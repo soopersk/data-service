@@ -1,0 +1,16 @@
+# File: kubernetes/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: observability-service-config
+  namespace: observability
+data:
+  application.yml: |
+    spring:
+      application:
+        name: observability-service
+    observability:
+      materialized-view:
+        enabled: true
+      statistics:
+        enabled: true

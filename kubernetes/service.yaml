@@ -1,0 +1,17 @@
+# File: kubernetes/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: observability-service
+  namespace: observability
+  labels:
+    app: observability-service
+spec:
+  selector:
+    app: observability-service
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+    name: http
+  type: ClusterIP
