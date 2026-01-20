@@ -3,7 +3,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: observability-postgres
     environment:
       POSTGRES_DB: observability
@@ -31,6 +31,19 @@ services:
       retries: 5
     command: redis-server --notify-keyspace-events Ex
 
+  # Optional: Redis Commander for debugging
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: observability-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    profiles:
+      - debug
+
   observability-service:
     build: .
     container_name: observability-service
@@ -56,3 +69,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

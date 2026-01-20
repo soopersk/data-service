@@ -1,0 +1,300 @@
+openapi: 3.0.3
+
+info:
+  title: Observability Service API
+  description: |
+    Backend Observability Service providing calculator run ingestion,
+    SLA monitoring, and status query APIs.
+  version: 1.0.0
+  contact:
+    name: Platform Engineering
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://{host}/api/v1
+    variables:
+      host:
+        default: observability.company.com
+
+tags:
+  - name: Ingestion
+    description: Calculator run ingestion APIs
+  - name: Query
+    description: Calculator status query APIs
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  /runs/start:
+    post:
+      tags: [Ingestion]
+      summary: Start a calculator run
+      operationId: startRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunStartRequest"
+      responses:
+        "201":
+          description: Run started successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /runs/{runId}/complete:
+    post:
+      tags: [Ingestion]
+      summary: Complete a calculator run
+      operationId: completeRun
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunCompletionRequest"
+      responses:
+        "200":
+          description: Run completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /calculators/{calculatorId}/status:
+    get:
+      tags: [Query]
+      summary: Get latest status of a calculator
+      operationId: getCalculatorStatus
+      parameters:
+        - name: calculatorId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: includeHistory
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Calculator status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalculatorStatusResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /calculators/status/batch:
+    post:
+      tags: [Query]
+      summary: Get status of multiple calculators
+      operationId: batchCalculatorStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchStatusRequest"
+      responses:
+        "200":
+          description: Batch calculator status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Conflict:
+      description: Conflict or idempotency violation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+
+    RunStartRequest:
+      type: object
+      required:
+        - runId
+        - calculatorId
+        - startTime
+        - slaSeconds
+      properties:
+        runId:
+          type: string
+          description: Unique run identifier (idempotent)
+        calculatorId:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        slaSeconds:
+          type: integer
+          minimum: 1
+        parameters:
+          type: object
+          additionalProperties: true
+
+    RunCompletionRequest:
+      type: object
+      required:
+        - endTime
+        - status
+      properties:
+        endTime:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [SUCCESS, FAILED, CANCELLED]
+        errorMessage:
+          type: string
+
+    RunResponse:
+      type: object
+      properties:
+        runId:
+          type: string
+        calculatorId:
+          type: string
+        status:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        durationSeconds:
+          type: integer
+        slaBreached:
+          type: boolean
+
+    CalculatorStatusResponse:
+      type: object
+      properties:
+        calculatorId:
+          type: string
+        currentStatus:
+          type: string
+        lastRun:
+          $ref: "#/components/schemas/RunResponse"
+        recentRuns:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunResponse"
+
+    BatchStatusRequest:
+      type: object
+      required:
+        - calculatorIds
+      properties:
+        calculatorIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+
+    BatchStatusResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/CalculatorStatusResponse"
+
+    ErrorResponse:
+      type: object
+      required:
+        - timestamp
+        - status
+        - errorCode
+        - message
+        - correlationId
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        errorCode:
+          type: string
+          example: OBS-400-001
+        message:
+          type: string
+        correlationId:
+          type: string
+        details:
+          type: object
+          additionalProperties: true

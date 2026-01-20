@@ -1,7 +1,7 @@
 # File: src/main/resources/application.yml
 spring:
   application:
-    name: observability-service
+    name: observability-service-main
   
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
@@ -18,6 +18,7 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
       pool-name: ObservabilityHikariCP
+      leak-detection-threshold: 60000
 
   # NO JPA configuration needed!
 
@@ -32,20 +33,32 @@ spring:
   data:
     redis:
       host: ${REDIS_HOST:localhost}
-      port: 6379
+      port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 3000ms
       lettuce:
         pool:
-          max-active: 20
-          max-idle: 10
-          min-idle: 5
+          max-active: 10
+          max-idle: 5
+          min-idle: 2
 
   cache:
     type: redis
     redis:
       time-to-live: 900000  # 15 minutes default
       cache-null-values: false
+
+  task:
+    scheduling:
+      pool:
+        size: 5
+        thread-name-prefix: scheduled-
+    execution:
+      pool:
+        core-size: 5
+        max-size: 10
+        queue-capacity: 100
+        thread-name-prefix: async-
 
 # OpenTelemetry
 otel:
@@ -61,7 +74,7 @@ applicationinsights:
   connection:
     string: ${APPLICATIONINSIGHTS_CONNECTION_STRING:}
 
-# Actuator
+# Actuator Management endpoints
 management:
   endpoints:
     web:
@@ -70,29 +83,54 @@ management:
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true
   metrics:
     export:
       prometheus:
         enabled: true
+    tags:
+      application: ${spring.application.name}
+      environment: ${SPRING_PROFILES_ACTIVE:local}
 
-# Custom properties
+# Custom properties: Observability Configuration
 observability:
+  sla:
+    # OPTIMIZED: Live detection every 2 minutes (tolerance: few minutes)
+    live-detection:
+      enabled: true
+      interval-ms: 120000        # Every 2 minutes (good balance)
+      initial-delay-ms: 30000    # Start after 30 seconds
+
+    # Early warning for approaching SLA
+    early-warning:
+      enabled: true
+      interval-ms: 180000        # Every 3 minutes
+      threshold-minutes: 10      # Warn if SLA within 10 minutes
+
   cache:
-    # Enable cache warming on run completion
-    warm-on-completion: true
+    eviction:
+      enabled: true
 
-    # TTL configuration
-    recent-runs:
-      daily-ttl-minutes: 15
-      monthly-ttl-minutes: 30
+  partitions:
+    management:
+      enabled: true
+      create-cron: "0 0 1 * * *"  # Daily at 1 AM
 
-    batch:
-      ttl-minutes: 5
+# Resilience4j Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      azureMonitorAlert:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+  retry:
+    instances:
+      azureMonitorAlert:
+        maxAttempts: 3
+        waitDuration: 1000ms
 
-    avg-runtime:
-      ttl-minutes: 30
-  materialized-view:
-    enabled: false
 
 # Logging
 logging:
@@ -105,3 +143,15 @@ logging:
     org.springframework.cache.interceptor: TRACE
     org.springframework.data.redis.cache: TRACE
     io.lettuce.core: DEBUG
+    pattern:
+      console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [%X{requestId}] - %msg%n"
+      file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [%X{requestId}] - %msg%n"
+
+# Springdoc OpenAPI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha

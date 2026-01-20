@@ -24,5 +24,7 @@ public class SlaBreachEvent {
     private Boolean alerted;
     private Instant alertedAt;
     private String alertStatus;
+    private Integer retryCount;
+    private String lastError;
     private Instant createdAt;
 }

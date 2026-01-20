@@ -3,17 +3,14 @@ package com.company.observability.repository;
 import com.company.observability.domain.SlaBreachEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Timestamp;
+import java.sql.*;
 import java.time.Instant;
 import java.util.List;
 
@@ -24,21 +21,11 @@ public class SlaBreachEventRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public List<SlaBreachEvent> findUnalertedBreaches(int limit) {
-        String sql = """
-            SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                   breach_type, expected_value, actual_value, severity,
-                   alerted, alerted_at, alert_status, created_at
-            FROM sla_breach_events
-            WHERE alerted = false
-            ORDER BY created_at ASC
-            LIMIT ?
-            """;
-
-        return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(), limit);
-    }
-
-    public SlaBreachEvent save(SlaBreachEvent breach) {
+    /**
+     * FIXED: Idempotent save - throws exception if duplicate
+     * Caller must handle DuplicateKeyException
+     */
+    public SlaBreachEvent save(SlaBreachEvent breach) throws DuplicateKeyException {
         if (breach.getCreatedAt() == null) {
             breach.setCreatedAt(Instant.now());
         }
@@ -47,8 +34,8 @@ public class SlaBreachEventRepository {
             INSERT INTO sla_breach_events (
                 run_id, calculator_id, calculator_name, tenant_id,
                 breach_type, expected_value, actual_value, severity,
-                alerted, alerted_at, alert_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                alerted, alerted_at, alert_status, retry_count, last_error, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -66,7 +53,9 @@ public class SlaBreachEventRepository {
             ps.setBoolean(9, breach.getAlerted());
             ps.setTimestamp(10, breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null);
             ps.setString(11, breach.getAlertStatus());
-            ps.setTimestamp(12, Timestamp.from(breach.getCreatedAt()));
+            ps.setInt(12, breach.getRetryCount() != null ? breach.getRetryCount() : 0);
+            ps.setString(13, breach.getLastError());
+            ps.setTimestamp(14, Timestamp.from(breach.getCreatedAt()));
             return ps;
         }, keyHolder);
 
@@ -74,12 +63,35 @@ public class SlaBreachEventRepository {
         return breach;
     }
 
+    /**
+     * Find unalerted breaches for batch processing
+     */
+    public List<SlaBreachEvent> findUnalertedBreaches(int limit) {
+        String sql = """
+            SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
+                   breach_type, expected_value, actual_value, severity,
+                   alerted, alerted_at, alert_status, retry_count, last_error, created_at
+            FROM sla_breach_events
+            WHERE alerted = false
+            AND alert_status IN ('PENDING', 'FAILED')
+            ORDER BY created_at ASC
+            LIMIT ?
+            """;
+
+        return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(), limit);
+    }
+
+    /**
+     * Update breach status after alert attempt
+     */
     public void update(SlaBreachEvent breach) {
         String sql = """
             UPDATE sla_breach_events
             SET alerted = ?,
                 alerted_at = ?,
-                alert_status = ?
+                alert_status = ?,
+                retry_count = ?,
+                last_error = ?
             WHERE breach_id = ?
             """;
 
@@ -87,6 +99,8 @@ public class SlaBreachEventRepository {
                 breach.getAlerted(),
                 breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null,
                 breach.getAlertStatus(),
+                breach.getRetryCount(),
+                breach.getLastError(),
                 breach.getBreachId()
         );
     }
@@ -108,6 +122,8 @@ public class SlaBreachEventRepository {
                     .alertedAt(rs.getTimestamp("alerted_at") != null ?
                             rs.getTimestamp("alerted_at").toInstant() : null)
                     .alertStatus(rs.getString("alert_status"))
+                    .retryCount(rs.getInt("retry_count"))
+                    .lastError(rs.getString("last_error"))
                     .createdAt(rs.getTimestamp("created_at").toInstant())
                     .build();
         }
