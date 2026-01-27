@@ -1,0 +1,458 @@
+openapi: 3.0.3
+info:
+  title: Calculator Observability Service API
+  description: |
+    REST API for ingesting and querying calculator run observability data.
+    
+    **Key Capabilities:**
+    - Ingest calculator run start/completion events (primarily from Airflow)
+    - Query single or batch calculator status with recent history
+    - SLA breach monitoring and alerting
+    - Partition-optimized PostgreSQL backend with Redis caching for high performance
+
+    **Authentication:**
+    - All endpoints require a valid Azure AD JWT Bearer token
+    - Tenant isolation is enforced via the `tenant_id` claim in the JWT
+    - Roles: `AIRFLOW` (ingestion only), `UI_READER` (queries), `ADMIN` (monitoring)
+  version: "1.0.0"
+  contact:
+    name: Platform Observability Team
+    email: observability@company.com
+  license:
+    name: Internal Use Only
+    url: https://company.com/internal-license
+
+servers:
+  - url: https://observability.company.com
+    description: Production
+  - url: https://observability-staging.company.com
+    description: Staging
+  - url: http://localhost:8080
+    description: Local development
+
+security:
+  - bearer-jwt: []
+
+paths:
+  /api/v1/health:
+    get:
+      summary: Service Health Check
+      description: Returns basic health and version information
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "UP"
+                timestamp: "2026-01-26T23:37:00Z"
+                service: "observability-service"
+                version: "1.0.0"
+
+  /api/v1/runs/start:
+    post:
+      summary: Start Calculator Run
+      description: |
+        Called by Airflow (or other orchestrators) when a calculator run begins.
+        Creates a new run record and registers it for live SLA monitoring.
+      tags:
+        - Run Ingestion
+      security:
+        - bearer-jwt: [AIRFLOW]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRunRequest'
+      responses:
+        '201':
+          description: Run started successfully
+          headers:
+            Location:
+              description: URI of the created run
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '400':
+          description: Invalid request (validation error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/runs/{runId}/complete:
+    post:
+      summary: Complete Calculator Run
+      description: |
+        Called by Airflow when a calculator run finishes.
+        Updates the run with end time, status, duration, and performs SLA evaluation.
+      tags:
+        - Run Ingestion
+      security:
+        - bearer-jwt: [AIRFLOW]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique run identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteRunRequest'
+      responses:
+        '200':
+          description: Run completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '404':
+          description: Run not found or already completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/calculators/{calculatorId}/status:
+    get:
+      summary: Get Calculator Status
+      description: |
+        Returns current run status and recent history for a single calculator.
+        History depth is automatically adjusted based on frequency (DAILY: ~3 days, MONTHLY: ~13 months).
+      tags:
+        - Calculator Status
+      security:
+        - bearer-jwt: [UI_READER, AIRFLOW]
+      parameters:
+        - name: calculatorId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: frequency
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [DAILY, MONTHLY]
+          description: Calculator run frequency
+        - name: historyLimit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 5
+            minimum: 1
+            maximum: 100
+          description: Maximum number of historical runs to return
+      responses:
+        '200':
+          description: Calculator status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculatorStatusResponse'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: "max-age=30, private"
+        '404':
+          description: Calculator not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/calculators/batch/status:
+    post:
+      summary: Batch Calculator Status
+      description: |
+        Optimized batch endpoint for dashboard use cases.
+        Supports up to 100 calculator IDs in a single request.
+        When allowStale=true, returns cached data with longer TTL for better performance.
+      tags:
+        - Calculator Status
+      security:
+        - bearer-jwt: [UI_READER, AIRFLOW]
+      parameters:
+        - name: frequency
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [DAILY, MONTHLY]
+        - name: historyLimit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 5
+            minimum: 1
+            maximum: 50
+        - name: allowStale
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Allow slightly stale cached data (60s vs 15s TTL)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              minItems: 1
+              maxItems: 100
+            example: ["calc-001", "calc-002", "calc-003"]
+      responses:
+        '200':
+          description: Batch status retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CalculatorStatusResponse'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: "max-age=60, private"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearer-jwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Azure AD JWT token with `roles` and `tenant_id` claims
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "UP"
+        timestamp:
+          type: string
+          format: date-time
+        service:
+          type: string
+        version:
+          type: string
+
+    StartRunRequest:
+      type: object
+      required:
+        - runId
+        - calculatorId
+        - calculatorName
+        - frequency
+        - reportingDate
+        - startTime
+        - slaTimeCet
+      properties:
+        runId:
+          type: string
+          example: "run-20260126-001"
+        calculatorId:
+          type: string
+          example: "daily-sales-report"
+        calculatorName:
+          type: string
+          example: "Daily Sales Report Calculator"
+        frequency:
+          type: string
+          enum: [DAILY, MONTHLY]
+        reportingDate:
+          type: string
+          format: date
+          example: "2026-01-26"
+        startTime:
+          type: string
+          format: date-time
+          example: "2026-01-26T04:15:00Z"
+        slaTimeCet:
+          type: string
+          format: time
+          example: "06:15:00"
+          description: Target completion time in CET timezone
+        expectedDurationMs:
+          type: integer
+          format: int64
+          example: 3600000
+        estimatedStartTimeCet:
+          type: string
+          format: time
+          example: "04:15:00"
+        runParameters:
+          type: string
+          description: JSON string of run parameters
+
+    CompleteRunRequest:
+      type: object
+      required:
+        - endTime
+      properties:
+        endTime:
+          type: string
+          format: date-time
+          example: "2026-01-26T06:12:34Z"
+        status:
+          type: string
+          enum: [SUCCESS, FAILED, TIMEOUT, CANCELLED]
+          default: SUCCESS
+
+    RunResponse:
+      type: object
+      properties:
+        runId:
+          type: string
+        calculatorId:
+          type: string
+        calculatorName:
+          type: string
+        status:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+          format: int64
+        slaBreached:
+          type: boolean
+        slaBreachReason:
+          type: string
+
+    RunStatusInfo:
+      type: object
+      properties:
+        runId:
+          type: string
+        status:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        estimatedStart:
+          type: string
+          format: date-time
+        estimatedEnd:
+          type: string
+          format: date-time
+        sla:
+          type: string
+          format: date-time
+          description: Absolute SLA deadline
+        durationMs:
+          type: integer
+          format: int64
+        durationFormatted:
+          type: string
+          example: "1h 45m"
+        slaBreached:
+          type: boolean
+        slaBreachReason:
+          type: string
+
+    CalculatorStatusResponse:
+      type: object
+      properties:
+        calculatorName:
+          type: string
+        lastRefreshed:
+          type: string
+          format: date-time
+        current:
+          $ref: '#/components/schemas/RunStatusInfo'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunStatusInfo'
+
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Access denied (insufficient role or tenant mismatch)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: Health
+    description: Health and readiness checks
+  - name: Run Ingestion
+    description: Airflow integration endpoints
+  - name: Calculator Status
+    description: Query endpoints for dashboards and UIs

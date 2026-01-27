@@ -1,0 +1,76 @@
+//GET /api/v1/calculators/{calculatorId}/status
+
+{
+  "calculatorName": "Daily Sales Report Calculator",
+  "lastRefreshed": "2026-01-26T23:39:20Z",
+  "current": {
+    "runId": "run-20260126-001",
+    "status": "SUCCESS",
+    "start": "2026-01-26T04:15:00Z",
+    "end": "2026-01-26T06:12:34Z",
+    "estimatedStart": "2026-01-26T04:15:00Z",
+    "estimatedEnd": "2026-01-26T05:45:00Z",
+    "sla": "2026-01-26T06:15:00Z",
+    "durationMs": 7054000,
+    "durationFormatted": "1h 57m",
+    "slaBreached": false,
+    "slaBreachReason": null
+  },
+  "history": [
+    {
+      "runId": "run-20260125-001",
+      "status": "SUCCESS",
+      "start": "2026-01-25T04:14:00Z",
+      "end": "2026-01-25T05:48:22Z",
+      "estimatedStart": "2026-01-25T04:15:00Z",
+      "estimatedEnd": "2026-01-25T05:45:00Z",
+      "sla": "2026-01-25T06:15:00Z",
+      "durationMs": 5662000,
+      "durationFormatted": "1h 34m",
+      "slaBreached": false,
+      "slaBreachReason": null
+    },
+    {
+      "runId": "run-20260124-001",
+      "status": "FAILED",
+      "start": "2026-01-24T04:15:00Z",
+      "end": "2026-01-24T04:22:15Z",
+      "estimatedStart": "2026-01-24T04:15:00Z",
+      "estimatedEnd": "2026-01-24T05:45:00Z",
+      "sla": "2026-01-24T06:15:00Z",
+      "durationMs": 435000,
+      "durationFormatted": "7m 15s",
+      "slaBreached": true,
+      "slaBreachReason": "Run status: FAILED"
+    }
+  ]
+}
+
+//POST /api/v1/calculators/batch/status
+
+[
+  {
+    "calculatorName": "Daily Sales Report Calculator",
+    "lastRefreshed": "2026-01-26T23:39:20Z",
+    "current": { ... },
+    "history": [ ... ]
+  },
+  {
+    "calculatorName": "Monthly Revenue Forecast",
+    "lastRefreshed": "2026-01-26T23:39:20Z",
+    "current": {
+      "runId": "run-20260131-001",
+      "status": "RUNNING",
+      "start": "2026-01-26T03:45:00Z",
+      "end": null,
+      "estimatedStart": "2026-01-26T03:45:00Z",
+      "estimatedEnd": "2026-01-26T06:30:00Z",
+      "sla": "2026-01-26T07:00:00Z",
+      "durationMs": null,
+      "durationFormatted": null,
+      "slaBreached": false,
+      "slaBreachReason": null
+    },
+    "history": [ ... ]
+  }
+]
