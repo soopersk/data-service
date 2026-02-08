@@ -24,7 +24,7 @@ tags:
     description: Calculator status query APIs
 
 security:
-  - bearerAuth: []
+  - basicAuth: []
 
 paths:
 
@@ -140,10 +140,9 @@ paths:
 components:
 
   securitySchemes:
-    bearerAuth:
+    basicAuth:
       type: http
-      scheme: bearer
-      bearerFormat: JWT
+      scheme: basic
 
   responses:
     BadRequest:

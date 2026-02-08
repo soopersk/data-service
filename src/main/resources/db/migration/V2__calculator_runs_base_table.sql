@@ -1,13 +1,14 @@
 CREATE TABLE IF NOT EXISTS calculator_runs (
     run_id VARCHAR(100) NOT NULL,
-    -- Key attribute for partitioning
-    reporting_date DATE NOT NULL,
 
     -- Calculator metadata
     calculator_id VARCHAR(100) NOT NULL,
     calculator_name VARCHAR(255) NOT NULL,
     tenant_id VARCHAR(50) NOT NULL,
-    frequency VARCHAR(20) NOT NULL CHECK (frequency IN ('DAILY', 'MONTHLY')),
+    frequency VARCHAR(20) NOT NULL,
+
+    -- Key attribute for partitioning
+    reporting_date DATE NOT NULL,
 
     -- Timing information
     start_time TIMESTAMPTZ NOT NULL,
@@ -19,8 +20,7 @@ CREATE TABLE IF NOT EXISTS calculator_runs (
     end_hour_cet DECIMAL(4, 2),
 
     -- Status
-    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING'
-        CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED')),
+    status VARCHAR(20) NOT NULL,
 
     -- SLA tracking (absolute time-based)
     sla_time TIMESTAMPTZ,
@@ -32,8 +32,11 @@ CREATE TABLE IF NOT EXISTS calculator_runs (
     sla_breached BOOLEAN DEFAULT false,
     sla_breach_reason TEXT,
 
+    -- JSON columns for flexibility
+    run_parameters JSONB,  -- Airflow DAG run configuration, input parameters
+    additional_attributes JSONB,  -- Generic extensibility for future needs
+
     -- Metadata
-    run_parameters TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

@@ -2,8 +2,12 @@ package com.company.observability.repository;
 
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.util.JsonbConverter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.support.DataAccessUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -12,9 +16,15 @@ import java.sql.*;
 import java.time.*;
 import java.util.*;
 
+import static com.company.observability.util.TimeUtils.toTimestamp;
+
 /**
- * Partition-aware repository optimized for reporting_date queries
- */
+ * Repository
+ *
+ * This repository provides efficient access to calculator run data with a focus on recent runs for each calculator.
+ * It uses a combination of PostgreSQL for durable storage and Redis for caching recent runs to optimize read performance.
+*/
+
 @Repository
 @RequiredArgsConstructor
 @Slf4j
@@ -22,6 +32,7 @@ public class CalculatorRunRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final RedisCalculatorCache redisCache;
+    private final JsonbConverter jsonbConverter;
 
     private static final String SELECT_BASE = """
         SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
@@ -29,7 +40,8 @@ public class CalculatorRunRepository {
                status, sla_time, expected_duration_ms, 
                estimated_start_time, estimated_end_time,
                sla_breached, sla_breach_reason,
-               run_parameters, created_at, updated_at
+               run_parameters, additional_attributes,
+               created_at, updated_at
         FROM calculator_runs
         """;
 
@@ -39,7 +51,7 @@ public class CalculatorRunRepository {
      * MONTHLY: reporting_date = end of month
      */
     public List<CalculatorRun> findRecentRuns(
-            String calculatorId, String tenantId, String frequency, int limit) {
+            String calculatorId, String tenantId, CalculatorFrequency frequency, int limit) {
 
         // Check bloom filter
         if (!redisCache.mightExist(calculatorId)) {
@@ -49,7 +61,7 @@ public class CalculatorRunRepository {
 
         // Try Redis sorted set
         Optional<List<CalculatorRun>> cached = redisCache.getRecentRuns(
-                calculatorId, tenantId, limit);
+                calculatorId, tenantId, frequency, limit);
 
         if (cached.isPresent()) {
             log.debug("REDIS HIT: Recent runs for {}", calculatorId);
@@ -60,19 +72,18 @@ public class CalculatorRunRepository {
         log.debug("REDIS MISS: Querying database for {}", calculatorId);
         return queryAndCacheRecentRuns(calculatorId, tenantId, frequency, limit);
     }
-
     /**
      * Query with partition pruning based on frequency
      */
     private List<CalculatorRun> queryAndCacheRecentRuns(
-            String calculatorId, String tenantId, String frequency, int limit) {
+            String calculatorId, String tenantId, CalculatorFrequency frequency, int limit) {
 
         String sql = buildPartitionPrunedQuery(frequency);
 
         List<CalculatorRun> runs = jdbcTemplate.query(
                 sql,
                 new CalculatorRunRowMapper(),
-                calculatorId, tenantId, frequency, limit
+                calculatorId, tenantId, frequency.name(), limit
         );
 
         // Populate Redis cache
@@ -84,12 +95,8 @@ public class CalculatorRunRepository {
         return runs;
     }
 
-    /**
-     * Build SQL with optimal partition pruning
-     */
-    private String buildPartitionPrunedQuery(String frequency) {
-        if ("DAILY".equalsIgnoreCase(frequency)) {
-            // DAILY: Last 3 days only (prunes to 3 partitions)
+    private String buildPartitionPrunedQuery(CalculatorFrequency frequency) {
+        if (frequency == CalculatorFrequency.DAILY) {
             return SELECT_BASE + """
                 WHERE calculator_id = ? 
                 AND tenant_id = ? 
@@ -100,7 +107,6 @@ public class CalculatorRunRepository {
                 LIMIT ?
                 """;
         } else {
-            // MONTHLY: End of month dates only in last 13 months (prunes to ~13 partitions)
             return SELECT_BASE + """
                 WHERE calculator_id = ? 
                 AND tenant_id = ? 
@@ -117,7 +123,7 @@ public class CalculatorRunRepository {
      * Batch query with partition pruning
      */
     public Map<String, List<CalculatorRun>> findBatchRecentRuns(
-            List<String> calculatorIds, String tenantId, String frequency, int limit) {
+            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, int limit) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
             return Collections.emptyMap();
@@ -129,7 +135,7 @@ public class CalculatorRunRepository {
         // Check Redis for each calculator
         for (String calculatorId : calculatorIds) {
             Optional<List<CalculatorRun>> cached = redisCache.getRecentRuns(
-                    calculatorId, tenantId, limit);
+                    calculatorId, tenantId, frequency, limit);
 
             if (cached.isPresent()) {
                 result.put(calculatorId, cached.get());
@@ -160,7 +166,7 @@ public class CalculatorRunRepository {
      * Single optimized batch query with partition pruning
      */
     private Map<String, List<CalculatorRun>> queryBatchFromDatabase(
-            List<String> calculatorIds, String tenantId, String frequency, int limit) {
+            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, int limit) {
 
         String placeholders = String.join(",", Collections.nCopies(calculatorIds.size(), "?"));
         String partitionFilter = buildPartitionFilter(frequency);
@@ -172,7 +178,8 @@ public class CalculatorRunRepository {
                        status, sla_time, expected_duration_ms,
                        estimated_start_time, estimated_end_time,
                        sla_breached, sla_breach_reason,
-                       run_parameters, created_at, updated_at,
+                       run_parameters, additional_attributes,
+                       created_at, updated_at,
                        ROW_NUMBER() OVER (
                            PARTITION BY calculator_id 
                            ORDER BY reporting_date DESC, created_at DESC
@@ -192,7 +199,7 @@ public class CalculatorRunRepository {
             params[i] = calculatorIds.get(i);
         }
         params[calculatorIds.size()] = tenantId;
-        params[calculatorIds.size() + 1] = frequency;
+        params[calculatorIds.size() + 1] = frequency.name();
         params[calculatorIds.size() + 2] = limit;
 
         List<CalculatorRun> allRuns = jdbcTemplate.query(sql, new CalculatorRunRowMapper(), params);
@@ -209,8 +216,8 @@ public class CalculatorRunRepository {
     /**
      * Build partition filter based on frequency
      */
-    private String buildPartitionFilter(String frequency) {
-        if ("DAILY".equalsIgnoreCase(frequency)) {
+    private String buildPartitionFilter(CalculatorFrequency frequency) {
+        if (frequency == CalculatorFrequency.DAILY) {
             return """
                 AND reporting_date >= CURRENT_DATE - INTERVAL '3 days'
                 AND reporting_date <= CURRENT_DATE
@@ -227,10 +234,12 @@ public class CalculatorRunRepository {
      * Write-through upsert with partition key
      */
     public CalculatorRun upsert(CalculatorRun run) {
+        Instant now = Instant.now();
+
         if (run.getCreatedAt() == null) {
-            run.setCreatedAt(Instant.now());
+            run.setCreatedAt(now);
         }
-        run.setUpdatedAt(Instant.now());
+        run.setUpdatedAt(now);
 
         String sql = """
             INSERT INTO calculator_runs (
@@ -239,8 +248,9 @@ public class CalculatorRunRepository {
                 status, sla_time, expected_duration_ms,
                 estimated_start_time, estimated_end_time,
                 sla_breached, sla_breach_reason,
-                run_parameters, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                run_parameters, additional_attributes,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id, reporting_date) DO UPDATE SET
                 end_time = EXCLUDED.end_time,
                 duration_ms = EXCLUDED.duration_ms,
@@ -248,37 +258,50 @@ public class CalculatorRunRepository {
                 status = EXCLUDED.status,
                 sla_breached = EXCLUDED.sla_breached,
                 sla_breach_reason = EXCLUDED.sla_breach_reason,
+                run_parameters = EXCLUDED.run_parameters,
+                additional_attributes = EXCLUDED.additional_attributes,
                 updated_at = EXCLUDED.updated_at
             RETURNING *
             """;
 
         try {
-            CalculatorRun savedRun = jdbcTemplate.queryForObject(sql, new CalculatorRunRowMapper(),
+            List<CalculatorRun> results = jdbcTemplate.query(sql, new CalculatorRunRowMapper(),
                     run.getRunId(),
                     run.getCalculatorId(),
                     run.getCalculatorName(),
                     run.getTenantId(),
-                    run.getFrequency(),
+                    run.getFrequency().name(),
                     run.getReportingDate(),
-                    run.getStartTime() != null ? Timestamp.from(run.getStartTime()) : null,
-                    run.getEndTime() != null ? Timestamp.from(run.getEndTime()) : null,
+                    toTimestamp(run.getStartTime()),
+                    toTimestamp(run.getEndTime()),
                     run.getDurationMs(),
                     run.getStartHourCet(),
                     run.getEndHourCet(),
-                    run.getStatus(),
-                    run.getSlaTime() != null ? Timestamp.from(run.getSlaTime()) : null,
+                    run.getStatus().name(),
+                    toTimestamp(run.getSlaTime()),
                     run.getExpectedDurationMs(),
-                    run.getEstimatedStartTime() != null ? Timestamp.from(run.getEstimatedStartTime()) : null,
-                    run.getEstimatedEndTime() != null ? Timestamp.from(run.getEstimatedEndTime()) : null,
+                    toTimestamp(run.getEstimatedStartTime()),
+                    toTimestamp(run.getEstimatedEndTime()),
                     run.getSlaBreached(),
                     run.getSlaBreachReason(),
-                    run.getRunParameters(),
+                    jsonbConverter.toJsonb(run.getRunParameters()),
+                    jsonbConverter.toJsonb(run.getAdditionalAttributes()),
                     Timestamp.from(run.getCreatedAt()),
                     Timestamp.from(run.getUpdatedAt())
             );
 
+            CalculatorRun savedRun = DataAccessUtils.singleResult(results);
+            if (savedRun == null) {
+                throw new IllegalStateException("Upsert returned no rows");
+            }
+
             // Write-through cache
-            redisCache.cacheRunOnWrite(savedRun);
+            try {
+                redisCache.cacheRunOnWrite(savedRun);
+            } catch (Exception cacheEx) {
+                log.warn("DB write succeeded but failed to update Redis for run {}",
+                        savedRun.getRunId(), cacheEx);
+            }
 
             log.debug("Upserted and cached run {}", savedRun.getRunId());
 
@@ -309,6 +332,7 @@ public class CalculatorRunRepository {
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
+
     /**
      * Mark SLA breached with partition awareness
      */
@@ -334,7 +358,6 @@ public class CalculatorRunRepository {
         if (!running.isEmpty()) {
             return running.size();
         }
-
         // Fallback to database (recent partitions only)
         Integer count = jdbcTemplate.queryForObject("""
             SELECT COUNT(*) FROM calculator_runs 
@@ -352,7 +375,8 @@ public class CalculatorRunRepository {
         return jdbcTemplate.queryForList("SELECT * FROM get_partition_statistics()");
     }
 
-    private static class CalculatorRunRowMapper implements RowMapper<CalculatorRun> {
+   
+    private class CalculatorRunRowMapper implements RowMapper<CalculatorRun> {
         @Override
         public CalculatorRun mapRow(ResultSet rs, int rowNum) {
             try {
@@ -361,21 +385,22 @@ public class CalculatorRunRepository {
                         .calculatorId(rs.getString("calculator_id"))
                         .calculatorName(rs.getString("calculator_name"))
                         .tenantId(rs.getString("tenant_id"))
-                        .frequency(rs.getString("frequency"))
+                        .frequency(CalculatorFrequency.from(rs.getString("frequency")))
                         .reportingDate(rs.getObject("reporting_date", LocalDate.class))
                         .startTime(getInstant(rs, "start_time"))
                         .endTime(getInstant(rs, "end_time"))
                         .durationMs(rs.getObject("duration_ms", Long.class))
                         .startHourCet(rs.getBigDecimal("start_hour_cet"))
                         .endHourCet(rs.getBigDecimal("end_hour_cet"))
-                        .status(rs.getString("status"))
+                        .status(RunStatus.fromString(rs.getString("status")))
                         .slaTime(getInstant(rs, "sla_time"))
                         .expectedDurationMs(rs.getObject("expected_duration_ms", Long.class))
                         .estimatedStartTime(getInstant(rs, "estimated_start_time"))
                         .estimatedEndTime(getInstant(rs, "estimated_end_time"))
                         .slaBreached(rs.getBoolean("sla_breached"))
                         .slaBreachReason(rs.getString("sla_breach_reason"))
-                        .runParameters(rs.getString("run_parameters"))
+                        .runParameters(jsonbConverter.fromJsonb(rs, "run_parameters"))
+                        .additionalAttributes(jsonbConverter.fromJsonb(rs, "additional_attributes"))
                         .createdAt(getInstant(rs, "created_at"))
                         .updatedAt(getInstant(rs, "updated_at"))
                         .build();
@@ -388,5 +413,15 @@ public class CalculatorRunRepository {
             Timestamp timestamp = rs.getTimestamp(columnName);
             return timestamp != null ? timestamp.toInstant() : null;
         }
+
+        @SuppressWarnings("unchecked")
+        private static Map<String, Object> getMap(ResultSet rs, String columnName) throws SQLException {
+            Object value = rs.getObject(columnName);
+            if (value instanceof Map) {
+                return (Map<String, Object>) value;
+            }
+            return null;
+        }
+
     }
 }

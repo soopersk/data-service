@@ -14,10 +14,7 @@ CREATE TABLE IF NOT EXISTS sla_breach_events (
         CHECK (alert_status IN ('PENDING', 'SENT', 'FAILED', 'RETRYING')),
     retry_count INT DEFAULT 0,
     last_error TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT fk_breach_run FOREIGN KEY (run_id)
-        REFERENCES calculator_runs(run_id) ON DELETE CASCADE
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_sla_breach_events_unalerted ON sla_breach_events(created_at)

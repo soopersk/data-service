@@ -2,10 +2,13 @@ package com.company.observability.service;
 
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.*;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.util.TimeUtils;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.Tags;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -14,6 +17,9 @@ import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Query service
+ */
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -23,24 +29,27 @@ public class RunQueryService {
     private final RedisCalculatorCache redisCache;
     private final MeterRegistry meterRegistry;
 
-    /**
-     * Get calculator status with partition-aware query
-     */
     public CalculatorStatusResponse getCalculatorStatus(
-            String calculatorId, String tenantId, String frequency, int historyLimit) {
+            String calculatorId, String tenantId, CalculatorFrequency frequency, 
+            int historyLimit, boolean bypassCache) {
 
-        // Check full response cache first
-        Optional<CalculatorStatusResponse> cachedResponse =
-                redisCache.getStatusResponse(calculatorId, tenantId);
+        // Check cache (unless bypassed)
+        if (!bypassCache) {
+            Optional<CalculatorStatusResponse> cachedResponse =
+                    redisCache.getStatusResponse(calculatorId, tenantId, frequency, historyLimit);
 
-        if (cachedResponse.isPresent()) {
-            meterRegistry.counter("query.calculator_status.cache_hit",
-                    "tier", "response_cache"
-            ).increment();
-            return cachedResponse.get();
+            if (cachedResponse.isPresent()) {
+                meterRegistry.counter("query.calculator_status.cache_hit",
+                        Tags.of(
+                                Tag.of("tier", "response_cache"),
+                                Tag.of("frequency", frequency.name())
+                        )
+                ).increment();
+                return cachedResponse.get();
+            }
         }
 
-        // Query with partition pruning based on frequency
+        // Query with partition pruning
         List<CalculatorRun> runs = runRepository.findRecentRuns(
                 calculatorId, tenantId, frequency, historyLimit + 1);
 
@@ -50,7 +59,6 @@ public class RunQueryService {
 
         // Build response
         CalculatorRun currentRun = runs.get(0);
-        String calculatorName = currentRun.getCalculatorName();
         RunStatusInfo current = mapToRunStatusInfo(currentRun);
 
         List<RunStatusInfo> history = runs.stream()
@@ -59,49 +67,53 @@ public class RunQueryService {
                 .collect(Collectors.toList());
 
         CalculatorStatusResponse response = CalculatorStatusResponse.builder()
-                .calculatorName(calculatorName)
+                .calculatorName(currentRun.getCalculatorName())
                 .lastRefreshed(Instant.now())
                 .current(current)
                 .history(history)
                 .build();
 
-        // Cache the response
-        redisCache.cacheStatusResponse(calculatorId, tenantId, response);
+        // Cache (unless bypassed)
+        if (!bypassCache) {
+            redisCache.cacheStatusResponse(calculatorId, tenantId, frequency, historyLimit, response);
+        }
 
         meterRegistry.counter("query.calculator_status.cache_miss",
-                "frequency", frequency
+                Tags.of(
+                        Tag.of("tier", "response_cache"),
+                        Tag.of("frequency", frequency.name())
+                )
         ).increment();
 
         return response;
     }
 
-    /**
-     * Batch query with partition pruning
-     */
     public List<CalculatorStatusResponse> getBatchCalculatorStatus(
-            List<String> calculatorIds, String tenantId, String frequency, int historyLimit) {
+            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, 
+            int historyLimit, boolean allowStale) {
 
         long startTime = System.currentTimeMillis();
 
-        // Batch check response cache
-        Map<String, CalculatorStatusResponse> cachedResponses =
-                redisCache.getBatchStatusResponses(calculatorIds, tenantId);
+        // 1. Determine cached responses (effectively final)
+        final Map<String, CalculatorStatusResponse> cachedResponses = allowStale
+                ? redisCache.getBatchStatusResponses(calculatorIds, tenantId, frequency, historyLimit)
+                : Collections.emptyMap();
 
-        List<String> cacheMisses = calculatorIds.stream()
+        // 2. Determine misses based on the hits (effectively final)
+        final List<String> cacheMisses = calculatorIds.stream()
                 .filter(id -> !cachedResponses.containsKey(id))
                 .collect(Collectors.toList());
 
-        log.debug("BATCH ({}): {} cache hits, {} misses",
-                frequency, cachedResponses.size(), cacheMisses.size());
+        log.debug("BATCH ({}): {} cache hits, {} misses (allowStale: {})",
+                frequency, cachedResponses.size(), cacheMisses.size(), allowStale);
 
-        // Query missing calculators with partition pruning
+        // Query missing calculators
         Map<String, CalculatorStatusResponse> freshResponses = new HashMap<>();
 
         if (!cacheMisses.isEmpty()) {
             Map<String, List<CalculatorRun>> runsByCalculator =
                     runRepository.findBatchRecentRuns(cacheMisses, tenantId, frequency, historyLimit + 1);
 
-            // Build responses for cache misses
             for (String calcId : cacheMisses) {
                 List<CalculatorRun> runs = runsByCalculator.get(calcId);
 
@@ -128,11 +140,13 @@ public class RunQueryService {
                 freshResponses.put(calcId, response);
             }
 
-            // Cache fresh responses
-            redisCache.cacheBatchStatusResponses(freshResponses, tenantId);
+            // Cache if stale data is acceptable
+            if (allowStale) {
+                redisCache.cacheBatchStatusResponses(freshResponses, tenantId, frequency, historyLimit);
+            }
         }
 
-        // Combine cached + fresh responses
+        // Combine results
         List<CalculatorStatusResponse> result = calculatorIds.stream()
                 .map(calcId -> {
                     CalculatorStatusResponse response = cachedResponses.get(calcId);
@@ -147,12 +161,24 @@ public class RunQueryService {
         long duration = System.currentTimeMillis() - startTime;
 
         meterRegistry.counter("query.batch_status.requests",
-                "count", String.valueOf(calculatorIds.size()),
-                "frequency", frequency
+                Tags.of(
+                        Tag.of("tier", "response_cache"),
+                        Tag.of("frequency", frequency.name())
+                )
         ).increment();
 
-        meterRegistry.timer("query.batch_status.duration")
-                .record(java.time.Duration.ofMillis(duration));
+        meterRegistry.timer("query.batch_status.duration",
+                Tags.of(
+                        Tag.of("frequency", frequency.name())
+                )
+        ).record(java.time.Duration.ofMillis(duration));
+
+        meterRegistry.summary("query.batch_status.batch_size",
+                Tags.of(
+                    Tag.of("frequency", frequency.name()),
+                    Tag.of("allow_stale", String.valueOf(allowStale))
+                )
+        ).record(calculatorIds.size());
 
         log.debug("Batch query ({}) completed in {}ms: {}/{} calculators",
                 frequency, duration, result.size(), calculatorIds.size());
@@ -163,7 +189,7 @@ public class RunQueryService {
     private RunStatusInfo mapToRunStatusInfo(CalculatorRun run) {
         return RunStatusInfo.builder()
                 .runId(run.getRunId())
-                .status(run.getStatus())
+                .status(run.getStatus().name())
                 .start(run.getStartTime())
                 .end(run.getEndTime())
                 .estimatedStart(run.getEstimatedStartTime())

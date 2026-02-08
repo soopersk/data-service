@@ -10,23 +10,19 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
     
-    @ExceptionHandler(CalculatorNotFoundException.class)
-    public ResponseEntity<Map<String, Object>> handleCalculatorNotFound(CalculatorNotFoundException ex) {
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
         return buildErrorResponse(HttpStatus.NOT_FOUND, ex.getMessage());
     }
     
-    @ExceptionHandler(RunNotFoundException.class)
-    public ResponseEntity<Map<String, Object>> handleRunNotFound(RunNotFoundException ex) {
-        return buildErrorResponse(HttpStatus.NOT_FOUND, ex.getMessage());
-    }
-    
-    @ExceptionHandler(TenantAccessDeniedException.class)
-    public ResponseEntity<Map<String, Object>> handleTenantAccessDenied(TenantAccessDeniedException ex) {
+    @ExceptionHandler(SecurityException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessDenied(SecurityException ex) {
         return buildErrorResponse(HttpStatus.FORBIDDEN, ex.getMessage());
     }
     

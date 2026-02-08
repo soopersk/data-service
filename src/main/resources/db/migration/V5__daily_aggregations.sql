@@ -11,9 +11,7 @@ CREATE TABLE IF NOT EXISTS calculator_sli_daily (
     avg_end_min_cet INT DEFAULT 0,
     computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    PRIMARY KEY (calculator_id, tenant_id, day_cet),
-    CONSTRAINT fk_daily_calculator FOREIGN KEY (calculator_id)
-        REFERENCES calculators(calculator_id) ON DELETE CASCADE
+    PRIMARY KEY (calculator_id, tenant_id, day_cet)
 );
 
 CREATE INDEX IF NOT EXISTS idx_calculator_sli_daily_recent

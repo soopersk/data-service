@@ -2,6 +2,7 @@ package com.company.observability.util;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.Timestamp;
 import java.time.*;
 
 public class TimeUtils {
@@ -9,27 +10,16 @@ public class TimeUtils {
     private static final ZoneId CET_ZONE = ZoneId.of("CET");
 
     /**
-     * Calculate absolute SLA deadline time from start time and SLA time of day
+     * Calculate absolute SLA deadline time from reporting date and SLA time of day (CET)
      *
-     * @param startTime When the run started (UTC)
+     * @param reportingDate Reporting date in CET calendar
      * @param slaTimeCet Target completion time in CET (e.g., 06:15:00)
      * @return Absolute deadline time in UTC
      */
-    public static Instant calculateSlaDeadline(Instant startTime, LocalTime slaTimeCet) {
-        if (startTime == null || slaTimeCet == null) return null;
+    public static Instant calculateSlaDeadline(LocalDate reportingDate, LocalTime slaTimeCet) {
+        if (reportingDate == null || slaTimeCet == null) return null;
 
-        // Convert start time to CET date
-        ZonedDateTime startCet = startTime.atZone(CET_ZONE);
-        LocalDate startDate = startCet.toLocalDate();
-
-        // Combine with SLA time
-        ZonedDateTime slaDateTime = ZonedDateTime.of(startDate, slaTimeCet, CET_ZONE);
-
-        // If SLA time is before start time, it means next day
-        if (slaDateTime.isBefore(startCet)) {
-            slaDateTime = slaDateTime.plusDays(1);
-        }
-
+        ZonedDateTime slaDateTime = ZonedDateTime.of(reportingDate, slaTimeCet, CET_ZONE);
         return slaDateTime.toInstant();
     }
 
@@ -122,4 +112,9 @@ public class TimeUtils {
 
         return String.format("%02d:%02d", hours, minutes);
     }
+
+    public static Timestamp toTimestamp(Instant instant) {
+        return instant != null ? Timestamp.from(instant) : null;
+    }
+
 }

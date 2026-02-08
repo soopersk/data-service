@@ -2,6 +2,7 @@ package com.company.observability.scheduled;
 
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.util.SlaEvaluationResult;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -28,7 +30,7 @@ import java.util.*;
 @Slf4j
 @RequiredArgsConstructor
 @ConditionalOnProperty(
-        value = "observability.sla.live-detection.enabled",
+        value = {"observability.sla.live-detection.enabled", "observability.sla.live-tracking.enabled"},
         havingValue = "true",
         matchIfMissing = true
 )
@@ -70,35 +72,44 @@ public class LiveSlaBreachDetectionJob {
 
             for (Map<String, Object> runInfo : breachedRuns) {
                 String runId = (String) runInfo.get("runId");
+                String tenantId = (String) runInfo.get("tenantId");
+                String reportingDateStr = (String) runInfo.get("reportingDate");
+                LocalDate reportingDate = null;
+                if (reportingDateStr != null) {
+                    reportingDate = LocalDate.parse(reportingDateStr);
+                }
 
                 try {
                     // Verify run is still RUNNING in database
-                    Optional<CalculatorRun> runOpt = runRepository.findById(runId);
+                    Optional<CalculatorRun> runOpt = reportingDate != null
+                            ? runRepository.findById(runId, reportingDate)
+                            : runRepository.findById(runId);
 
                     if (runOpt.isEmpty()) {
                         log.warn("Run {} not found in database, deregistering", runId);
-                        slaMonitoringCache.deregisterFromSlaMonitoring(runId);
+                        slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         continue;
                     }
 
                     CalculatorRun run = runOpt.get();
 
                     // Check if already marked as breached or completed
-                    if (!"RUNNING".equals(run.getStatus())) {
+                    if (run.getStatus() != RunStatus.RUNNING) {
                         log.debug("Run {} already completed, deregistering", runId);
-                        slaMonitoringCache.deregisterFromSlaMonitoring(runId);
+                        slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         continue;
                     }
 
                     if (Boolean.TRUE.equals(run.getSlaBreached())) {
                         log.debug("Run {} already marked as breached", runId);
-                        slaMonitoringCache.deregisterFromSlaMonitoring(runId);
+                        slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         continue;
                     }
 
                     // Mark as breached in database
                     String breachReason = buildBreachReason(run);
-                    int updated = runRepository.markSlaBreached(runId, breachReason);
+                    int updated = runRepository.markSlaBreached(
+                            runId, breachReason, run.getReportingDate());
 
                     if (updated > 0) {
                         // Publish breach event
@@ -115,7 +126,7 @@ public class LiveSlaBreachDetectionJob {
                         eventPublisher.publishEvent(new SlaBreachedEvent(run, result));
 
                         // Deregister (no longer need to monitor)
-                        slaMonitoringCache.deregisterFromSlaMonitoring(runId);
+                        slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
 
                         processedCount++;
 

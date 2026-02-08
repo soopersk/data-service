@@ -13,7 +13,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableCaching
 @EnableScheduling
-@EnableAsync
 @OpenAPIDefinition(
         info = @Info(
                 title = "Observability Service API",
@@ -22,10 +21,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         )
 )
 @SecurityScheme(
-        name = "bearer-jwt",
+        name = "basicAuth",
         type = SecuritySchemeType.HTTP,
-        scheme = "bearer",
-        bearerFormat = "JWT"
+        scheme = "basic"
 )
 public class ObservabilityServiceApplication {
 

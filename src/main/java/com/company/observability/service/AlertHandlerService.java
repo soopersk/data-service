@@ -1,24 +1,28 @@
 package com.company.observability.service;
 
-import com.company.observability.domain.*;
+import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.SlaBreachEventRepository;
 import com.company.observability.util.SlaEvaluationResult;
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
-import io.github.resilience4j.retry.annotation.Retry;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.Tags;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.Instant;
 
 /**
- * FIXED: Idempotent alert handling with circuit breaker
+ * FIXED: Use TransactionalEventListener to prevent alerts before DB commit
+ * FIXED: Reduced cardinality in metrics
  */
 @Service
 @Slf4j
@@ -26,12 +30,15 @@ import java.time.Instant;
 public class AlertHandlerService {
 
     private final SlaBreachEventRepository breachRepository;
-    private final AzureMonitorAlertSender azureAlertSender;
     private final MeterRegistry meterRegistry;
 
-    @EventListener
+    /**
+     * FIXED: Only send alerts after transaction commits
+     * FIXED: New transaction for alert processing
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void handleSlaBreachEvent(SlaBreachedEvent event) {
         CalculatorRun run = event.getRun();
         SlaEvaluationResult result = event.getResult();
@@ -56,12 +63,14 @@ public class AlertHandlerService {
         SlaBreachEvent savedBreach;
 
         try {
-            // FIXED: Save with idempotency - will throw exception if duplicate
             savedBreach = breachRepository.save(breach);
 
+            // FIXED: Reduced cardinality - no calculatorId
             meterRegistry.counter("sla.breaches.created",
-                    "calculator", run.getCalculatorId(),
-                    "severity", result.getSeverity()
+                    Tags.of(
+                            Tag.of("severity", result.getSeverity()),
+                            Tag.of("frequency", run.getFrequency().name())
+                    )
             ).increment();
 
         } catch (DuplicateKeyException e) {
@@ -69,30 +78,37 @@ public class AlertHandlerService {
                     run.getRunId());
 
             meterRegistry.counter("sla.breaches.duplicate",
-                    "calculator", run.getCalculatorId()
+                    Tags.of(
+                            Tag.of("frequency", run.getFrequency().name())
+                    )
             ).increment();
 
-            return; // Idempotent - exit gracefully
+            return;
         }
 
-        // Send alert with retry and circuit breaker
-        sendAlertWithRetry(savedBreach, run);
+        // Phase-1: simple alerting via logs
+        sendSimpleAlert(savedBreach, run);
     }
 
-    @Retry(name = "azureMonitorAlert", fallbackMethod = "alertSendFallback")
-    @CircuitBreaker(name = "azureMonitorAlert", fallbackMethod = "alertSendFallback")
-    private void sendAlertWithRetry(SlaBreachEvent breach, CalculatorRun run) {
+    private void sendSimpleAlert(SlaBreachEvent breach, CalculatorRun run) {
         try {
-            azureAlertSender.sendAlert(breach, run);
+            log.warn("SLA breach alert: runId={}, calculator={}, severity={}, reason={}",
+                    breach.getRunId(),
+                    breach.getCalculatorName(),
+                    breach.getSeverity(),
+                    run.getSlaBreachReason());
 
             breach.setAlerted(true);
             breach.setAlertedAt(Instant.now());
             breach.setAlertStatus("SENT");
             breachRepository.update(breach);
 
+            // FIXED: Reduced cardinality
             meterRegistry.counter("sla.alerts.sent",
-                    "calculator", run.getCalculatorId(),
-                    "severity", breach.getSeverity()
+                    Tags.of(
+                            Tag.of("severity", breach.getSeverity()),
+                            Tag.of("frequency", run.getFrequency().name())
+                    )
             ).increment();
 
             log.info("Alert sent successfully for breach {}", breach.getBreachId());
@@ -106,30 +122,13 @@ public class AlertHandlerService {
             breachRepository.update(breach);
 
             meterRegistry.counter("sla.alerts.failed",
-                    "calculator", run.getCalculatorId()
+                    Tags.of(
+                            Tag.of("frequency", run.getFrequency().name())
+                    )
             ).increment();
 
-            throw e; // Re-throw to trigger retry/circuit breaker
+            throw e;
         }
-    }
-
-    /**
-     * Fallback when Azure Monitor is unavailable
-     */
-    private void alertSendFallback(SlaBreachEvent breach, CalculatorRun run, Exception e) {
-        log.error("Azure Monitor unavailable for breach {}, marking for retry: {}",
-                breach.getBreachId(), e.getMessage());
-
-        breach.setAlertStatus("PENDING");
-        breach.setRetryCount(breach.getRetryCount() + 1);
-        breach.setLastError("Circuit open: " + e.getMessage());
-        breachRepository.update(breach);
-
-        meterRegistry.counter("sla.alerts.circuit_open",
-                "calculator", run.getCalculatorId()
-        ).increment();
-
-        // Batch job will retry later
     }
 
     private String determineBreachType(String reason) {

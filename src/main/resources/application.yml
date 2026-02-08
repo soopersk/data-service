@@ -29,6 +29,7 @@ spring:
     baseline-version: 0
     schemas: public
     validate-on-migrate: true
+#    clean-disabled: false
 
   data:
     redis:
@@ -60,20 +61,6 @@ spring:
         queue-capacity: 100
         thread-name-prefix: async-
 
-# OpenTelemetry
-otel:
-  service:
-    name: observability-service
-  traces:
-    exporter: ${OTEL_TRACES_EXPORTER:logging}
-  metrics:
-    exporter: ${OTEL_METRICS_EXPORTER:logging}
-
-# Azure Monitor
-applicationinsights:
-  connection:
-    string: ${APPLICATIONINSIGHTS_CONNECTION_STRING:}
-
 # Actuator Management endpoints
 management:
   endpoints:
@@ -95,7 +82,14 @@ management:
 
 # Custom properties: Observability Configuration
 observability:
+  security:
+    basic:
+      username: ${OBS_BASIC_USER:admin}
+      password: ${OBS_BASIC_PASSWORD:admin}
+      role: ${OBS_BASIC_ROLE:USER}
   sla:
+    live-tracking:
+      enabled: true
     # OPTIMIZED: Live detection every 2 minutes (tolerance: few minutes)
     live-detection:
       enabled: true
@@ -117,21 +111,6 @@ observability:
       enabled: true
       create-cron: "0 0 1 * * *"  # Daily at 1 AM
 
-# Resilience4j Configuration
-resilience4j:
-  circuitbreaker:
-    instances:
-      azureMonitorAlert:
-        slidingWindowSize: 10
-        failureRateThreshold: 50
-        waitDurationInOpenState: 30s
-  retry:
-    instances:
-      azureMonitorAlert:
-        maxAttempts: 3
-        waitDuration: 1000ms
-
-
 # Logging
 logging:
   level:
@@ -143,9 +122,9 @@ logging:
     org.springframework.cache.interceptor: TRACE
     org.springframework.data.redis.cache: TRACE
     io.lettuce.core: DEBUG
-    pattern:
-      console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [%X{requestId}] - %msg%n"
-      file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [%X{requestId}] - %msg%n"
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [%X{requestId}] - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [%X{requestId}] - %msg%n"
 
 # Springdoc OpenAPI
 springdoc:

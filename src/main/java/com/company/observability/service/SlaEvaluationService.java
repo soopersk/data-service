@@ -1,6 +1,7 @@
 package com.company.observability.service;
 
 import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.util.SlaEvaluationResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,7 +36,7 @@ public class SlaEvaluationService {
         }
 
         // Check 2: Still running past SLA deadline
-        if (run.getSlaTime() != null && "RUNNING".equals(run.getStatus())) {
+        if (run.getSlaTime() != null && run.getStatus() == RunStatus.RUNNING) {
             Instant now = Instant.now();
             if (now.isAfter(run.getSlaTime())) {
                 long delaySeconds = java.time.Duration.between(
@@ -62,7 +63,7 @@ public class SlaEvaluationService {
         }
 
         // Check 4: Run failed
-        if ("FAILED".equals(run.getStatus()) || "TIMEOUT".equals(run.getStatus())) {
+        if (run.getStatus() == RunStatus.FAILED || run.getStatus() == RunStatus.TIMEOUT) {
             breachReasons.add("Run status: " + run.getStatus());
         }
 
@@ -77,7 +78,7 @@ public class SlaEvaluationService {
             return null;
         }
 
-        if ("FAILED".equals(run.getStatus())) {
+        if (run.getStatus() == RunStatus.FAILED) {
             return "CRITICAL";
         }
 

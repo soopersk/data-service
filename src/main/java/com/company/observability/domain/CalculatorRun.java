@@ -1,5 +1,7 @@
 package com.company.observability.domain;
 
+import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.RunStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -9,6 +11,7 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Map;
 
 /**
  * Calculator Run domain model with reporting_date for partition key
@@ -27,7 +30,9 @@ public class CalculatorRun implements Serializable {
     private String calculatorId;
     private String calculatorName;
     private String tenantId;
-    private String frequency; // DAILY or MONTHLY
+
+    @Builder.Default
+    private CalculatorFrequency frequency = CalculatorFrequency.DAILY;
 
     // Partition key - critical for query performance
     private LocalDate reportingDate;
@@ -41,8 +46,9 @@ public class CalculatorRun implements Serializable {
     private BigDecimal startHourCet;
     private BigDecimal endHourCet;
 
-    // Status
-    private String status; // RUNNING, SUCCESS, FAILED, TIMEOUT, CANCELLED
+    // Default to RUNNING
+    @Builder.Default
+    private RunStatus status = RunStatus.RUNNING;
 
     // SLA tracking
     private Instant slaTime;
@@ -54,7 +60,8 @@ public class CalculatorRun implements Serializable {
     private String slaBreachReason;
 
     // Metadata
-    private String runParameters;
+    private Map<String, Object> runParameters;
+    private Map<String, Object> additionalAttributes;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -62,14 +69,14 @@ public class CalculatorRun implements Serializable {
      * Helper to determine if this is a DAILY run
      */
     public boolean isDaily() {
-        return "DAILY".equalsIgnoreCase(frequency);
+        return frequency == CalculatorFrequency.DAILY;
     }
 
     /**
      * Helper to determine if this is a MONTHLY run
      */
     public boolean isMonthly() {
-        return "MONTHLY".equalsIgnoreCase(frequency);
+        return frequency == CalculatorFrequency.MONTHLY;
     }
 
     /**

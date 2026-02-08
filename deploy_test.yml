@@ -1,0 +1,487 @@
+# File: kubernetes/deployment.yaml
+
+{{- $nodeSelector := .Values.nodeSelector }}
+{{- $affinity := .Values.affinity }}
+{{- $tolerations := .Values.tolerations }}
+{{- $topologySpreadConstraints := .Values.topologySpreadConstraints }}
+{{- $revisionHistoryLimit := .Values.revisionHistoryLimit }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    tier: task-state
+    component: task-state
+    release: {{ .Release.Name }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    heritage: {{ .Release.Service }}
+    {{- with .Values.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end ｝｝
+  {{- if .Values.annotations }}
+  annotations: {{- toYaml . Values.annotations | nindent 4 }}
+  {{- end }}
+  spec:
+    replicas: {{ .Values.replicas }}
+    {{- if $revisionHistoryLimit }}
+    revisionHistoryLimit: {{ $revisionHistoryLimit }}
+    {{- end }}
+    strategy: {{- toYaml.Values.strategy | nindent 4 }}
+    selector:
+      matchLabels:
+        tier: task-state
+        component: task-state
+        release: {{ .Release.Name }}
+        azure.workLoad.identity/use: "true"
+    template:
+      metadata:
+        labels:
+          tier: task-state
+          component: task-state
+          release: {{ .Release.Name })
+          {{- if or (.Values.labels) (.Values.labels) }}
+            {{- .Values.labels | toYaml | nindent 8 }}
+          {{- end }}
+        annotations:
+          {{- if .Values.annotations }}
+            {{- toYaml .Values.annotations | nindent 8 }}
+          {{- end }}
+      spec:
+        {{- if .Values.hostAliases }}
+        hostAliases: {{- toYaml .Values.hostAliases | nindent 8 }}
+        {{- end }}
+        serviceAccountName: {{ include "vault.serviceAccountName" . }}
+        {{- if .Values.priorityClassName }}
+        priorityClassName: {{ .Values.priorityClassName }}
+        {{- end }}
+        nodeSelector: {{- toYaml $nodeSelector | nindent 8 }}
+        affinity:
+          {{-if $affinity }}
+            {{- toYaml $affinity | nindent 8 }}
+          {{- else }}
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    component: task-state
+                topologyKey: kubernetes.io/hostname
+            weight: 100
+            {{- end }}
+          toleration: {{- toYaml $tolerations | nindent 8 }}
+          topologySpreadConstraints: {{- toYaml $topologySpreadConstraints | nindent 8 }}
+          restartPolicy: Always
+          terminationGracePeriodSeconds: 10
+          securityContext: {{ include "securitycontext" | nindent 8 }}
+          {{- if or .Values.registry.secretName .Values.registry.connection }}
+          imagePullSecrets:
+            - name: {{ template "registry_secret" . }}
+          {{- end }}
+          initContainers:
+          {{- include "vault_agent_init_container" . | nindent 8 }}
+
+          containers:
+            # Always run the main scheduler container.
+            - name: task-state
+              image: {{ template "task_state_image" . }}
+              imagepullPolicy: {{. Values.images.task_state.pullpolicy }}
+              {{ include "maverickSecurityContext" • | nindent 10 }}
+
+
+
+  {tif Values command
+
+    command: # tpl (toYaml. VaLues. command) • | nindent 12 }}
+
+    H- end }}
+
+  H- if -Values.args F
+
+                                              args: ff tpl (toYam. .Values.args) • I nindent 12 H
+
+                                              resources: 1i- toYamL
+
+                                              enufrom: +f- include talk state ences mentatron? I defant In 11" 1 indent 10 17
+
+                                              env:
+
+                                              H- include "task_state_environment" • | indent 10 }} voLumeMounts:
+
+                                              H- incLude "common_volume_mount" - | nindent 10 }} ports:
+
+                                                - name: taskstate containerPort: ff. .Values.ports.taskState *)
+
+  ff-if Values,LivenessProbe.enabled})
+
+                                              LivenessProbe: httpGet:
+
+                                              path: 4f if Values, livenessProbe,baserl ff- with urlParse (tpl, Values, LivenessProbe.baseur port: 8080
+
+  ff-if Values, livenessProbe, baseUrL)) hitpHeaders;
+  
+  • name; Host ff- end 33
+
+                                              scheme: 44. Values, LivenessProbe, scheme F initialDelaySeconds: 44. VaLues, LivenessProbe, initialDeLaySeconds h timeoutSeconds: ff, Values, LivenessProbe, timeoutSeconds failureThreshold: {4, Values, LivenessProbe, failureThreshold * periodSeconds: if,Values.livenessProbe.periodSeconds
+
+                                                {f-end }}
+
+  {{-  include "consolidated_volumes", | nindent 6 }}
+    
+    
+    
+    
+
+    apiVersion: v1 kind: ConfigMap metadata:
+
+    name: {f. Release. Name }}-vault-agent-config Labels:
+
+                              app: {f Release. Name }}-ms-pod
+
+                                              data:
+
+                                              vault-agent-config.hcl: I-
+
+  # Comment this out if running as sidecar instead of initContainer
+
+  exit_after_auth = true
+  
+  pid_file = "/home/vault/pidfile"
+  
+  auto_auth {
+  
+  method "azure" {
+  
+  mount_path = "auth/azure"
+
+  {f printf "namespace = \ %s\""$.Values.vault.swicode }}
+
+  config = {
+  
+  If printf "role $.Values. vault.roze 3}
+  
+  {f printf "resource = \"%s"" $.Values. vault. resource F}
+  
+  authenticate_from_environment = true
+
+}
+
+  sink "file" {
+  
+  config = {
+
+}
+
+  path = "/home/vault/.Vaurt-token
+  
+  {f-$secret_path_base:= printf "secret/runtime" }}
+  
+  # Create secrets.sh script (to export secrets as environment variables)
+  
+  template {
+  
+  destination = "/etc/secrets/secrets_eva.sh"
+  
+  perms = "0755"
+  
+  contents = <<EOT
+  
+  #!/bin/sh
+  
+  {f- if .Values. vault.secrets.generic }}
+  
+  # All other secrets
+  
+  {f
+    
+    {f
+      
+      printf "export %s='{f .Data. data. password }} *" $map_key }} printf "{{ end - }}" }}
+  
+  end -*}
+  
+  {{- end }}
+  
+  
+  
+  ff- if
+  
+  • Values. vault.fileContents *)
+  
+  #Export paths to secret files
+  
+  range $map_key, $map_value:= .Values.vault.fileContents -)
+  
+  tt
+  
+  end -}}
+  
+  printf "export%-%s/%s"Smap_key$.Values.vault.files.path_base $map_key
+  
+  tt
+  
+  end
+  
+  다}}
+  
+  ff/* Section for - Values. vault. secrets postgres. Template generates export urt informat postgrest://username:password@hostname:port/dbna
+  
+  H if .Values. vault.secrets-postgres H
+  
+  # Postgres AIRFLOW_CONN_POSTGRES_DATABASE
+  
+  $metadataHost:= .Values.data.metadataConnection.host })
+  
+  f
+  
+  H-
+  
+  H-
+  
+  $port:= -Values.data.metadataConnection.port | tostring }
+  
+  $database:= _Values.data.metadataConnection.db |}
+  
+  $query = printf "sslmode%s" .Values.data.metadataConnection.sslmode }}
+  
+  $user:= _Values.data.metadataConnection.user F
+  
+  range Smap_key, Smap_value:=$.Values.vault.secrets.postgres
+  
+  printf "# %s" $map_key }}
+  
+  printf "H with secret \"%s/%s\" -}]" $secret_path_base $map_value }}
+  
+  printf "export %s=*postgresql://%s:{f.Data.data.password | urlquery 0%:%s/%s?%s*" $map_key Suser SmetadataHast Spart Sdata
+  
+  printf"# %s" $map_key }}
+  
+  H
+  
+  printf "export %_JDB="jdbc:postgresql://%s:%s/%s?%s&user=%s&password=(f .Data.data.password
+  
+  printf "H end - 33* 3}
+  
+  urtquery H* Smap_key Smetada
+  
+  end -}}
+  
+  H
+  
+  end -3
+  
+  ff- if -Values.vault.secrets.azure 3}
+  
+  #
+  
+  Azure client credentials
+  
+  H
+  
+  range Smap_key, Smap_value =
+  
+  $. Values.vault.secrets.azure -13
+  
+  printf "if with secret 1%s/%s\"-}} $secret_path_base $map_value it
+  
+  printf export%_ID=*{ index Data, data "client-id\"1*" Smap_key }
+  
+  printf export %_SECRET= {f index Data, data \"secret)" }) *" $map_key it printf "ff end -}3*
+  
+  end -33
+  
+  end
+  
+  1-33
+  
+  EOT
+
+}
+
+  ff- if haskey Values, vault "fileContents" 1)
+  
+  # Create files with contents from EVA section
+  
+  ff-range $map_key, $map_value:=, Values, vault, fileContents it
+  
+  
+  
+  template {
+  
+  destination="{f$.Values,vault.files,path_base vault.files,path_base /(Smap_key }™
+  
+  perms = "0755"
+  
+  contents = "ff printf "ff- with secret 111"%s/%s\|/" }ff.Data, data, password
+  
+  
+  
+  {- $useHost:= .Values. ingress: useHosts }} ff- if or .Values.ingress.web.enabled. Values.ingress.enabled }} kind: Ingress apiVersion: networking.k8s.io/v1 metadata:
+
+                                              name: {.Release. Name )-ingress namespace: (f.Values.namespace })
+
+                                              Labels:
+
+                                              tier: task-state
+
+                                              component: task-state-ingress release: { Release. Name }} chart: " Chart Name 33-(t
+
+Chart. Version 31"
+
+                                              heritage: I.Release. Service *)
+
+  H- with Values. Labels
+  
+  H- toYaml • 1 nindent 4 H
+  
+  f- end ｝｝
+
+                                              It- with - Values.ingress.web.annotations }) annotations: ff-toYam. I nindent 4 H
+
+  f- end ｝｝
+
+                                              spec:
+
+  H- if and .Values.ingress.web.hosts (.Values.ingress.web.hosts | first | kindIs "string" | not) H
+  
+  H- if -Values.ingress.web.ingressLassName F}
+
+                                              ingressClassName: {f .Values.ingress.web.ingressCLassName })
+
+  H- end ｝｝
+  
+  H- SanyTLsHosts := false -}}
+  
+  H- range -Values.ingress.web.hosts }}
+  
+  ff- if -tls.enabled }}
+  
+  H- SanyTLsHosts = true -1}
+  
+  ti- end 33
+  
+  11- end 分｝
+  
+  ff- end 37
+  
+  H- if SanyTLsHosts 1}
+
+                                              tls:
+
+  ti- range Values.ingress.web.hosts)
+  
+  ff-if tls 33
+  
+  ff- if tls,enabled 3}
+  
+  ﻿﻿hosts;
+  ﻿﻿ff .name 1
+  quote it
+                                              secretName: 44 tls,secretName h
+
+  4f- end 33
+  
+  fi- end 3
+  
+  7
+  
+  9
+  
+  ti- end 33
+
+                                              fi- else if Values, ingress, web, tis, enabLed tLs:
+
+                                                - hosts:
+
+  f1-
+  
+  Values, Angress,web.hosts | defaultiat,Values,ingress.web,host)|toYam|nindent 8
+
+                                              secretName: ff, Values, ingress. web,tls, secretName it
+
+                                              rules:
+
+  fi-range, Values.ingress,web,hosts | default (list, Values, ingress. web, host) #
+
+                                              ﻿﻿http:
+                                              paths:
+  it- range$.Values.ingress.web.precedingPaths #
+                                              ﻿﻿path: {fpath }}
+                                              pathType: {pathtype H
+                                                backend:
+                                                  Service.
+
+                                                ﻿﻿hosts:
+                                                  ﻿﻿it•name | quote Fr
+                                                secretName: ff .tls.secretName }}
+
+  It- end Fr {f-
+
+  {{- end 3}
+
+    {t-else if. Values.ingress.web.tls.enabled
+
+      tls:
+
+        - hosts:
+
+      rules:
+
+      ff-range. Values. ingress.web.hosts|default (List. Values.ingress.web.host) 33
+
+      ﻿﻿http:
+      paths:
+      {f-range $.Values.ingress.web.precedingPaths})
+      ﻿﻿path: {{ •path }}
+      pathType: ti •pathType }} backend:
+                                              service:
+                                              name: {€ •serviceName }} port:
+                                              name: it •servicePort }}
+  {{- end }}
+
+                                              - backend:
+
+                                              service:
+
+                                              name: {f $.Release.Name }} port:
+
+                                              name: taskstate
+
+  ff-if $.Values.ingress.web.path}
+
+                                              path: {f $.Values.ingress.web.path})
+
+                                              pathType: {f$.Values.ingress.web.pathType }
+
+  ti-end }}
+  
+  {f-range $.Values.ingress.web.succeedingPaths}
+
+                                              - path: {f •path }}
+
+                                              pathType: ff .pathType }}
+
+                                              backend: service:
+
+                                              name: {f .serviceName }} port:
+
+                                              name: {f servicePort })
+
+  {f- end }}
+  
+  {f- $hostname := . -}}
+  
+  ff- if . I kindIs
+  
+  "string" | not lt
+  
+  {{- $hostname = • name -}}
+  
+  {f- end }}
+  
+  {f-if and $hostname $useHost }}
+
+                                              host: {f $hostname | quote Fi
+
+                                                {- end 1}
+
+                                                      ff-end }}

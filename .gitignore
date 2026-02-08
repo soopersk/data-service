@@ -12,6 +12,7 @@ target/
 .vscode/
 *.swp
 *.swo
+.metals/
 
 # OS
 .DS_Store

@@ -31,7 +31,7 @@ servers:
     description: Local development
 
 security:
-  - bearer-jwt: []
+  - basic-auth: []
 
 paths:
   /api/v1/health:
@@ -255,11 +255,10 @@ paths:
 
 components:
   securitySchemes:
-    bearer-jwt:
+    basic-auth:
       type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: Azure AD JWT token with `roles` and `tenant_id` claims
+      scheme: basic
+      description: Basic auth for Phase-1
 
   schemas:
     HealthResponse:
@@ -311,7 +310,7 @@ components:
           type: string
           format: time
           example: "06:15:00"
-          description: Target completion time in CET timezone
+          description: Target completion time in CET timezone (DAILY runs only)
         expectedDurationMs:
           type: integer
           format: int64

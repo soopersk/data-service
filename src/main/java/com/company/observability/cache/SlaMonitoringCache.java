@@ -1,14 +1,17 @@
 package com.company.observability.cache;
 
 import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.enums.RunStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -23,6 +26,9 @@ public class SlaMonitoringCache {
     private final RedisTemplate<String, Object> redisTemplate;
     private final ObjectMapper objectMapper;
 
+    @Value("${observability.sla.live-tracking.enabled:true}")
+    private boolean liveTrackingEnabled;
+
     // Sorted set: score = SLA deadline timestamp (epoch millis)
     private static final String SLA_DEADLINES_ZSET = "obs:sla:deadlines";
 
@@ -34,26 +40,35 @@ public class SlaMonitoringCache {
      * Called when run starts
      */
     public void registerForSlaMonitoring(CalculatorRun run) {
+        if (!liveTrackingEnabled) {
+            log.debug("Live SLA tracking disabled, skipping monitoring for run {}", run.getRunId());
+            return;
+        }
+
         if (run.getSlaTime() == null) {
             log.debug("No SLA time for run {}, skipping monitoring", run.getRunId());
             return;
         }
 
-        if (!"RUNNING".equals(run.getStatus())) {
+        if (run.getStatus() != RunStatus.RUNNING) {
             log.debug("Run {} not in RUNNING status, skipping SLA monitoring", run.getRunId());
             return;
         }
 
         try {
+            String runKey = buildRunKey(run.getTenantId(), run.getRunId(), run.getReportingDate());
+
             // Calculate score (SLA deadline as epoch millis)
             long slaDeadlineScore = run.getSlaTime().toEpochMilli();
 
             // Create minimal run info for quick lookups
             Map<String, Object> runInfo = new HashMap<>();
+            runInfo.put("runKey", runKey);
             runInfo.put("runId", run.getRunId());
             runInfo.put("calculatorId", run.getCalculatorId());
             runInfo.put("calculatorName", run.getCalculatorName());
             runInfo.put("tenantId", run.getTenantId());
+            runInfo.put("reportingDate", run.getReportingDate() != null ? run.getReportingDate().toString() : null);
             runInfo.put("startTime", run.getStartTime().toEpochMilli());
             runInfo.put("slaTime", run.getSlaTime().toEpochMilli());
 
@@ -62,14 +77,14 @@ public class SlaMonitoringCache {
             // Add to sorted set (score = SLA deadline)
             redisTemplate.opsForZSet().add(
                     SLA_DEADLINES_ZSET,
-                    run.getRunId(),
+                    runKey,
                     slaDeadlineScore
             );
 
             // Store run info in hash for quick retrieval
             redisTemplate.opsForHash().put(
                     SLA_RUN_INFO_HASH,
-                    run.getRunId(),
+                    runKey,
                     runInfoJson
             );
 
@@ -88,10 +103,11 @@ public class SlaMonitoringCache {
     /**
      * Deregister a run (called when run completes)
      */
-    public void deregisterFromSlaMonitoring(String runId) {
+    public void deregisterFromSlaMonitoring(String runId, String tenantId, LocalDate reportingDate) {
         try {
-            redisTemplate.opsForZSet().remove(SLA_DEADLINES_ZSET, runId);
-            redisTemplate.opsForHash().delete(SLA_RUN_INFO_HASH, runId);
+            String runKey = buildRunKey(tenantId, runId, reportingDate);
+            redisTemplate.opsForZSet().remove(SLA_DEADLINES_ZSET, runKey);
+            redisTemplate.opsForHash().delete(SLA_RUN_INFO_HASH, runKey);
 
             log.debug("Deregistered run {} from SLA monitoring", runId);
 
@@ -109,19 +125,19 @@ public class SlaMonitoringCache {
             long now = Instant.now().toEpochMilli();
 
             // Get all runs with SLA deadline <= NOW
-            Set<Object> breachedRunIds = redisTemplate.opsForZSet()
+            Set<Object> breachedRunKeys = redisTemplate.opsForZSet()
                     .rangeByScore(SLA_DEADLINES_ZSET, 0, now);
 
-            if (breachedRunIds == null || breachedRunIds.isEmpty()) {
+            if (breachedRunKeys == null || breachedRunKeys.isEmpty()) {
                 return Collections.emptyList();
             }
 
             List<Map<String, Object>> breachedRuns = new ArrayList<>();
 
             // Fetch run info for each breached run
-            for (Object runIdObj : breachedRunIds) {
-                String runId = runIdObj.toString();
-                Object runInfoJson = redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runId);
+            for (Object runKeyObj : breachedRunKeys) {
+                String runKey = runKeyObj.toString();
+                Object runInfoJson = redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runKey);
 
                 if (runInfoJson != null) {
                     @SuppressWarnings("unchecked")
@@ -152,18 +168,18 @@ public class SlaMonitoringCache {
             long threshold = Instant.now().plus(Duration.ofMinutes(minutesAhead)).toEpochMilli();
 
             // Get runs with SLA deadline between NOW and NOW+N minutes
-            Set<Object> approachingRunIds = redisTemplate.opsForZSet()
+            Set<Object> approachingRunKeys = redisTemplate.opsForZSet()
                     .rangeByScore(SLA_DEADLINES_ZSET, now, threshold);
 
-            if (approachingRunIds == null || approachingRunIds.isEmpty()) {
+            if (approachingRunKeys == null || approachingRunKeys.isEmpty()) {
                 return Collections.emptyList();
             }
 
             List<Map<String, Object>> approachingRuns = new ArrayList<>();
 
-            for (Object runIdObj : approachingRunIds) {
-                String runId = runIdObj.toString();
-                Object runInfoJson = redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runId);
+            for (Object runKeyObj : approachingRunKeys) {
+                String runKey = runKeyObj.toString();
+                Object runInfoJson = redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runKey);
 
                 if (runInfoJson != null) {
                     @SuppressWarnings("unchecked")
@@ -224,5 +240,12 @@ public class SlaMonitoringCache {
             log.error("Failed to get next SLA deadline", e);
             return Optional.empty();
         }
+    }
+
+    private String buildRunKey(String tenantId, String runId, LocalDate reportingDate) {
+        String tenant = tenantId != null ? tenantId : "unknown-tenant";
+        String date = reportingDate != null ? reportingDate.toString() : "unknown-date";
+        String id = runId != null ? runId : "unknown-run";
+        return tenant + ":" + id + ":" + date;
     }
 }

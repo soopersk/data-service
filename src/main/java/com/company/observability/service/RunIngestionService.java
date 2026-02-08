@@ -3,6 +3,8 @@ package com.company.observability.service;
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.*;
 import com.company.observability.event.*;
 import com.company.observability.repository.*;
@@ -11,10 +13,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -29,6 +33,9 @@ public class RunIngestionService {
     private final MeterRegistry meterRegistry;
     private final RedisCalculatorCache redisCache;
     private final SlaMonitoringCache slaMonitoringCache;
+
+    @Value("${observability.sla.live-tracking.enabled:true}")
+    private boolean liveTrackingEnabled;
 
     @Transactional
     public CalculatorRun startRun(StartRunRequest request, String tenantId) {
@@ -48,8 +55,29 @@ public class RunIngestionService {
         // Validate reporting_date matches frequency expectations
         validateReportingDate(request);
 
-        Instant slaDeadline = TimeUtils.calculateSlaDeadline(
-                request.getStartTime(), request.getSlaTimeCet());
+        CalculatorFrequency frequency = Objects.requireNonNullElse(
+                request.getFrequency(), CalculatorFrequency.DAILY);
+
+        Instant slaDeadline = null;
+        if (frequency == CalculatorFrequency.DAILY) {
+            slaDeadline = TimeUtils.calculateSlaDeadline(
+                    request.getReportingDate(), request.getSlaTimeCet());
+        }
+
+        boolean breachedAtStart = false;
+        String breachReasonAtStart = null;
+        if (slaDeadline != null && request.getStartTime() != null
+                && request.getStartTime().isAfter(slaDeadline)) {
+            breachedAtStart = true;
+            breachReasonAtStart = String.format(
+                    "Start time %s is after SLA deadline %s (reporting_date=%s)",
+                    request.getStartTime(),
+                    slaDeadline,
+                    request.getReportingDate()
+            );
+            log.warn("SLA already breached at start for run {}: {}",
+                    request.getRunId(), breachReasonAtStart);
+        }
 
         Instant estimatedEndTime = null;
         if (request.getExpectedDurationMs() != null) {
@@ -57,38 +85,57 @@ public class RunIngestionService {
                     request.getStartTime(), request.getExpectedDurationMs());
         }
 
+        log.info("RunId: {} for calculator {} , startTime: {}, slaDeadline: {}",
+                request.getRunId(), request.getCalculatorId(), request.getStartTime(), slaDeadline);
+
         CalculatorRun run = CalculatorRun.builder()
                 .runId(request.getRunId())
                 .calculatorId(request.getCalculatorId())
                 .calculatorName(request.getCalculatorName())
                 .tenantId(tenantId)
-                .frequency(request.getFrequency())
+                .frequency(frequency)
                 .reportingDate(request.getReportingDate())
                 .startTime(request.getStartTime())
                 .startHourCet(TimeUtils.calculateCetHour(request.getStartTime()))
-                .status("RUNNING")
+                .status(RunStatus.RUNNING)
                 .slaTime(slaDeadline)
                 .expectedDurationMs(request.getExpectedDurationMs())
                 .estimatedStartTime(request.getStartTime())
                 .estimatedEndTime(estimatedEndTime)
                 .runParameters(request.getRunParameters())
-                .slaBreached(false)
+                .additionalAttributes(request.getAdditionalAttributes())
+                .slaBreached(breachedAtStart)
+                .slaBreachReason(breachedAtStart ? breachReasonAtStart : null)
                 .build();
 
         run = runRepository.upsert(run);
 
-        // Register for live SLA monitoring
-        slaMonitoringCache.registerForSlaMonitoring(run);
+        // Register for live SLA monitoring (daily only, feature toggle, not already breached)
+        if (liveTrackingEnabled
+                && frequency == CalculatorFrequency.DAILY
+                && slaDeadline != null
+                && !breachedAtStart) {
+            slaMonitoringCache.registerForSlaMonitoring(run);
+        }
+
+        if (breachedAtStart && liveTrackingEnabled) {
+            SlaEvaluationResult result = new SlaEvaluationResult(
+                    true,
+                    breachReasonAtStart,
+                    "HIGH"
+            );
+            eventPublisher.publishEvent(new SlaBreachedEvent(run, result));
+        }
 
         eventPublisher.publishEvent(new RunStartedEvent(run));
 
         meterRegistry.counter("calculator.runs.started",
                 "calculator", run.getCalculatorId(),
-                "frequency", run.getFrequency()
+                "frequency", run.getFrequency().name()
         ).increment();
 
-        log.info("Run {} started (reporting_date: {}, SLA deadline: {})",
-                run.getRunId(), run.getReportingDate(), slaDeadline);
+        log.info("Run {} started (reporting_date: {}, SLA deadline: {}, live_tracking: {})",
+                run.getRunId(), run.getReportingDate(), slaDeadline, liveTrackingEnabled);
 
         return run;
     }
@@ -108,7 +155,7 @@ public class RunIngestionService {
             throw new RuntimeException("Access denied to run " + runId + " for tenant " + tenantId);
         }
 
-        if (!"RUNNING".equals(run.getStatus())) {
+        if (run.getStatus() != RunStatus.RUNNING) {
             log.info("Run {} already completed", runId);
             meterRegistry.counter("calculator.runs.complete.duplicate").increment();
             return run;
@@ -119,7 +166,7 @@ public class RunIngestionService {
         run.setEndTime(request.getEndTime());
         run.setDurationMs(durationMs);
         run.setEndHourCet(TimeUtils.calculateCetHour(request.getEndTime()));
-        run.setStatus(request.getStatus() != null ? request.getStatus() : "SUCCESS");
+        run.setStatus(RunStatus.fromString(request.getStatus() != null ? request.getStatus() : "SUCCESS"));
 
         SlaEvaluationResult slaResult = slaEvaluationService.evaluateSla(run);
         run.setSlaBreached(slaResult.isBreached());
@@ -128,14 +175,14 @@ public class RunIngestionService {
         run = runRepository.upsert(run);
 
         // Deregister from SLA monitoring
-        slaMonitoringCache.deregisterFromSlaMonitoring(runId);
+        slaMonitoringCache.deregisterFromSlaMonitoring(run.getRunId(), run.getTenantId(), run.getReportingDate());
 
         updateDailyAggregate(run);
 
         meterRegistry.counter("calculator.runs.completed",
                 "calculator", run.getCalculatorId(),
-                "frequency", run.getFrequency(),
-                "status", run.getStatus(),
+                "frequency", run.getFrequency().name(),
+                "status", run.getStatus().name(),
                 "sla_breached", String.valueOf(run.getSlaBreached())
         ).increment();
 
@@ -172,7 +219,7 @@ public class RunIngestionService {
      * Validate reporting_date matches frequency expectations
      */
     private void validateReportingDate(StartRunRequest request) {
-        if ("MONTHLY".equalsIgnoreCase(request.getFrequency())) {
+        if (request.getFrequency() == CalculatorFrequency.MONTHLY) {
             // MONTHLY runs should have end-of-month reporting date
             LocalDate reportingDate = request.getReportingDate();
             LocalDate nextDay = reportingDate.plusDays(1);
@@ -191,7 +238,7 @@ public class RunIngestionService {
                     run.getCalculatorId(),
                     run.getTenantId(),
                     run.getReportingDate(),
-                    run.getStatus(),
+                    run.getStatus().name(),
                     run.getSlaBreached(),
                     run.getDurationMs(),
                     TimeUtils.calculateCetMinute(run.getStartTime()),

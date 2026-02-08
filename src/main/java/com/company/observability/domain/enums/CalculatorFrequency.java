@@ -1,5 +1,7 @@
 package com.company.observability.domain.enums;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.time.Duration;
 
 public enum CalculatorFrequency {
@@ -20,14 +22,20 @@ public enum CalculatorFrequency {
         return Duration.ofDays(lookbackDays);
     }
 
-    public static CalculatorFrequency fromString(String frequency) {
-        if (frequency == null) {
+
+    /**
+     * Accepts D, DAILY, M, MONTHLY (case-insensitive)
+     * Normalizes to DAILY / MONTHLY
+     * Default is DAILY
+     */
+    @JsonCreator
+    public static CalculatorFrequency from(String frequency) {
+        if (frequency == null || frequency.isBlank()) {
             return DAILY;
         }
-        try {
-            return CalculatorFrequency.valueOf(frequency.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            return DAILY;
-        }
+        return switch (frequency.trim().toUpperCase()) {
+            case "M", "MONTHLY" -> MONTHLY;
+            default -> DAILY;
+        };
     }
 }

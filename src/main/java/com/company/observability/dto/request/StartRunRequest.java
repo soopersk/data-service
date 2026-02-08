@@ -1,5 +1,7 @@
 package com.company.observability.dto.request;
 
+import com.company.observability.domain.enums.CalculatorFrequency;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -10,6 +12,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Map;
 
 /**
  * Request to start a calculator run with reporting_date
@@ -28,20 +31,26 @@ public class StartRunRequest {
     @NotBlank(message = "Calculator name is required")
     private String calculatorName;
 
-    @NotBlank(message = "Frequency is required (DAILY or MONTHLY)")
-    private String frequency;
+    @NotNull(message = "Frequency is required (DAILY or MONTHLY)")
+    private CalculatorFrequency frequency;
 
     @NotNull(message = "Reporting date is required")
+    @Schema(example = "2026-02-06")
     private LocalDate reportingDate;
 
     @NotNull(message = "Start time is required")
+    @Schema(example = "2026-02-06T23:22:32Z")
     private Instant startTime;
 
     @NotNull(message = "SLA time (CET) is required")
-    private LocalTime slaTimeCet;  // e.g., "06:15:00"
+    @Schema(type = "string", example = "06:15:00",
+            description = "Target completion time in CET (time-of-day). Used for DAILY runs only.")
+    private LocalTime slaTimeCet;
 
     // Optional fields
     private Long expectedDurationMs;
     private LocalTime estimatedStartTimeCet;
-    private String runParameters;
+
+    private Map<String, Object> runParameters;
+    private Map<String, Object> additionalAttributes;
 }

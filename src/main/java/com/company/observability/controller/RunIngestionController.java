@@ -4,21 +4,19 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.dto.request.CompleteRunRequest;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.dto.response.RunResponse;
-import com.company.observability.security.TenantContext;
 import com.company.observability.service.RunIngestionService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.security.Principal;
 
 /**
  * FIXED: Secure ingestion controller with tenant context from JWT
@@ -28,22 +26,20 @@ import java.net.URI;
 @Tag(name = "Run Ingestion", description = "APIs for Airflow to ingest calculator run data")
 @RequiredArgsConstructor
 @Slf4j
-@SecurityRequirement(name = "bearer-jwt")
 public class RunIngestionController {
 
     private final RunIngestionService ingestionService;
-    private final TenantContext tenantContext;
     private final MeterRegistry meterRegistry;
 
     @PostMapping("/start")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Start a calculator run", description = "Called by Airflow when calculator starts")
-    @PreAuthorize("hasRole('AIRFLOW')")
-    public ResponseEntity<RunResponse> startRun(@Valid @RequestBody StartRunRequest request) {
+    public ResponseEntity<RunResponse> startRun(
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @Valid @RequestBody StartRunRequest request,
+            Principal principal) {
 
-        // FIXED: Get tenant from JWT, not from header
-        String tenantId = tenantContext.getCurrentTenantId();
-        String userId = tenantContext.getCurrentUserId();
+        String userId = principal != null ? principal.getName() : "unknown";
 
         log.info("Start run request from user {} for calculator {} in tenant {}",
                 userId, request.getCalculatorId(), tenantId);
@@ -61,13 +57,13 @@ public class RunIngestionController {
 
     @PostMapping("/{runId}/complete")
     @Operation(summary = "Complete a calculator run", description = "Called by Airflow when calculator finishes")
-    @PreAuthorize("hasRole('AIRFLOW')")
     public ResponseEntity<RunResponse> completeRun(
             @PathVariable String runId,
-            @Valid @RequestBody CompleteRunRequest request) {
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @Valid @RequestBody CompleteRunRequest request,
+            Principal principal) {
 
-        String tenantId = tenantContext.getCurrentTenantId();
-        String userId = tenantContext.getCurrentUserId();
+        String userId = principal != null ? principal.getName() : "unknown";
 
         log.info("Complete run request from user {} for run {} in tenant {}",
                 userId, runId, tenantId);
@@ -86,7 +82,7 @@ public class RunIngestionController {
                 .runId(run.getRunId())
                 .calculatorId(run.getCalculatorId())
                 .calculatorName(run.getCalculatorName())
-                .status(run.getStatus())
+                .status(run.getStatus().name())
                 .startTime(run.getStartTime())
                 .endTime(run.getEndTime())
                 .durationMs(run.getDurationMs())
