@@ -92,7 +92,7 @@ public class CalculatorRunRepository {
         String sql = buildPartitionPrunedQuery(SELECT_STATUS_BASE, frequency);
 
         List<CalculatorRun> runs = jdbcTemplate.query(
-                sql, new StatusRunRowMapper(),
+                sql, new CalculatorRunRowMapper(false),
                 calculatorId, tenantId, frequency.name(), limit
         );
 
@@ -229,7 +229,7 @@ public class CalculatorRunRepository {
         params[calculatorIds.size() + 1] = frequency.name();
         params[calculatorIds.size() + 2] = limit;
 
-        List<CalculatorRun> allRuns = jdbcTemplate.query(sql, new StatusRunRowMapper(), params);
+        List<CalculatorRun> allRuns = jdbcTemplate.query(sql, new CalculatorRunRowMapper(false), params);
 
         // Group by calculator ID
         Map<String, List<CalculatorRun>> grouped = new HashMap<>();
@@ -292,7 +292,7 @@ public class CalculatorRunRepository {
             """;
 
         try {
-            List<CalculatorRun> results = jdbcTemplate.query(sql, new CalculatorRunRowMapper(),
+            List<CalculatorRun> results = jdbcTemplate.query(sql, new CalculatorRunRowMapper(true),
                     run.getRunId(),
                     run.getCalculatorId(),
                     run.getCalculatorName(),
@@ -346,7 +346,7 @@ public class CalculatorRunRepository {
     public Optional<CalculatorRun> findById(String runId, LocalDate reportingDate) {
         String sql = SELECT_BASE + " WHERE run_id = ? AND reporting_date = ?";
         List<CalculatorRun> results = jdbcTemplate.query(
-                sql, new CalculatorRunRowMapper(), runId, reportingDate);
+                sql, new CalculatorRunRowMapper(true), runId, reportingDate);
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
@@ -355,7 +355,7 @@ public class CalculatorRunRepository {
      */
     public Optional<CalculatorRun> findById(String runId) {
         String sql = SELECT_BASE + " WHERE run_id = ? ORDER BY reporting_date DESC LIMIT 1";
-        List<CalculatorRun> results = jdbcTemplate.query(sql, new CalculatorRunRowMapper(), runId);
+        List<CalculatorRun> results = jdbcTemplate.query(sql, new CalculatorRunRowMapper(true), runId);
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
@@ -450,11 +450,22 @@ public class CalculatorRunRepository {
     }
 
 
+    private static Instant getInstant(ResultSet rs, String columnName) throws SQLException {
+        Timestamp timestamp = rs.getTimestamp(columnName);
+        return timestamp != null ? timestamp.toInstant() : null;
+    }
+
     private class CalculatorRunRowMapper implements RowMapper<CalculatorRun> {
+        private final boolean includeJsonb;
+
+        CalculatorRunRowMapper(boolean includeJsonb) {
+            this.includeJsonb = includeJsonb;
+        }
+
         @Override
         public CalculatorRun mapRow(ResultSet rs, int rowNum) {
             try {
-                return CalculatorRun.builder()
+                var builder = CalculatorRun.builder()
                         .runId(rs.getString("run_id"))
                         .calculatorId(rs.getString("calculator_id"))
                         .calculatorName(rs.getString("calculator_name"))
@@ -473,52 +484,18 @@ public class CalculatorRunRepository {
                         .estimatedEndTime(getInstant(rs, "estimated_end_time"))
                         .slaBreached(rs.getBoolean("sla_breached"))
                         .slaBreachReason(rs.getString("sla_breach_reason"))
-                        .runParameters(jsonbConverter.fromJsonb(rs, "run_parameters"))
-                        .additionalAttributes(jsonbConverter.fromJsonb(rs, "additional_attributes"))
                         .createdAt(getInstant(rs, "created_at"))
-                        .updatedAt(getInstant(rs, "updated_at"))
-                        .build();
+                        .updatedAt(getInstant(rs, "updated_at"));
+
+                if (includeJsonb) {
+                    builder.runParameters(jsonbConverter.fromJsonb(rs, "run_parameters"))
+                           .additionalAttributes(jsonbConverter.fromJsonb(rs, "additional_attributes"));
+                }
+
+                return builder.build();
             } catch (SQLException e) {
                 throw new RuntimeException("Failed to map calculator run", e);
             }
-        }
-
-        private static Instant getInstant(ResultSet rs, String columnName) throws SQLException {
-            Timestamp timestamp = rs.getTimestamp(columnName);
-            return timestamp != null ? timestamp.toInstant() : null;
-        }
-    }
-
-    private static class StatusRunRowMapper implements RowMapper<CalculatorRun> {
-        @Override
-        public CalculatorRun mapRow(ResultSet rs, int rowNum) throws SQLException {
-            return CalculatorRun.builder()
-                    .runId(rs.getString("run_id"))
-                    .calculatorId(rs.getString("calculator_id"))
-                    .calculatorName(rs.getString("calculator_name"))
-                    .tenantId(rs.getString("tenant_id"))
-                    .frequency(CalculatorFrequency.from(rs.getString("frequency")))
-                    .reportingDate(rs.getObject("reporting_date", LocalDate.class))
-                    .startTime(getInstant(rs, "start_time"))
-                    .endTime(getInstant(rs, "end_time"))
-                    .durationMs(rs.getObject("duration_ms", Long.class))
-                    .startHourCet(rs.getBigDecimal("start_hour_cet"))
-                    .endHourCet(rs.getBigDecimal("end_hour_cet"))
-                    .status(RunStatus.fromString(rs.getString("status")))
-                    .slaTime(getInstant(rs, "sla_time"))
-                    .expectedDurationMs(rs.getObject("expected_duration_ms", Long.class))
-                    .estimatedStartTime(getInstant(rs, "estimated_start_time"))
-                    .estimatedEndTime(getInstant(rs, "estimated_end_time"))
-                    .slaBreached(rs.getBoolean("sla_breached"))
-                    .slaBreachReason(rs.getString("sla_breach_reason"))
-                    .createdAt(getInstant(rs, "created_at"))
-                    .updatedAt(getInstant(rs, "updated_at"))
-                    .build();
-        }
-
-        private static Instant getInstant(ResultSet rs, String columnName) throws SQLException {
-            Timestamp timestamp = rs.getTimestamp(columnName);
-            return timestamp != null ? timestamp.toInstant() : null;
         }
     }
 }

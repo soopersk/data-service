@@ -13,9 +13,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.*;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Repository
 @RequiredArgsConstructor
@@ -23,6 +21,21 @@ import java.util.Map;
 public class SlaBreachEventRepository {
 
     private final JdbcTemplate jdbcTemplate;
+
+    private static final String SELECT_COLUMNS = """
+            breach_id, run_id, calculator_id, calculator_name, tenant_id,
+            breach_type, expected_value, actual_value, severity,
+            alerted, alerted_at, alert_status, retry_count, last_error, created_at""";
+
+    private static final String SELECT_FROM = "SELECT " + SELECT_COLUMNS + "\nFROM sla_breach_events\n";
+
+    private static final String BASE_WHERE = """
+            WHERE calculator_id = ? AND tenant_id = ?
+            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'""";
+
+    private static final String ORDER_DESC = "\nORDER BY created_at DESC, breach_id DESC";
+
+    private static final SlaBreachEventRowMapper ROW_MAPPER = new SlaBreachEventRowMapper();
 
     /**
      * FIXED: Idempotent save - throws exception if duplicate
@@ -70,18 +83,13 @@ public class SlaBreachEventRepository {
      * Find unalerted breaches for batch processing
      */
     public List<SlaBreachEvent> findUnalertedBreaches(int limit) {
-        String sql = """
-            SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                   breach_type, expected_value, actual_value, severity,
-                   alerted, alerted_at, alert_status, retry_count, last_error, created_at
-            FROM sla_breach_events
+        String sql = SELECT_FROM + """
             WHERE alerted = false
             AND alert_status IN ('PENDING', 'FAILED')
             ORDER BY created_at ASC
-            LIMIT ?
-            """;
+            LIMIT ?""";
 
-        return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(), limit);
+        return jdbcTemplate.query(sql, ROW_MAPPER, limit);
     }
 
     /**
@@ -109,25 +117,6 @@ public class SlaBreachEventRepository {
     }
 
     /**
-     * Find breaches for a calculator within a time period
-     */
-    public List<SlaBreachEvent> findByCalculatorIdAndPeriod(
-            String calculatorId, String tenantId, int days) {
-        String sql = """
-            SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                   breach_type, expected_value, actual_value, severity,
-                   alerted, alerted_at, alert_status, retry_count, last_error, created_at
-            FROM sla_breach_events
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-            ORDER BY created_at DESC
-            """;
-
-        return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(),
-                calculatorId, tenantId, days);
-    }
-
-    /**
      * Aggregated breach counts by severity for analytics summary/trends.
      */
     public Map<String, Integer> countBySeverity(
@@ -135,10 +124,9 @@ public class SlaBreachEventRepository {
         String sql = """
             SELECT severity, COUNT(*) AS cnt
             FROM sla_breach_events
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-            GROUP BY severity
-            """;
+            """ + BASE_WHERE + """
+
+            GROUP BY severity""";
 
         Map<String, Integer> result = new HashMap<>();
         jdbcTemplate.query(sql, rs -> {
@@ -158,10 +146,9 @@ public class SlaBreachEventRepository {
         String sql = """
             SELECT COALESCE(breach_type, 'UNKNOWN') AS breach_type, COUNT(*) AS cnt
             FROM sla_breach_events
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-            GROUP BY COALESCE(breach_type, 'UNKNOWN')
-            """;
+            """ + BASE_WHERE + """
+
+            GROUP BY COALESCE(breach_type, 'UNKNOWN')""";
 
         Map<String, Integer> result = new HashMap<>();
         jdbcTemplate.query(sql, rs -> {
@@ -190,10 +177,9 @@ public class SlaBreachEventRepository {
                        END
                    ) AS worst_rank
             FROM sla_breach_events
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-            GROUP BY (created_at AT TIME ZONE 'CET')::DATE
-            """;
+            """ + BASE_WHERE + """
+
+            GROUP BY (created_at AT TIME ZONE 'CET')::DATE""";
 
         Map<LocalDate, String> result = new HashMap<>();
         jdbcTemplate.query(sql, rs -> {
@@ -205,40 +191,28 @@ public class SlaBreachEventRepository {
     }
 
     /**
-     * Find breaches with pagination and optional severity filter
+     * Find breaches with offset pagination and optional severity filter.
      */
     public List<SlaBreachEvent> findByCalculatorIdPaginated(
             String calculatorId, String tenantId, int days,
             String severity, int offset, int limit) {
 
-        if (severity != null && !severity.isBlank()) {
-            String sql = """
-                SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                       breach_type, expected_value, actual_value, severity,
-                       alerted, alerted_at, alert_status, retry_count, last_error, created_at
-                FROM sla_breach_events
-                WHERE calculator_id = ? AND tenant_id = ?
-                AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-                AND severity = ?
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-                """;
-            return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(),
-                    calculatorId, tenantId, days, severity, limit, offset);
+        boolean hasSeverity = severity != null && !severity.isBlank();
+
+        StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
+        List<Object> params = new ArrayList<>(List.of(calculatorId, tenantId, days));
+
+        if (hasSeverity) {
+            sql.append("\nAND severity = ?");
+            params.add(severity);
         }
 
-        String sql = """
-            SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                   breach_type, expected_value, actual_value, severity,
-                   alerted, alerted_at, alert_status, retry_count, last_error, created_at
-            FROM sla_breach_events
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-            """;
-        return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(),
-                calculatorId, tenantId, days, limit, offset);
+        sql.append("\nORDER BY created_at DESC");
+        sql.append("\nLIMIT ? OFFSET ?");
+        params.add(limit);
+        params.add(offset);
+
+        return jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
     }
 
     /**
@@ -251,95 +225,45 @@ public class SlaBreachEventRepository {
         boolean hasCursor = cursorCreatedAt != null && cursorBreachId != null;
         boolean hasSeverity = severity != null && !severity.isBlank();
 
-        if (hasSeverity && hasCursor) {
-            String sql = """
-                SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                       breach_type, expected_value, actual_value, severity,
-                       alerted, alerted_at, alert_status, retry_count, last_error, created_at
-                FROM sla_breach_events
-                WHERE calculator_id = ? AND tenant_id = ?
-                AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-                AND severity = ?
-                AND (created_at, breach_id) < (?, ?)
-                ORDER BY created_at DESC, breach_id DESC
-                LIMIT ?
-                """;
-            return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(),
-                    calculatorId, tenantId, days, severity,
-                    Timestamp.from(cursorCreatedAt), cursorBreachId, limit);
-        }
+        StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
+        List<Object> params = new ArrayList<>(List.of(calculatorId, tenantId, days));
 
         if (hasSeverity) {
-            String sql = """
-                SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                       breach_type, expected_value, actual_value, severity,
-                       alerted, alerted_at, alert_status, retry_count, last_error, created_at
-                FROM sla_breach_events
-                WHERE calculator_id = ? AND tenant_id = ?
-                AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-                AND severity = ?
-                ORDER BY created_at DESC, breach_id DESC
-                LIMIT ?
-                """;
-            return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(),
-                    calculatorId, tenantId, days, severity, limit);
+            sql.append("\nAND severity = ?");
+            params.add(severity);
         }
 
         if (hasCursor) {
-            String sql = """
-                SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                       breach_type, expected_value, actual_value, severity,
-                       alerted, alerted_at, alert_status, retry_count, last_error, created_at
-                FROM sla_breach_events
-                WHERE calculator_id = ? AND tenant_id = ?
-                AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-                AND (created_at, breach_id) < (?, ?)
-                ORDER BY created_at DESC, breach_id DESC
-                LIMIT ?
-                """;
-            return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(),
-                    calculatorId, tenantId, days, Timestamp.from(cursorCreatedAt), cursorBreachId, limit);
+            sql.append("\nAND (created_at, breach_id) < (?, ?)");
+            params.add(Timestamp.from(cursorCreatedAt));
+            params.add(cursorBreachId);
         }
 
-        String sql = """
-            SELECT breach_id, run_id, calculator_id, calculator_name, tenant_id,
-                   breach_type, expected_value, actual_value, severity,
-                   alerted, alerted_at, alert_status, retry_count, last_error, created_at
-            FROM sla_breach_events
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-            ORDER BY created_at DESC, breach_id DESC
-            LIMIT ?
-            """;
-        return jdbcTemplate.query(sql, new SlaBreachEventRowMapper(),
-                calculatorId, tenantId, days, limit);
+        sql.append(ORDER_DESC);
+        sql.append("\nLIMIT ?");
+        params.add(limit);
+
+        return jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
     }
 
     /**
-     * Count breaches with optional severity filter
+     * Count breaches with optional severity filter.
      */
     public long countByCalculatorIdAndPeriod(
             String calculatorId, String tenantId, int days, String severity) {
 
-        if (severity != null && !severity.isBlank()) {
-            String sql = """
-                SELECT COUNT(*) FROM sla_breach_events
-                WHERE calculator_id = ? AND tenant_id = ?
-                AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-                AND severity = ?
-                """;
-            Long count = jdbcTemplate.queryForObject(sql, Long.class,
-                    calculatorId, tenantId, days, severity);
-            return count != null ? count : 0;
+        boolean hasSeverity = severity != null && !severity.isBlank();
+
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM sla_breach_events\n")
+                .append(BASE_WHERE);
+        List<Object> params = new ArrayList<>(List.of(calculatorId, tenantId, days));
+
+        if (hasSeverity) {
+            sql.append("\nAND severity = ?");
+            params.add(severity);
         }
 
-        String sql = """
-            SELECT COUNT(*) FROM sla_breach_events
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
-            """;
-        Long count = jdbcTemplate.queryForObject(sql, Long.class,
-                calculatorId, tenantId, days);
+        Long count = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
         return count != null ? count : 0;
     }
 

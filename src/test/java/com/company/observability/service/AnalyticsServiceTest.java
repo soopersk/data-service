@@ -25,7 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -121,8 +120,6 @@ class AnalyticsServiceTest {
 
         assertEquals(2, response.getTotalBreaches());
         assertEquals(1, response.getRedDays());
-        verify(slaBreachEventRepository, never())
-                .findByCalculatorIdAndPeriod("calc-1", "tenant-1", 30);
     }
 
     @Test
@@ -153,8 +150,6 @@ class AnalyticsServiceTest {
 
         assertEquals(1, response.getTrends().size());
         assertEquals("AMBER", response.getTrends().get(0).getSlaStatus());
-        verify(slaBreachEventRepository, never())
-                .findByCalculatorIdAndPeriod("calc-1", "tenant-1", 7);
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

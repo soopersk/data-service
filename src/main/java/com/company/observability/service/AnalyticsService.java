@@ -282,7 +282,7 @@ public class AnalyticsService {
                 .calculatorName(breach.getCalculatorName())
                 .breachType(breach.getBreachType())
                 .severity(breach.getSeverity())
-                .slaStatus(mapSeverityToSlaStatus(breach.getSeverity()))
+                .slaStatus(mapSeverityToTrafficLight(breach.getSeverity()))
                 .expectedValue(breach.getExpectedValue())
                 .actualValue(breach.getActualValue())
                 .createdAt(breach.getCreatedAt())
@@ -447,10 +447,7 @@ public class AnalyticsService {
         if (worstSeverity == null || agg.getSlaBreaches() == 0) {
             return "GREEN";
         }
-        if ("HIGH".equals(worstSeverity) || "CRITICAL".equals(worstSeverity)) {
-            return "RED";
-        }
-        return "AMBER";
+        return mapSeverityToTrafficLight(worstSeverity);
     }
 
     private SlaCoreData getSlaCoreData(String calculatorId, String tenantId, int days) {
@@ -486,7 +483,7 @@ public class AnalyticsService {
         return coreData;
     }
 
-    private String mapSeverityToSlaStatus(String severity) {
+    private String mapSeverityToTrafficLight(String severity) {
         if (severity == null) return "AMBER";
         return switch (severity) {
             case "HIGH", "CRITICAL" -> "RED";
