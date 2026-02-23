@@ -1,11 +1,13 @@
 package com.company.observability.service;
 
-import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.*;
+import com.company.observability.exception.DomainAccessDeniedException;
+import com.company.observability.exception.DomainNotFoundException;
+import com.company.observability.exception.DomainValidationException;
 import com.company.observability.event.*;
 import com.company.observability.repository.*;
 import com.company.observability.util.*;
@@ -31,7 +33,6 @@ public class RunIngestionService {
     private final SlaEvaluationService slaEvaluationService;
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
-    private final RedisCalculatorCache redisCache;
     private final SlaMonitoringCache slaMonitoringCache;
 
     @Value("${observability.sla.live-tracking.enabled:true}")
@@ -118,7 +119,7 @@ public class RunIngestionService {
             slaMonitoringCache.registerForSlaMonitoring(run);
         }
 
-        if (breachedAtStart && liveTrackingEnabled) {
+        if (breachedAtStart) {
             SlaEvaluationResult result = new SlaEvaluationResult(
                     true,
                     breachReasonAtStart,
@@ -130,7 +131,6 @@ public class RunIngestionService {
         eventPublisher.publishEvent(new RunStartedEvent(run));
 
         meterRegistry.counter("calculator.runs.started",
-                "calculator", run.getCalculatorId(),
                 "frequency", run.getFrequency().name()
         ).increment();
 
@@ -146,13 +146,13 @@ public class RunIngestionService {
         Optional<CalculatorRun> runOpt = findRecentRun(runId);
 
         if (runOpt.isEmpty()) {
-            throw new RuntimeException("Run not found: " + runId);
+            throw new DomainNotFoundException("Run not found: " + runId);
         }
 
         CalculatorRun run = runOpt.get();
 
         if (!run.getTenantId().equals(tenantId)) {
-            throw new RuntimeException("Access denied to run " + runId + " for tenant " + tenantId);
+            throw new DomainAccessDeniedException("Access denied to run " + runId + " for tenant " + tenantId);
         }
 
         if (run.getStatus() != RunStatus.RUNNING) {
@@ -161,16 +161,29 @@ public class RunIngestionService {
             return run;
         }
 
+        if (request.getEndTime().isBefore(run.getStartTime())) {
+            throw new DomainValidationException("End time cannot be before start time");
+        }
+
+        boolean alreadyBreached = Boolean.TRUE.equals(run.getSlaBreached());
+        String previousBreachReason = run.getSlaBreachReason();
+
         long durationMs = Duration.between(run.getStartTime(), request.getEndTime()).toMillis();
 
         run.setEndTime(request.getEndTime());
         run.setDurationMs(durationMs);
         run.setEndHourCet(TimeUtils.calculateCetHour(request.getEndTime()));
-        run.setStatus(RunStatus.fromString(request.getStatus() != null ? request.getStatus() : "SUCCESS"));
+        try {
+            run.setStatus(RunStatus.fromCompletionStatus(request.getStatus()));
+        } catch (IllegalArgumentException e) {
+            throw new DomainValidationException(e.getMessage(), e);
+        }
 
         SlaEvaluationResult slaResult = slaEvaluationService.evaluateSla(run);
-        run.setSlaBreached(slaResult.isBreached());
-        run.setSlaBreachReason(slaResult.getReason());
+        run.setSlaBreached(alreadyBreached || slaResult.isBreached());
+        run.setSlaBreachReason(
+                slaResult.getReason() != null ? slaResult.getReason() : previousBreachReason
+        );
 
         run = runRepository.upsert(run);
 
@@ -180,13 +193,13 @@ public class RunIngestionService {
         updateDailyAggregate(run);
 
         meterRegistry.counter("calculator.runs.completed",
-                "calculator", run.getCalculatorId(),
                 "frequency", run.getFrequency().name(),
                 "status", run.getStatus().name(),
                 "sla_breached", String.valueOf(run.getSlaBreached())
         ).increment();
 
-        if (slaResult.isBreached()) {
+        boolean newlyBreached = !alreadyBreached && slaResult.isBreached();
+        if (newlyBreached) {
             eventPublisher.publishEvent(new SlaBreachedEvent(run, slaResult));
         } else {
             eventPublisher.publishEvent(new RunCompletedEvent(run));

@@ -16,10 +16,13 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * LIVE SLA BREACH DETECTION (every 15 seconds)
@@ -40,9 +43,19 @@ public class LiveSlaBreachDetectionJob {
     private final CalculatorRunRepository runRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
+    private final AtomicInteger approachingRunsGauge = new AtomicInteger(0);
+    private final AtomicInteger lastBreachesGauge = new AtomicInteger(0);
+    private final AtomicLong activeRunsGauge = new AtomicLong(0L);
 
     @Value("${observability.sla.live-detection.interval-ms:15000}")
     private long detectionIntervalMs;
+
+    @PostConstruct
+    void registerGauges() {
+        meterRegistry.gauge("sla.approaching.count", approachingRunsGauge);
+        meterRegistry.gauge("sla.breach.live_detection.last_breaches", lastBreachesGauge);
+        meterRegistry.gauge("sla.monitoring.active_runs", activeRunsGauge);
+    }
 
     /**
      * Check for SLA breaches every 15 seconds (near real-time)
@@ -133,7 +146,6 @@ public class LiveSlaBreachDetectionJob {
                         log.warn("LIVE BREACH: Run {} marked as breached ({})", runId, breachReason);
 
                         meterRegistry.counter("sla.breaches.live_detected",
-                                "calculator", run.getCalculatorId(),
                                 "severity", severity
                         ).increment();
                     }
@@ -179,8 +191,8 @@ public class LiveSlaBreachDetectionJob {
                             calculateMinutesUntilSla(runInfo));
                 }
 
-                meterRegistry.gauge("sla.approaching.count", approachingRuns.size());
             }
+            approachingRunsGauge.set(approachingRuns.size());
 
         } catch (Exception e) {
             log.error("Failed to detect approaching SLA runs", e);
@@ -214,12 +226,10 @@ public class LiveSlaBreachDetectionJob {
         meterRegistry.counter("sla.breach.live_detection.runs").increment();
         meterRegistry.timer("sla.breach.live_detection.duration").record(executionTime);
 
-        if (breachedCount > 0) {
-            meterRegistry.gauge("sla.breach.live_detection.last_breaches", breachedCount);
-        }
+        lastBreachesGauge.set(breachedCount);
 
         // Record monitored run count
         long monitoredCount = slaMonitoringCache.getMonitoredRunCount();
-        meterRegistry.gauge("sla.monitoring.active_runs", monitoredCount);
+        activeRunsGauge.set(monitoredCount);
     }
 }

@@ -44,9 +44,7 @@ public class RunIngestionController {
         log.info("Start run request from user {} for calculator {} in tenant {}",
                 userId, request.getCalculatorId(), tenantId);
 
-        meterRegistry.counter("api.runs.start.requests",
-                "calculator", request.getCalculatorId()
-        ).increment();
+        meterRegistry.counter("api.runs.start.requests").increment();
 
         CalculatorRun run = ingestionService.startRun(request, tenantId);
 
@@ -68,9 +66,7 @@ public class RunIngestionController {
         log.info("Complete run request from user {} for run {} in tenant {}",
                 userId, runId, tenantId);
 
-        meterRegistry.counter("api.runs.complete.requests",
-                "status", request.getStatus()
-        ).increment();
+        meterRegistry.counter("api.runs.complete.requests").increment();
 
         CalculatorRun run = ingestionService.completeRun(runId, request, tenantId);
 

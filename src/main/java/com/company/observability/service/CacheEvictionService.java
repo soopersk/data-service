@@ -8,6 +8,7 @@ import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
@@ -20,6 +21,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @Service
 @Slf4j
 @RequiredArgsConstructor
+@ConditionalOnProperty(
+        value = "observability.cache.legacy-eviction-listener.enabled",
+        havingValue = "true",
+        matchIfMissing = false
+)
 public class CacheEvictionService {
 
     private final RedisCalculatorCache redisCache;

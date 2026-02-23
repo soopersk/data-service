@@ -7,9 +7,10 @@ import com.company.observability.repository.CalculatorRunRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
  * GT Enhancement: Automatically warm Redis cache when calculator runs complete
@@ -31,7 +32,7 @@ public class CacheWarmingService {
     /**
      * When run starts, invalidate cache so status shows RUNNING immediately
      */
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
     public void onRunStarted(RunStartedEvent event) {
         evictCacheForRun(event.getRun());
@@ -41,19 +42,23 @@ public class CacheWarmingService {
      * When run completes, immediately warm the cache with fresh data
      * This prevents the next UI query from hitting the database
      */
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
     public void onRunCompleted(RunCompletedEvent event) {
-        warmCacheForRun(event.getRun());
+        CalculatorRun run = event.getRun();
+        evictCacheForRun(run);
+        warmCacheForRun(run);
     }
 
     /**
      * When SLA breaches, update cache with breach information
      */
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
     public void onSlaBreached(SlaBreachedEvent event) {
-        warmCacheForRun(event.getRun());
+        CalculatorRun run = event.getRun();
+        redisCache.updateRunInCache(run);
+        redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
     }
 
     /**

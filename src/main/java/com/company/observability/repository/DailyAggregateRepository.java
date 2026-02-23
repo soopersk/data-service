@@ -79,7 +79,7 @@ public class DailyAggregateRepository {
                    sla_breaches, avg_duration_ms, avg_start_min_cet, avg_end_min_cet, computed_at
             FROM calculator_sli_daily
             WHERE calculator_id = ? AND tenant_id = ?
-            AND day_cet >= CURRENT_DATE - INTERVAL '? days'
+            AND day_cet >= CURRENT_DATE - CAST(? AS INTEGER) * INTERVAL '1 day'
             ORDER BY day_cet DESC
             """;
 

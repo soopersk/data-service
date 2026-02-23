@@ -4,6 +4,7 @@ import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.*;
+import com.company.observability.exception.DomainNotFoundException;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.util.TimeUtils;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -54,7 +55,7 @@ public class RunQueryService {
                 calculatorId, tenantId, frequency, historyLimit + 1);
 
         if (runs.isEmpty()) {
-            throw new RuntimeException("Calculator not found: " + calculatorId);
+            throw new DomainNotFoundException("Calculator not found: " + calculatorId);
         }
 
         // Build response
@@ -112,7 +113,7 @@ public class RunQueryService {
 
         if (!cacheMisses.isEmpty()) {
             Map<String, List<CalculatorRun>> runsByCalculator =
-                    runRepository.findBatchRecentRuns(cacheMisses, tenantId, frequency, historyLimit + 1);
+                    runRepository.findBatchRecentRunsDbOnly(cacheMisses, tenantId, frequency, historyLimit + 1);
 
             for (String calcId : cacheMisses) {
                 List<CalculatorRun> runs = runsByCalculator.get(calcId);

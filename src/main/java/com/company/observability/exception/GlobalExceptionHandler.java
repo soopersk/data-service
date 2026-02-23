@@ -1,6 +1,7 @@
 package com.company.observability.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -20,10 +21,25 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
         return buildErrorResponse(HttpStatus.NOT_FOUND, ex.getMessage());
     }
+
+    @ExceptionHandler(DomainNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleDomainNotFound(DomainNotFoundException ex) {
+        return buildErrorResponse(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
     
     @ExceptionHandler(SecurityException.class)
     public ResponseEntity<Map<String, Object>> handleAccessDenied(SecurityException ex) {
         return buildErrorResponse(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(DomainAccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleDomainAccessDenied(DomainAccessDeniedException ex) {
+        return buildErrorResponse(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler({DomainValidationException.class, IllegalArgumentException.class})
+    public ResponseEntity<Map<String, Object>> handleDomainValidation(RuntimeException ex) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
     
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -40,6 +56,11 @@ public class GlobalExceptionHandler {
         response.put("errors", errors);
         
         return ResponseEntity.badRequest().body(response);
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleConstraintViolation(ConstraintViolationException ex) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
     
     @ExceptionHandler(Exception.class)
