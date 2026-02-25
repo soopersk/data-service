@@ -195,29 +195,38 @@ Read path:
 
 ### Runtime Interaction Diagram
 
-```
-Airflow          Controller       Service          Repository       Redis         PostgreSQL
-   │                 │               │                 │              │               │
-   │──POST start────►│               │                 │              │               │
-   │                 │──startRun()──►│                 │              │               │
-   │                 │               │──upsert()──────►│              │               │
-   │                 │               │                 │──INSERT OR──►│               │
-   │                 │               │                 │  CONFLICT   ─┼──────────────►│
-   │                 │               │                 │◄─────────────┼───────────────│
-   │                 │               │──register SLA──►│──ZADD───────►│               │
-   │                 │               │──publish event─►│(async)       │               │
-   │                 │               │                 │──evict/warm─►│               │
-   │◄────201 Created─│               │                 │              │               │
-   │                 │               │                 │              │               │
-   │──POST complete──►│              │                 │              │               │
-   │                 │──completeRun()►│                │              │               │
-   │                 │               │──evaluateSla()  │              │               │
-   │                 │               │──upsert()──────►│              │               │
-   │                 │               │──deregister────►│──ZREM───────►│               │
-   │                 │               │──updateAggregate►│             │               │
-   │                 │               │──publish event─►│(async)       │               │
-   │                 │               │                 │──AlertHandler save breach     │
-   │◄────200 OK──────│               │                 │              │               │
+
+``` mermaid
+sequenceDiagram
+    participant Airflow/ExternalSystem
+    participant API/Controller
+    participant Service
+    participant Repository
+    participant Redis
+    participant PostgreSQL
+    participant AlertHandler
+
+    Airflow/ExternalSystem->>API/Controller: POST /start
+    API/Controller->>Service: startRun()
+    Service->>Repository: upsert()
+    Repository->>PostgreSQL: INSERT OR CONFLICT
+    PostgreSQL-->>Repository: result
+    Service->>Repository: register SLA
+    Repository->>Redis: ZADD
+    Service->>Repository: publish event (async)
+    Repository->>Redis: evict/warm
+    API/Controller-->>Airflow/ExternalSystem: 201 Created
+
+    Airflow/ExternalSystem->>API/Controller: POST /complete
+    API/Controller->>Service: completeRun()
+    Service->>Service: evaluateSla()
+    Service->>Repository: upsert()
+    Service->>Repository: deregister SLA
+    Repository->>Redis: ZREM
+    Service->>Repository: updateAggregate
+    Service->>Repository: publish event (async)
+    Repository-->>AlertHandler: save breach
+    API/Controller-->>Airflow/ExternalSystem: 200 OK
 ```
 
 ---
@@ -976,26 +985,43 @@ All endpoints annotated with `@Tag` groupings:
 
 ### Sequence Diagram (Simplified)
 
-```
-Airflow           RunIngestion    SlaEvaluation   Repositories    Redis        AlertHandler
-   │              Service         Service                                       (async)
-   │─POST start──►│               │               │               │            │
-   │              │───upsert()───────────────────►│               │            │
-   │              │──register SLA──────────────────────────────►│             │
-   │              │──publish SlaBreachedEvent (if breached at start)──────────►│
-   │              │──publish RunStartedEvent                                   │
-   │              │                               │               │            │
-   │◄─201─────────│                               │               │            │
-   │              │                               │               │            │
-   │─POST complete►│                              │               │            │
-   │              │──evaluateSla()──────────────►│               │            │
-   │              │◄─SlaEvaluationResult──────────│               │            │
-   │              │───upsert()───────────────────►│               │            │
-   │              │──deregister SLA────────────────────────────►│             │
-   │              │──updateDailyAggregate─────────►│              │            │
-   │              │──publish SlaBreachedEvent (if breached)──────────────────►│
-   │              │──publish RunCompletedEvent (if not breached)──────────────►│
-   │◄─200─────────│                               │               │            │
+```mermaid
+  sequenceDiagram
+      participant Airflow
+      participant RunIngestion-Service
+      participant SlaEvaluation-Service
+      participant Repositories
+      participant Redis
+      participant AlertHandler
+
+      %% --- START FLOW ---
+      Airflow->>RunIngestion-Service: POST /start
+      RunIngestion-Service->>Repositories: upsert()
+      RunIngestion-Service->>Redis: register SLA
+
+      alt Breached at start
+          RunIngestion-Service-->>AlertHandler: publish SlaBreachedEvent
+      end
+
+      RunIngestion-Service-->>AlertHandler: publish RunStartedEvent
+      RunIngestion-Service-->>Airflow: 201 Created
+
+      %% --- COMPLETE FLOW ---
+      Airflow->>RunIngestion-Service: POST /complete
+      RunIngestion-Service->>SlaEvaluation-Service: evaluateSla()
+      SlaEvaluation-Service-->>RunIngestion-Service: SlaEvaluationResult
+      RunIngestion-Service->>Repositories: upsert()
+      RunIngestion-Service->>Redis: deregister SLA
+      RunIngestion-Service->>Repositories: updateDailyAggregate()
+
+      alt SLA Breached
+          RunIngestion-Service-->>AlertHandler: publish SlaBreachedEvent
+      else Not Breached
+          RunIngestion-Service-->>AlertHandler: publish RunCompletedEvent
+      end
+
+      RunIngestion-Service-->>Airflow: 200 OK
+
 ```
 
 ---
