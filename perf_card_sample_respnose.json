@@ -1,0 +1,86 @@
+{
+  "calculatorId": "calc-pricing-engine-001",
+  "calculatorName": "Pricing Engine",
+  "schedule": {
+    "estimatedStartTimeCet": "10:00",
+    "frequency": "DAILY"
+  },
+  "periodDays": 30,
+  "meanDurationMs": 5940000,
+  "meanDurationFormatted": "1hr 39mins",
+  "slaSummary": {
+    "totalRuns": 30,
+    "slaMetCount": 21,
+    "slaMetPct": 70,
+    "lateCount": 5,
+    "latePct": 16,
+    "veryLateCount": 4,
+    "veryLatePct": 14
+  },
+  "runs": [
+    {
+      "runId": "run-20260127-001",
+      "reportingDate": "2026-01-27",
+      "dateFormatted": "Tue 27 Jan 2026",
+      "startHourCet": 11.07,
+      "endHourCet": 13.14,
+      "startTimeCet": "11:07 CET",
+      "endTimeCet": "13:14 CET",
+      "durationMs": 7620000,
+      "durationFormatted": "2hrs 7mins",
+      "slaStatus": "VERY_LATE"
+    },
+    {
+      "runId": "run-20260128-001",
+      "reportingDate": "2026-01-28",
+      "dateFormatted": "Wed 28 Jan 2026",
+      "startHourCet": 10.03,
+      "endHourCet": 11.41,
+      "startTimeCet": "10:03 CET",
+      "endTimeCet": "11:41 CET",
+      "durationMs": 5880000,
+      "durationFormatted": "1hr 38mins",
+      "slaStatus": "SLA_MET"
+    },
+    {
+      "runId": "run-20260129-001",
+      "reportingDate": "2026-01-29",
+      "dateFormatted": "Thu 29 Jan 2026",
+      "startHourCet": 10.01,
+      "endHourCet": 12.27,
+      "startTimeCet": "10:01 CET",
+      "endTimeCet": "12:27 CET",
+      "durationMs": 8760000,
+      "durationFormatted": "2hrs 26mins",
+      "slaStatus": "LATE"
+    },
+    {
+      "runId": "run-20260130-001",
+      "reportingDate": "2026-01-30",
+      "dateFormatted": "Fri 30 Jan 2026",
+      "startHourCet": 10.00,
+      "endHourCet": 11.38,
+      "startTimeCet": "10:00 CET",
+      "endTimeCet": "11:38 CET",
+      "durationMs": 5880000,
+      "durationFormatted": "1hr 38mins",
+      "slaStatus": "SLA_MET"
+    },
+    {
+      "runId": "run-20260224-001",
+      "reportingDate": "2026-02-24",
+      "dateFormatted": "Tue 24 Feb 2026",
+      "startHourCet": 10.02,
+      "endHourCet": 11.44,
+      "startTimeCet": "10:02 CET",
+      "endTimeCet": "11:44 CET",
+      "durationMs": 6120000,
+      "durationFormatted": "1hr 42mins",
+      "slaStatus": "SLA_MET"
+    }
+  ],
+  "referenceLines": {
+    "slaStartHourCet": 10.00,
+    "slaEndHourCet": 12.00
+  }
+}
