@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+
+<suppressions>
+    <!-- Generated code -->
+    <suppress files=".*[\\/]generated[\\/].*" checks=".*"/>
+    <suppress files=".*[\\/]target[\\/].*" checks=".*"/>
+
+    <!-- Test classes: relax Javadoc & method length -->
+    <suppress files=".*Test\.java$" checks="MissingJavadocType"/>
+    <suppress files=".*Test\.java$" checks="MissingJavadocMethod"/>
+    <suppress files=".*Test\.java$" checks="MethodLength"/>
+    <suppress files=".*IT\.java$" checks="MissingJavadocType"/>
+    <suppress files=".*IT\.java$" checks="MissingJavadocMethod"/>
+    <suppress files=".*IT\.java$" checks="MethodLength"/>
+
+    <!-- DTOs / Entities: Lombok generates methods, no Javadoc needed -->
+    <suppress files=".*[\\/]model[\\/]dto[\\/].*" checks="MissingJavadocType"/>
+    <suppress files=".*[\\/]model[\\/]entity[\\/].*" checks="MissingJavadocType"/>
+
+    <!-- Configuration classes: simpler rules -->
+    <suppress files=".*Config\.java$" checks="MissingJavadocMethod"/>
+</suppressions>

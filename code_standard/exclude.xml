@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Exclude DTOs and Entities (Lombok-generated code) -->
+    <Match>
+        <Or>
+            <Package name="~.*\.model\.dto.*"/>
+            <Package name="~.*\.model\.entity.*"/>
+        </Or>
+    </Match>
+
+    <!-- Exclude configuration classes -->
+    <Match>
+        <Class name="~.*Config$"/>
+    </Match>
+
+    <!-- Exclude Spring Boot Application class -->
+    <Match>
+        <Class name="~.*Application$"/>
+        <Bug pattern="NM_CLASS_NOT_EXCEPTION"/>
+    </Match>
+
+    <!-- Exclude test classes -->
+    <Match>
+        <Source name="~.*Test\.java"/>
+    </Match>
+    <Match>
+        <Source name="~.*IT\.java"/>
+    </Match>
+
+    <!-- Exclude known false positives with Spring -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Or>
+            <Annotation name="org.springframework.stereotype.Controller"/>
+            <Annotation name="org.springframework.web.bind.annotation.RestController"/>
+        </Or>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Or>
+            <Annotation name="org.springframework.stereotype.Controller"/>
+            <Annotation name="org.springframework.web.bind.annotation.RestController"/>
+        </Or>
+    </Match>
+</FindBugsFilter>

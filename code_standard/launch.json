@@ -1,0 +1,33 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot — Run",
+            "request": "launch",
+            "mainClass": "com.example.myservice.MyServiceApplication",
+            "projectName": "my-microservice",
+            "args": "",
+            "vmArgs": "-Dspring.profiles.active=local",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "type": "java",
+            "name": "Spring Boot — Debug",
+            "request": "launch",
+            "mainClass": "com.example.myservice.MyServiceApplication",
+            "projectName": "my-microservice",
+            "args": "",
+            "vmArgs": "-Dspring.profiles.active=local -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "type": "java",
+            "name": "Current Test File",
+            "request": "launch",
+            "mainClass": "",
+            "projectName": "my-microservice",
+            "vmArgs": ""
+        }
+    ]
+}

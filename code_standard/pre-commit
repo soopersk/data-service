@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Git Pre-Commit Hook
+# ============================================================================
+# Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Or use:  git config core.hooksPath hooks
+# ============================================================================
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${YELLOW}━━━ Running pre-commit checks ━━━${NC}"
+
+# Check for secrets / credentials
+echo -e "  Checking for secrets..."
+if git diff --cached --name-only | xargs grep -lE '(password|secret|api[_-]?key|token)\s*[:=]\s*["\x27][^\s]+' 2>/dev/null; then
+    echo -e "${RED}  ✗ Possible secrets detected! Review staged files.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}  ✓ No secrets found${NC}"
+
+# Format check (fast — only staged Java files)
+STAGED_JAVA=$(git diff --cached --name-only --diff-filter=ACM | grep '\.java$' || true)
+if [ -n "$STAGED_JAVA" ]; then
+    echo -e "  Checking format..."
+    if ! ./mvnw -q fmt:check 2>/dev/null; then
+        echo -e "${RED}  ✗ Format violations found. Run: ./mvnw fmt:format${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}  ✓ Format OK${NC}"
+fi
+
+# Checkstyle (only if Java files changed)
+if [ -n "$STAGED_JAVA" ]; then
+    echo -e "  Running Checkstyle..."
+    if ! ./mvnw -q checkstyle:check 2>/dev/null; then
+        echo -e "${RED}  ✗ Checkstyle violations found${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}  ✓ Checkstyle OK${NC}"
+fi
+
+echo -e "${GREEN}━━━ All pre-commit checks passed ━━━${NC}"

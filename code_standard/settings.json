@@ -1,0 +1,101 @@
+{
+    // ━━━ Java Runtime ━━━
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-17",
+            "path": "",
+            "default": true
+        }
+    ],
+    "java.compile.nullAnalysis.mode": "automatic",
+
+    // ━━━ Formatting: Google Java Format ━━━
+    // Requires extension: "google-java-format-for-vs-code" (id: sherryuml.google-java-format-for-vs-code)
+    // OR configure via the standard Java formatter setting below
+    "java.format.settings.url": "https://raw.githubusercontent.com/google/styleguide/gh-pages/eclipse-java-google-style.xml",
+    "java.format.settings.profile": "GoogleStyle",
+
+    // ━━━ Editor Defaults ━━━
+    "editor.formatOnSave": true,
+    "editor.formatOnPaste": false,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.rulers": [100],
+    "editor.trimAutoWhitespace": true,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+    "files.encoding": "utf8",
+    "files.eol": "\n",
+
+    // ━━━ Java-Specific Editor Settings ━━━
+    "[java]": {
+        "editor.tabSize": 2,
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "redhat.java",
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+
+    // ━━━ XML / POM Formatting ━━━
+    "[xml]": {
+        "editor.tabSize": 4,
+        "editor.defaultFormatter": "redhat.vscode-xml"
+    },
+
+    // ━━━ YAML Formatting ━━━
+    "[yaml]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+    },
+
+    // ━━━ Maven ━━━
+    "maven.executable.path": "./mvnw",
+    "maven.terminal.useJavaHome": true,
+
+    // ━━━ Test Runner ━━━
+    "java.test.defaultConfig": {
+        "vmArgs": [
+            "-XX:+ShowCodeDetailsInExceptionMessages"
+        ]
+    },
+
+    // ━━━ Checkstyle (requires extension: shengchen.vscode-checkstyle) ━━━
+    "java.checkstyle.configuration": "${workspaceFolder}/config/checkstyle/checkstyle.xml",
+    "java.checkstyle.properties": {
+        "config_loc": "${workspaceFolder}/config/checkstyle"
+    },
+    "java.checkstyle.version": "10.21.1",
+
+    // ━━━ SonarLint (requires extension: sonarsource.sonarlint-vscode) ━━━
+    // Uncomment and set your SonarQube server details:
+    // "sonarlint.connectedMode.connections.sonarqube": [
+    //     {
+    //         "serverUrl": "https://sonarqube.yourcompany.com",
+    //         "token": "<your-token>"
+    //     }
+    // ],
+    // "sonarlint.connectedMode.project": {
+    //     "connectionId": "<connection-id>",
+    //     "projectKey": "my-microservice"
+    // },
+
+    // ━━━ File Associations ━━━
+    "files.associations": {
+        "*.yml": "yaml",
+        "*.yaml": "yaml",
+        "Dockerfile*": "dockerfile"
+    },
+
+    // ━━━ Search Exclusions ━━━
+    "search.exclude": {
+        "**/target": true,
+        "**/.m2": true,
+        "**/node_modules": true
+    },
+    "files.watcherExclude": {
+        "**/target/**": true,
+        "**/.m2/**": true
+    }
+}

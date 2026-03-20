@@ -1,0 +1,127 @@
+# ============================================================================
+# Application Configuration
+# ============================================================================
+spring:
+  application:
+    name: my-microservice
+
+  # ━━━ Jackson defaults ━━━
+  jackson:
+    default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: false
+    serialization:
+      write-dates-as-timestamps: false
+    time-zone: UTC
+
+  # ━━━ JPA / Hibernate ━━━
+  jpa:
+    open-in-view: false           # Prevent lazy-load anti-pattern
+    hibernate:
+      ddl-auto: validate          # Never auto-create in production
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+        generate_statistics: false
+
+  # ━━━ Database connection pool ━━━
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+
+# ━━━ Server ━━━
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    connection-timeout: 5s
+    keep-alive-timeout: 15s
+    threads:
+      max: 200
+      min-spare: 10
+
+# ━━━ Actuator ━━━
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,loggers
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true              # Kubernetes liveness/readiness
+    loggers:
+      enabled: true                # Runtime log level changes via REST
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # Publish percentile histograms for these meters (Prometheus native histograms)
+      percentiles-histogram:
+        http.server.requests: true
+        http.client.requests: true
+      # Also publish computed percentiles (for non-histogram backends)
+      percentiles:
+        http.server.requests: 0.5,0.90,0.95,0.99
+        http.client.requests: 0.5,0.90,0.95,0.99
+      # SLA buckets (ms) for service-level tracking
+      slo:
+        http.server.requests: 50ms,100ms,250ms,500ms,1s,3s,5s
+    enable:
+      jvm: true
+      process: true
+      system: true
+      tomcat: true
+      hikaricp: true
+      http: true
+  # Observation config (tracing + metrics unified)
+  observations:
+    http:
+      server:
+        requests:
+          name: http.server.requests
+  tracing:
+    sampling:
+      probability: 1.0            # Sample 100% locally; reduce in prod (e.g., 0.1)
+
+# ━━━ Logging ━━━
+# Detailed config is in logback-spring.xml. These are overrides only.
+logging:
+  level:
+    root: INFO
+    com.example.myservice: INFO
+    # Uncomment for debugging specific layers:
+    # com.example.myservice.controller: DEBUG
+    # com.example.myservice.service: DEBUG
+    # com.example.myservice.repository: DEBUG
+    # org.hibernate.SQL: DEBUG
+    # org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+# ━━━ Custom: Request Logging ━━━
+app:
+  logging:
+    # Log HTTP request/response summaries (method, URI, status, duration)
+    http-enabled: true
+    # Log request/response bodies (NEVER enable in production — PII risk)
+    include-payload: false
+    # Max body length to log when payload logging is on
+    max-payload-length: 1024
+    # Headers to redact from logs (case-insensitive)
+    sensitive-headers: Authorization,Cookie,Set-Cookie,X-API-Key
+    # Slow request threshold — logs at WARN level if exceeded
+    slow-request-threshold-ms: 3000
+  metrics:
+    # Prefix for all custom business metrics
+    prefix: myservice
+    # SLA boundaries for HTTP request duration histograms (ms)
+    http-sla-boundaries: 50,100,250,500,1000,3000,5000

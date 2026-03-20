@@ -1,0 +1,42 @@
+# ━━━ Build output ━━━
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# ━━━ IDE: IntelliJ ━━━
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# ━━━ IDE: VS Code (track shared configs, ignore user-specific) ━━━
+# .vscode/settings.json    — TRACKED (team formatting & tool config)
+# .vscode/extensions.json  — TRACKED (recommended extensions)
+# .vscode/launch.json      — TRACKED (run/debug configurations)
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# ━━━ IDE: Eclipse ━━━
+.settings/
+.project
+.classpath
+*.swp
+*.swo
+*~
+
+# ━━━ OS ━━━
+.DS_Store
+Thumbs.db
+
+# ━━━ Logs ━━━
+*.log
+logs/
+
+# ━━━ Environment ━━━
+.env
+.env.local
+*.env
+
+# ━━━ Docker ━━━
+docker-compose.override.yml

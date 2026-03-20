@@ -1,0 +1,276 @@
+# ============================================================================
+# GitLab CI/CD Pipeline — Spring Boot Microservice
+# ============================================================================
+# Stages: validate → build → test → analyze → package → deploy
+# Cache: Maven repo shared across stages
+# ============================================================================
+
+variables:
+  MAVEN_OPTS: >-
+    -Dhttps.protocols=TLSv1.2
+    -Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository
+    -Dorg.slf4j.simpleLogger.showDateTime=true
+  MAVEN_CLI_OPTS: >-
+    --batch-mode
+    --errors
+    --fail-at-end
+    --show-version
+    -DinstallAtEnd=true
+    -DdeployAtEnd=true
+  # SonarQube — set these in GitLab CI/CD Variables (Settings > CI/CD)
+  # SONAR_HOST_URL: https://sonarqube.yourcompany.com
+  # SONAR_TOKEN: <project-token>
+  JAVA_VERSION: "17"
+
+image: eclipse-temurin:${JAVA_VERSION}-jdk-jammy
+
+stages:
+  - validate
+  - build
+  - test
+  - analyze
+  - package
+  - deploy
+
+# ─── Cache ──────────────────────────────────────────────────────────────────
+.maven-cache: &maven-cache
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}-maven"
+    paths:
+      - .m2/repository
+    policy: pull-push
+
+# ─── Base job template ──────────────────────────────────────────────────────
+.maven-base:
+  <<: *maven-cache
+  before_script:
+    - chmod +x mvnw 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE: validate — formatting, linting, dependency checks
+# ═══════════════════════════════════════════════════════════════════════════
+
+validate:format:
+  extends: .maven-base
+  stage: validate
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS fmt:check
+  allow_failure: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+validate:checkstyle:
+  extends: .maven-base
+  stage: validate
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS checkstyle:check
+  artifacts:
+    when: always
+    paths:
+      - target/checkstyle-result.xml
+    reports:
+      codequality: target/checkstyle-result.xml
+    expire_in: 7 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+validate:enforcer:
+  extends: .maven-base
+  stage: validate
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS enforcer:enforce
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE: build — compile the project
+# ═══════════════════════════════════════════════════════════════════════════
+
+compile:
+  extends: .maven-base
+  stage: build
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS compile -DskipTests
+  artifacts:
+    paths:
+      - target/classes
+    expire_in: 1 hour
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE: test — unit tests, integration tests, coverage
+# ═══════════════════════════════════════════════════════════════════════════
+
+test:unit:
+  extends: .maven-base
+  stage: test
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS test jacoco:report
+  artifacts:
+    when: always
+    paths:
+      - target/surefire-reports
+      - target/site/jacoco
+    reports:
+      junit: target/surefire-reports/TEST-*.xml
+    expire_in: 7 days
+  coverage: '/Total.*?([0-9]{1,3})%/'
+  needs:
+    - compile
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test:integration:
+  extends: .maven-base
+  stage: test
+  services:
+    - name: docker:dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    TESTCONTAINERS_HOST_OVERRIDE: docker
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS verify -DskipUnitTests=true
+  artifacts:
+    when: always
+    paths:
+      - target/failsafe-reports
+    reports:
+      junit: target/failsafe-reports/TEST-*.xml
+    expire_in: 7 days
+  needs:
+    - compile
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test:spotbugs:
+  extends: .maven-base
+  stage: test
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS compile spotbugs:check
+  artifacts:
+    when: always
+    paths:
+      - target/spotbugsXml.xml
+    expire_in: 7 days
+  needs:
+    - compile
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE: analyze — SonarQube
+# ═══════════════════════════════════════════════════════════════════════════
+
+sonarqube:
+  extends: .maven-base
+  stage: analyze
+  variables:
+    GIT_DEPTH: "0"  # Full clone for blame data
+  script:
+    - >
+      ./mvnw $MAVEN_CLI_OPTS sonar:sonar
+      -Dsonar.host.url=${SONAR_HOST_URL}
+      -Dsonar.token=${SONAR_TOKEN}
+      -Dsonar.projectKey=${CI_PROJECT_NAME}
+      -Dsonar.qualitygate.wait=true
+      -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+      -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml
+      -Dsonar.java.spotbugs.reportPaths=target/spotbugsXml.xml
+  needs:
+    - test:unit
+    - validate:checkstyle
+    - test:spotbugs
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables:
+        SONAR_EXTRA_ARGS: >-
+          -Dsonar.pullrequest.key=${CI_MERGE_REQUEST_IID}
+          -Dsonar.pullrequest.branch=${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}
+          -Dsonar.pullrequest.base=${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE: package — build JAR & Docker image
+# ═══════════════════════════════════════════════════════════════════════════
+
+package:jar:
+  extends: .maven-base
+  stage: package
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS package -DskipTests
+  artifacts:
+    paths:
+      - target/*.jar
+    expire_in: 30 days
+  needs:
+    - test:unit
+    - test:integration
+    - sonarqube
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+package:docker:
+  stage: package
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    IMAGE_LATEST: $CI_REGISTRY_IMAGE:latest
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $IMAGE_TAG -t $IMAGE_LATEST .
+    - docker push $IMAGE_TAG
+    - docker push $IMAGE_LATEST
+  needs:
+    - package:jar
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE: deploy — deploy to environments
+# ═══════════════════════════════════════════════════════════════════════════
+
+deploy:staging:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - echo "Deploy to staging — customize with your deployment strategy"
+    # Example: kubectl set image deployment/$CI_PROJECT_NAME $CI_PROJECT_NAME=$IMAGE_TAG
+  environment:
+    name: staging
+    url: https://staging.yourcompany.com
+  needs:
+    - package:docker
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+deploy:production:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - echo "Deploy to production — customize with your deployment strategy"
+  environment:
+    name: production
+    url: https://api.yourcompany.com
+  needs:
+    - deploy:staging
+  rules:
+    - if: $CI_COMMIT_TAG
+  when: manual

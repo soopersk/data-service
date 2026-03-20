@@ -1,0 +1,27 @@
+{
+    "recommendations": [
+        // ━━━ Core Java Development ━━━
+        "redhat.java",                          // Language Support for Java
+        "vscjava.vscode-java-debug",            // Debugger for Java
+        "vscjava.vscode-java-test",             // Test Runner for Java
+        "vscjava.vscode-java-dependency",       // Project Manager for Java
+        "vscjava.vscode-maven",                 // Maven for Java
+
+        // ━━━ Spring Boot ━━━
+        "vmware.vscode-spring-boot",            // Spring Boot Tools
+        "vscjava.vscode-spring-initializr",     // Spring Initializr
+        "vscjava.vscode-spring-boot-dashboard", // Spring Boot Dashboard
+
+        // ━━━ Code Quality & Formatting ━━━
+        "shengchen.vscode-checkstyle",          // Checkstyle for Java
+        "sonarsource.sonarlint-vscode",         // SonarLint (local analysis)
+        "editorconfig.editorconfig",            // EditorConfig support
+
+        // ━━━ Productivity ━━━
+        "redhat.vscode-xml",                    // XML Support (for pom.xml)
+        "redhat.vscode-yaml",                   // YAML Support (for application.yml)
+        "ms-azuretools.vscode-docker",          // Docker support
+        "eamodio.gitlens",                      // Git blame & history
+        "gitlab.gitlab-workflow"                // GitLab MR & pipeline integration
+    ]
+}
