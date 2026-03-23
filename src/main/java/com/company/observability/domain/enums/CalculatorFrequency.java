@@ -38,4 +38,19 @@ public enum CalculatorFrequency {
             default -> DAILY;
         };
     }
+
+    /**
+     * Strict parsing for query/analytics endpoints. Rejects invalid values with IllegalArgumentException.
+     */
+    public static CalculatorFrequency fromStrict(String frequency) {
+        if (frequency == null || frequency.isBlank()) {
+            throw new IllegalArgumentException("Frequency is required. Valid values: DAILY, D, MONTHLY, M");
+        }
+        return switch (frequency.trim().toUpperCase()) {
+            case "D", "DAILY" -> DAILY;
+            case "M", "MONTHLY" -> MONTHLY;
+            default -> throw new IllegalArgumentException(
+                    "Unknown frequency: '" + frequency + "'. Valid values: DAILY, D, MONTHLY, M");
+        };
+    }
 }

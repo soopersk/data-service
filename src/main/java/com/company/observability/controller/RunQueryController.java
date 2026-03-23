@@ -50,7 +50,7 @@ public class RunQueryController {
             @RequestParam(defaultValue = "false") boolean bypassCache) {
         
         // Parse frequency using enum's built-in parser
-        CalculatorFrequency freq = CalculatorFrequency.from(frequency);
+        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
 
         meterRegistry.counter("api.calculators.status.requests",
                 "frequency", freq.name(),
@@ -89,7 +89,7 @@ public class RunQueryController {
             @RequestParam(defaultValue = "true") boolean allowStale) {
         
         // Parse frequency using enum
-        CalculatorFrequency freq = CalculatorFrequency.from(frequency);
+        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
 
         log.debug("Batch status query for {} calculators (frequency={}, allowStale={})",
                 calculatorIds.size(), freq, allowStale);
