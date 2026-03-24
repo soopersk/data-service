@@ -91,17 +91,17 @@ public class AnalyticsService {
         List<RuntimeAnalyticsResponse.DailyDataPoint> dataPoints = new ArrayList<>();
 
         for (DailyAggregate agg : aggregates) {
-            weightedSum += agg.getAvgDurationMs() * agg.getTotalRuns();
-            totalRuns += agg.getTotalRuns();
-            totalSuccess += agg.getSuccessRuns();
-            minDuration = Math.min(minDuration, agg.getAvgDurationMs());
-            maxDuration = Math.max(maxDuration, agg.getAvgDurationMs());
+            weightedSum += agg.avgDurationMs() * agg.totalRuns();
+            totalRuns += agg.totalRuns();
+            totalSuccess += agg.successRuns();
+            minDuration = Math.min(minDuration, agg.avgDurationMs());
+            maxDuration = Math.max(maxDuration, agg.avgDurationMs());
 
             dataPoints.add(RuntimeAnalyticsResponse.DailyDataPoint.builder()
-                    .date(agg.getDayCet())
-                    .avgDurationMs(agg.getAvgDurationMs())
-                    .totalRuns(agg.getTotalRuns())
-                    .successRuns(agg.getSuccessRuns())
+                    .date(agg.dayCet())
+                    .avgDurationMs(agg.avgDurationMs())
+                    .totalRuns(agg.totalRuns())
+                    .successRuns(agg.successRuns())
                     .build());
         }
 
@@ -149,8 +149,8 @@ public class AnalyticsService {
         int greenDays = 0, amberDays = 0, redDays = 0;
 
         for (DailyAggregate agg : coreData.getAggregates()) {
-            String worstSeverity = coreData.getWorstSeverityByDay().get(agg.getDayCet());
-            if (worstSeverity == null || agg.getSlaBreaches() == 0) {
+            String worstSeverity = coreData.getWorstSeverityByDay().get(agg.dayCet());
+            if (worstSeverity == null || agg.slaBreaches() == 0) {
                 greenDays++;
             } else {
                 if ("HIGH".equals(worstSeverity) || "CRITICAL".equals(worstSeverity)) {
@@ -199,17 +199,17 @@ public class AnalyticsService {
 
         List<TrendAnalyticsResponse.TrendDataPoint> trends = coreData.getAggregates().stream()
                 .map(agg -> {
-                    String worstSeverity = coreData.getWorstSeverityByDay().get(agg.getDayCet());
+                    String worstSeverity = coreData.getWorstSeverityByDay().get(agg.dayCet());
                     String slaStatus = classifyDay(agg, worstSeverity);
 
                     return TrendAnalyticsResponse.TrendDataPoint.builder()
-                            .date(agg.getDayCet())
-                            .avgDurationMs(agg.getAvgDurationMs())
-                            .totalRuns(agg.getTotalRuns())
-                            .successRuns(agg.getSuccessRuns())
-                            .slaBreaches(agg.getSlaBreaches())
-                            .avgStartMinCet(agg.getAvgStartMinCet())
-                            .avgEndMinCet(agg.getAvgEndMinCet())
+                            .date(agg.dayCet())
+                            .avgDurationMs(agg.avgDurationMs())
+                            .totalRuns(agg.totalRuns())
+                            .successRuns(agg.successRuns())
+                            .slaBreaches(agg.slaBreaches())
+                            .avgStartMinCet(agg.avgStartMinCet())
+                            .avgEndMinCet(agg.avgEndMinCet())
                             .slaStatus(slaStatus)
                             .build();
                 })
@@ -337,8 +337,8 @@ public class AnalyticsService {
         List<PerformanceCardResponse.RunBar> runBars = new ArrayList<>();
 
         for (RunWithSlaStatus run : runs) {
-            if (run.getDurationMs() != null && run.getDurationMs() > 0) {
-                totalDuration += run.getDurationMs();
+            if (run.durationMs() != null && run.durationMs() > 0) {
+                totalDuration += run.durationMs();
                 completedCount++;
             }
 
@@ -368,8 +368,8 @@ public class AnalyticsService {
                         .build();
 
         // Reference lines from latest run
-        BigDecimal slaStartHour = TimeUtils.calculateCetHour(latestRun.getEstimatedStartTime());
-        BigDecimal slaEndHour = TimeUtils.calculateCetHour(latestRun.getSlaTime());
+        BigDecimal slaStartHour = TimeUtils.calculateCetHour(latestRun.estimatedStartTime());
+        BigDecimal slaEndHour = TimeUtils.calculateCetHour(latestRun.slaTime());
 
         // Schedule info
         String startTimeCet = slaStartHour != null
@@ -377,7 +377,7 @@ public class AnalyticsService {
 
         return PerformanceCardResponse.builder()
                 .calculatorId(calculatorId)
-                .calculatorName(latestRun.getCalculatorName())
+                .calculatorName(latestRun.calculatorName())
                 .schedule(PerformanceCardResponse.ScheduleInfo.builder()
                         .estimatedStartTimeCet(startTimeCet)
                         .frequency(frequency.name())
@@ -395,11 +395,11 @@ public class AnalyticsService {
     }
 
     private PerformanceCardResponse.RunBar buildRunBar(RunWithSlaStatus run, String slaStatus) {
-        String dateFormatted = run.getReportingDate() != null
-                ? run.getReportingDate().format(DATE_FORMATTER) : null;
+        String dateFormatted = run.reportingDate() != null
+                ? run.reportingDate().format(DATE_FORMATTER) : null;
 
-        BigDecimal startHour = TimeUtils.calculateCetHour(run.getStartTime());
-        BigDecimal endHour = TimeUtils.calculateCetHour(run.getEndTime());
+        BigDecimal startHour = TimeUtils.calculateCetHour(run.startTime());
+        BigDecimal endHour = TimeUtils.calculateCetHour(run.endTime());
 
         String startCet = startHour != null
                 ? TimeUtils.formatCetHour(startHour) + " CET" : null;
@@ -407,15 +407,15 @@ public class AnalyticsService {
                 ? TimeUtils.formatCetHour(endHour) + " CET" : null;
 
         return PerformanceCardResponse.RunBar.builder()
-                .runId(run.getRunId())
-                .reportingDate(run.getReportingDate())
+                .runId(run.runId())
+                .reportingDate(run.reportingDate())
                 .dateFormatted(dateFormatted)
                 .startHourCet(startHour)
                 .endHourCet(endHour)
                 .startTimeCet(startCet)
                 .endTimeCet(endCet)
-                .durationMs(run.getDurationMs() != null ? run.getDurationMs() : 0)
-                .durationFormatted(TimeUtils.formatDuration(run.getDurationMs()))
+                .durationMs(run.durationMs() != null ? run.durationMs() : 0)
+                .durationFormatted(TimeUtils.formatDuration(run.durationMs()))
                 .slaStatus(slaStatus)
                 .build();
     }
@@ -428,14 +428,14 @@ public class AnalyticsService {
      * Per-run classification for performance card (SLA_MET / LATE / VERY_LATE)
      */
     private String classifyRunSlaStatus(RunWithSlaStatus run) {
-        if (!Boolean.TRUE.equals(run.getSlaBreached())) {
+        if (!Boolean.TRUE.equals(run.slaBreached())) {
             return "SLA_MET";
         }
-        if (run.getSeverity() == null) {
+        if (run.severity() == null) {
             return "LATE"; // fallback for breach without severity record
         }
-        return switch (run.getSeverity()) {
-            case "HIGH", "CRITICAL" -> "VERY_LATE";
+        return switch (run.severity()) {
+            case HIGH, CRITICAL -> "VERY_LATE";
             default -> "LATE";
         };
     }
@@ -444,7 +444,7 @@ public class AnalyticsService {
      * Per-day classification for trends/summary (GREEN / AMBER / RED)
      */
     private String classifyDay(DailyAggregate agg, String worstSeverity) {
-        if (worstSeverity == null || agg.getSlaBreaches() == 0) {
+        if (worstSeverity == null || agg.slaBreaches() == 0) {
             return "GREEN";
         }
         return mapSeverityToTrafficLight(worstSeverity);

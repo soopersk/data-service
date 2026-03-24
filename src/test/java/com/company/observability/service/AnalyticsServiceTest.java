@@ -97,17 +97,9 @@ class AnalyticsServiceTest {
     @Test
     void getSlaSummary_usesAggregatedBreachQueriesAndBuildsSummary() {
         LocalDate day = LocalDate.of(2026, 2, 20);
-        DailyAggregate aggregate = DailyAggregate.builder()
-                .calculatorId("calc-1")
-                .tenantId("tenant-1")
-                .dayCet(day)
-                .totalRuns(5)
-                .successRuns(4)
-                .slaBreaches(1)
-                .avgDurationMs(1200L)
-                .avgStartMinCet(360)
-                .avgEndMinCet(390)
-                .build();
+        DailyAggregate aggregate = new DailyAggregate(
+                "calc-1", "tenant-1", day,
+                5, 4, 1, 1200L, 360, 390, null);
 
         when(dailyAggregateRepository.findRecentAggregates("calc-1", "tenant-1", 30))
                 .thenReturn(List.of(aggregate));
@@ -127,17 +119,9 @@ class AnalyticsServiceTest {
     @Test
     void getTrends_usesAggregatedWorstSeverityByDay() {
         LocalDate day = LocalDate.of(2026, 2, 20);
-        DailyAggregate aggregate = DailyAggregate.builder()
-                .calculatorId("calc-1")
-                .tenantId("tenant-1")
-                .dayCet(day)
-                .totalRuns(3)
-                .successRuns(3)
-                .slaBreaches(1)
-                .avgDurationMs(800L)
-                .avgStartMinCet(360)
-                .avgEndMinCet(372)
-                .build();
+        DailyAggregate aggregate = new DailyAggregate(
+                "calc-1", "tenant-1", day,
+                3, 3, 1, 800L, 360, 372, null);
 
         when(dailyAggregateRepository.findRecentAggregates("calc-1", "tenant-1", 7))
                 .thenReturn(List.of(aggregate));
