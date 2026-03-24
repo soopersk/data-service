@@ -1,6 +1,9 @@
 package com.company.observability.repository;
 
 import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.domain.enums.AlertStatus;
+import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.Severity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,9 +35,9 @@ class SlaBreachEventRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         Instant t2 = Instant.parse("2026-02-22T11:00:00Z");
         Instant t3 = Instant.parse("2026-02-22T10:00:00Z");
 
-        save("run-1", t1, "HIGH");
-        save("run-2", t2, "HIGH");
-        save("run-3", t3, "HIGH");
+        save("run-1", t1, Severity.HIGH);
+        save("run-2", t2, Severity.HIGH);
+        save("run-3", t3, Severity.HIGH);
 
         List<SlaBreachEvent> firstPage = repository.findByCalculatorIdKeyset(
                 "calc-1", "tenant-1", 30, "HIGH", null, null, 2
@@ -53,9 +56,9 @@ class SlaBreachEventRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
 
     @Test
     void paginatedAndCount_withSeverityFilter_returnsMatchingRows() {
-        save("run-a", Instant.parse("2026-02-22T12:00:00Z"), "CRITICAL");
-        save("run-b", Instant.parse("2026-02-22T11:00:00Z"), "CRITICAL");
-        save("run-c", Instant.parse("2026-02-22T10:00:00Z"), "LOW");
+        save("run-a", Instant.parse("2026-02-22T12:00:00Z"), Severity.CRITICAL);
+        save("run-b", Instant.parse("2026-02-22T11:00:00Z"), Severity.CRITICAL);
+        save("run-c", Instant.parse("2026-02-22T10:00:00Z"), Severity.LOW);
 
         List<SlaBreachEvent> page = repository.findByCalculatorIdPaginated(
                 "calc-1", "tenant-1", 30, "CRITICAL", 0, 10
@@ -68,18 +71,18 @@ class SlaBreachEventRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         assertEquals(2L, count);
     }
 
-    private void save(String runId, Instant createdAt, String severity) {
+    private void save(String runId, Instant createdAt, Severity severity) {
         repository.save(SlaBreachEvent.builder()
                 .runId(runId)
                 .calculatorId("calc-1")
                 .calculatorName("Calculator 1")
                 .tenantId("tenant-1")
-                .breachType("TIME_EXCEEDED")
+                .breachType(BreachType.TIME_EXCEEDED)
                 .expectedValue(100L)
                 .actualValue(200L)
                 .severity(severity)
                 .alerted(false)
-                .alertStatus("PENDING")
+                .alertStatus(AlertStatus.PENDING)
                 .retryCount(0)
                 .createdAt(createdAt)
                 .build());

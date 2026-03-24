@@ -1,6 +1,9 @@
 package com.company.observability.repository;
 
 import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.domain.enums.AlertStatus;
+import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.Severity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -62,13 +65,13 @@ public class SlaBreachEventRepository {
             ps.setString(2, breach.getCalculatorId());
             ps.setString(3, breach.getCalculatorName());
             ps.setString(4, breach.getTenantId());
-            ps.setString(5, breach.getBreachType());
+            ps.setString(5, breach.getBreachType().name());
             ps.setObject(6, breach.getExpectedValue());
             ps.setObject(7, breach.getActualValue());
-            ps.setString(8, breach.getSeverity());
+            ps.setString(8, breach.getSeverity().name());
             ps.setBoolean(9, breach.getAlerted());
             ps.setTimestamp(10, breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null);
-            ps.setString(11, breach.getAlertStatus());
+            ps.setString(11, breach.getAlertStatus().name());
             ps.setInt(12, breach.getRetryCount() != null ? breach.getRetryCount() : 0);
             ps.setString(13, breach.getLastError());
             ps.setTimestamp(14, Timestamp.from(breach.getCreatedAt()));
@@ -109,7 +112,7 @@ public class SlaBreachEventRepository {
         jdbcTemplate.update(sql,
                 breach.getAlerted(),
                 breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null,
-                breach.getAlertStatus(),
+                breach.getAlertStatus().name(),
                 breach.getRetryCount(),
                 breach.getLastError(),
                 breach.getBreachId()
@@ -285,14 +288,14 @@ public class SlaBreachEventRepository {
                     .calculatorId(rs.getString("calculator_id"))
                     .calculatorName(rs.getString("calculator_name"))
                     .tenantId(rs.getString("tenant_id"))
-                    .breachType(rs.getString("breach_type"))
+                    .breachType(BreachType.fromString(rs.getString("breach_type")))
                     .expectedValue(rs.getObject("expected_value", Long.class))
                     .actualValue(rs.getObject("actual_value", Long.class))
-                    .severity(rs.getString("severity"))
+                    .severity(Severity.fromString(rs.getString("severity")))
                     .alerted(rs.getBoolean("alerted"))
                     .alertedAt(rs.getTimestamp("alerted_at") != null ?
                             rs.getTimestamp("alerted_at").toInstant() : null)
-                    .alertStatus(rs.getString("alert_status"))
+                    .alertStatus(AlertStatus.fromString(rs.getString("alert_status")))
                     .retryCount(rs.getInt("retry_count"))
                     .lastError(rs.getString("last_error"))
                     .createdAt(rs.getTimestamp("created_at").toInstant())

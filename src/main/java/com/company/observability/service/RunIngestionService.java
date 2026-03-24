@@ -3,6 +3,7 @@ package com.company.observability.service;
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.*;
 import com.company.observability.exception.DomainAccessDeniedException;
@@ -173,11 +174,10 @@ public class RunIngestionService {
         run.setEndTime(request.getEndTime());
         run.setDurationMs(durationMs);
         run.setEndHourCet(TimeUtils.calculateCetHour(request.getEndTime()));
-        try {
-            run.setStatus(RunStatus.fromCompletionStatus(request.getStatus()));
-        } catch (IllegalArgumentException e) {
-            throw new DomainValidationException(e.getMessage(), e);
-        }
+        CompletionStatus completionStatus = request.getStatus() != null
+                ? request.getStatus()
+                : CompletionStatus.SUCCESS;
+        run.setStatus(completionStatus.toRunStatus());
 
         SlaEvaluationResult slaResult = slaEvaluationService.evaluateSla(run);
         run.setSlaBreached(alreadyBreached || slaResult.isBreached());

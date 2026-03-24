@@ -132,18 +132,18 @@ public class DailyAggregateRepository {
         @Override
         public DailyAggregate mapRow(ResultSet rs, int rowNum) {
             try {
-                return DailyAggregate.builder()
-                        .calculatorId(rs.getString("calculator_id"))
-                        .tenantId(rs.getString("tenant_id"))
-                        .dayCet(rs.getDate("day_cet").toLocalDate())
-                        .totalRuns(rs.getInt("total_runs"))
-                        .successRuns(rs.getInt("success_runs"))
-                        .slaBreaches(rs.getInt("sla_breaches"))
-                        .avgDurationMs(rs.getLong("avg_duration_ms"))
-                        .avgStartMinCet(rs.getInt("avg_start_min_cet"))
-                        .avgEndMinCet(rs.getInt("avg_end_min_cet"))
-                        .computedAt(rs.getTimestamp("computed_at").toInstant())
-                        .build();
+                return new DailyAggregate(
+                        rs.getString("calculator_id"),
+                        rs.getString("tenant_id"),
+                        rs.getDate("day_cet").toLocalDate(),
+                        rs.getInt("total_runs"),
+                        rs.getInt("success_runs"),
+                        rs.getInt("sla_breaches"),
+                        rs.getLong("avg_duration_ms"),
+                        rs.getInt("avg_start_min_cet"),
+                        rs.getInt("avg_end_min_cet"),
+                        rs.getTimestamp("computed_at").toInstant()
+                );
             } catch (SQLException e) {
                 throw new RuntimeException("Failed to map daily aggregate", e);
             }

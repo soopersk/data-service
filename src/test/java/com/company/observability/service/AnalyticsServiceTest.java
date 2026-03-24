@@ -3,6 +3,8 @@ package com.company.observability.service;
 import com.company.observability.cache.AnalyticsCacheService;
 import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.Severity;
 import com.company.observability.dto.response.PagedResponse;
 import com.company.observability.dto.response.SlaBreachDetailResponse;
 import com.company.observability.dto.response.SlaSummaryResponse;
@@ -73,8 +75,8 @@ class AnalyticsServiceTest {
                 "calc-1", "tenant-1", 30, null, 0, 2, null
         );
 
-        assertEquals(2, response.getContent().size());
-        assertNotNull(response.getNextCursor());
+        assertEquals(2, response.content().size());
+        assertNotNull(response.nextCursor());
     }
 
     @Test
@@ -95,17 +97,9 @@ class AnalyticsServiceTest {
     @Test
     void getSlaSummary_usesAggregatedBreachQueriesAndBuildsSummary() {
         LocalDate day = LocalDate.of(2026, 2, 20);
-        DailyAggregate aggregate = DailyAggregate.builder()
-                .calculatorId("calc-1")
-                .tenantId("tenant-1")
-                .dayCet(day)
-                .totalRuns(5)
-                .successRuns(4)
-                .slaBreaches(1)
-                .avgDurationMs(1200L)
-                .avgStartMinCet(360)
-                .avgEndMinCet(390)
-                .build();
+        DailyAggregate aggregate = new DailyAggregate(
+                "calc-1", "tenant-1", day,
+                5, 4, 1, 1200L, 360, 390, null);
 
         when(dailyAggregateRepository.findRecentAggregates("calc-1", "tenant-1", 30))
                 .thenReturn(List.of(aggregate));
@@ -118,24 +112,16 @@ class AnalyticsServiceTest {
 
         SlaSummaryResponse response = service.getSlaSummary("calc-1", "tenant-1", 30);
 
-        assertEquals(2, response.getTotalBreaches());
-        assertEquals(1, response.getRedDays());
+        assertEquals(2, response.totalBreaches());
+        assertEquals(1, response.redDays());
     }
 
     @Test
     void getTrends_usesAggregatedWorstSeverityByDay() {
         LocalDate day = LocalDate.of(2026, 2, 20);
-        DailyAggregate aggregate = DailyAggregate.builder()
-                .calculatorId("calc-1")
-                .tenantId("tenant-1")
-                .dayCet(day)
-                .totalRuns(3)
-                .successRuns(3)
-                .slaBreaches(1)
-                .avgDurationMs(800L)
-                .avgStartMinCet(360)
-                .avgEndMinCet(372)
-                .build();
+        DailyAggregate aggregate = new DailyAggregate(
+                "calc-1", "tenant-1", day,
+                3, 3, 1, 800L, 360, 372, null);
 
         when(dailyAggregateRepository.findRecentAggregates("calc-1", "tenant-1", 7))
                 .thenReturn(List.of(aggregate));
@@ -148,8 +134,8 @@ class AnalyticsServiceTest {
 
         TrendAnalyticsResponse response = service.getTrends("calc-1", "tenant-1", 7);
 
-        assertEquals(1, response.getTrends().size());
-        assertEquals("AMBER", response.getTrends().get(0).getSlaStatus());
+        assertEquals(1, response.trends().size());
+        assertEquals("AMBER", response.trends().get(0).slaStatus());
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {
@@ -159,8 +145,8 @@ class AnalyticsServiceTest {
                 .calculatorId("calc-1")
                 .calculatorName("Calculator 1")
                 .tenantId("tenant-1")
-                .breachType("TIME_EXCEEDED")
-                .severity("HIGH")
+                .breachType(BreachType.TIME_EXCEEDED)
+                .severity(Severity.HIGH)
                 .createdAt(createdAt)
                 .build();
     }

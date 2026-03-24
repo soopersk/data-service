@@ -2,10 +2,7 @@ package com.company.observability.domain;
 
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -16,10 +13,13 @@ import java.util.Map;
 /**
  * Calculator Run domain model with reporting_date for partition key
  */
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@EqualsAndHashCode(of = {"runId", "reportingDate"})
+@ToString
 public class CalculatorRun implements Serializable {
     private static final long serialVersionUID = 1L;
 

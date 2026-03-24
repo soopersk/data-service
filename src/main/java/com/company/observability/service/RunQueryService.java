@@ -67,12 +67,8 @@ public class RunQueryService {
                 .map(this::mapToRunStatusInfo)
                 .collect(Collectors.toList());
 
-        CalculatorStatusResponse response = CalculatorStatusResponse.builder()
-                .calculatorName(currentRun.getCalculatorName())
-                .lastRefreshed(Instant.now())
-                .current(current)
-                .history(history)
-                .build();
+        CalculatorStatusResponse response = new CalculatorStatusResponse(
+                currentRun.getCalculatorName(), Instant.now(), current, history);
 
         // Cache (unless bypassed)
         if (!bypassCache) {
@@ -131,12 +127,8 @@ public class RunQueryService {
                         .map(this::mapToRunStatusInfo)
                         .collect(Collectors.toList());
 
-                CalculatorStatusResponse response = CalculatorStatusResponse.builder()
-                        .calculatorName(currentRun.getCalculatorName())
-                        .lastRefreshed(Instant.now())
-                        .current(current)
-                        .history(history)
-                        .build();
+                CalculatorStatusResponse response = new CalculatorStatusResponse(
+                        currentRun.getCalculatorName(), Instant.now(), current, history);
 
                 freshResponses.put(calcId, response);
             }
@@ -188,18 +180,12 @@ public class RunQueryService {
     }
 
     private RunStatusInfo mapToRunStatusInfo(CalculatorRun run) {
-        return RunStatusInfo.builder()
-                .runId(run.getRunId())
-                .status(run.getStatus().name())
-                .start(run.getStartTime())
-                .end(run.getEndTime())
-                .estimatedStart(run.getEstimatedStartTime())
-                .estimatedEnd(run.getEstimatedEndTime())
-                .sla(run.getSlaTime())
-                .durationMs(run.getDurationMs())
-                .durationFormatted(TimeUtils.formatDuration(run.getDurationMs()))
-                .slaBreached(run.getSlaBreached())
-                .slaBreachReason(run.getSlaBreachReason())
-                .build();
+        return new RunStatusInfo(
+                run.getRunId(), run.getStatus().name(),
+                run.getStartTime(), run.getEndTime(),
+                run.getEstimatedStartTime(), run.getEstimatedEndTime(),
+                run.getSlaTime(), run.getDurationMs(),
+                TimeUtils.formatDuration(run.getDurationMs()),
+                run.getSlaBreached(), run.getSlaBreachReason());
     }
 }

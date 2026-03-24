@@ -41,7 +41,7 @@ public class AnalyticsController {
             @Parameter(description = "Frequency: DAILY or MONTHLY")
             @RequestParam(defaultValue = "DAILY") String frequency) {
 
-        CalculatorFrequency freq = CalculatorFrequency.from(frequency);
+        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
         meterRegistry.counter("api.analytics.runtime.requests").increment();
 
         RuntimeAnalyticsResponse response = analyticsService
@@ -139,7 +139,7 @@ public class AnalyticsController {
             @Parameter(description = "Frequency: DAILY or MONTHLY")
             @RequestParam(defaultValue = "DAILY") String frequency) {
 
-        CalculatorFrequency freq = CalculatorFrequency.from(frequency);
+        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
         meterRegistry.counter("api.analytics.performance-card.requests").increment();
 
         PerformanceCardResponse response = analyticsService

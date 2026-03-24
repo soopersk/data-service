@@ -147,17 +147,12 @@ class RunQueryControllerTest {
     }
 
     private static CalculatorStatusResponse sampleStatusResponse(String calculatorName) {
-        RunStatusInfo current = RunStatusInfo.builder()
-                .runId("run-1")
-                .status("RUNNING")
-                .start(Instant.parse("2026-02-22T06:00:00Z"))
-                .build();
+        RunStatusInfo current = new RunStatusInfo(
+                "run-1", "RUNNING", Instant.parse("2026-02-22T06:00:00Z"),
+                null, null, null, null, null, null, null, null);
 
-        return CalculatorStatusResponse.builder()
-                .calculatorName(calculatorName)
-                .lastRefreshed(Instant.parse("2026-02-22T06:01:00Z"))
-                .current(current)
-                .history(Collections.emptyList())
-                .build();
+        return new CalculatorStatusResponse(
+                calculatorName, Instant.parse("2026-02-22T06:01:00Z"),
+                current, Collections.emptyList());
     }
 }

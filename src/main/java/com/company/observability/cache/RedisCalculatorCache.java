@@ -167,10 +167,10 @@ public class RedisCalculatorCache {
         String field = String.valueOf(historyLimit);
 
         try {
-            RunStatus currentStatus = response.getCurrent() != null 
-                    ? RunStatus.fromString(response.getCurrent().getStatus())
+            RunStatus currentStatus = response.current() != null
+                    ? RunStatus.fromString(response.current().status())
                     : RunStatus.SUCCESS;
-                    
+
             Duration ttl = currentStatus == RunStatus.RUNNING
                     ? Duration.ofSeconds(30)
                     : Duration.ofSeconds(60);
@@ -309,8 +309,8 @@ public class RedisCalculatorCache {
                     String hashKey = buildStatusHashKey(calcId, tenantId, frequency);
                     String field = String.valueOf(historyLimit);
                     
-                    RunStatus currentStatus = response.getCurrent() != null 
-                            ? RunStatus.fromString(response.getCurrent().getStatus())
+                    RunStatus currentStatus = response.current() != null
+                            ? RunStatus.fromString(response.current().status())
                             : RunStatus.SUCCESS;
                             
                     Duration ttl = currentStatus == RunStatus.RUNNING

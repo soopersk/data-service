@@ -3,6 +3,7 @@ package com.company.observability.service;
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.CompleteRunRequest;
 import com.company.observability.dto.request.StartRunRequest;
@@ -67,23 +68,6 @@ class RunIngestionServiceTest {
     }
 
     @Test
-    void completeRun_rejectsUnknownCompletionStatus() {
-        Instant start = Instant.parse("2026-02-20T10:00:00Z");
-        CalculatorRun run = runningRun(start);
-        when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
-
-        CompleteRunRequest request = CompleteRunRequest.builder()
-                .endTime(start.plusSeconds(60))
-                .status("UNKNOWN")
-                .build();
-
-        assertThrows(DomainValidationException.class,
-                () -> service.completeRun("run-1", request, "tenant-1"));
-
-        verify(runRepository, never()).upsert(any());
-    }
-
-    @Test
     void completeRun_rejectsEndTimeBeforeStartTime() {
         Instant start = Instant.parse("2026-02-20T10:00:00Z");
         CalculatorRun run = runningRun(start);
@@ -91,7 +75,7 @@ class RunIngestionServiceTest {
 
         CompleteRunRequest request = CompleteRunRequest.builder()
                 .endTime(start.minusSeconds(1))
-                .status("SUCCESS")
+                .status(CompletionStatus.SUCCESS)
                 .build();
 
         assertThrows(DomainValidationException.class,
@@ -174,7 +158,7 @@ class RunIngestionServiceTest {
 
         CompleteRunRequest request = CompleteRunRequest.builder()
                 .endTime(start.plusSeconds(600))
-                .status("SUCCESS")
+                .status(CompletionStatus.SUCCESS)
                 .build();
 
         service.completeRun("run-1", request, "tenant-1");
@@ -197,7 +181,7 @@ class RunIngestionServiceTest {
 
         CompleteRunRequest request = CompleteRunRequest.builder()
                 .endTime(start.plusSeconds(1800))
-                .status("SUCCESS")
+                .status(CompletionStatus.SUCCESS)
                 .build();
 
         service.completeRun("run-1", request, "tenant-1");

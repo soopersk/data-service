@@ -1,89 +1,50 @@
 package com.company.observability.dto.response;
 
-import lombok.*;
-import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class PerformanceCardResponse implements Serializable {
-    private static final long serialVersionUID = 1L;
+public record PerformanceCardResponse(
+        String calculatorId,
+        String calculatorName,
+        ScheduleInfo schedule,
+        int periodDays,
+        long meanDurationMs,
+        String meanDurationFormatted,
+        SlaSummaryPct slaSummary,
+        List<RunBar> runs,
+        ReferenceLines referenceLines
+) {
+    public record ScheduleInfo(
+            String estimatedStartTimeCet,
+            String frequency
+    ) {}
 
-    // Card header
-    private String calculatorId;
-    private String calculatorName;
-    private ScheduleInfo schedule;
-    private int periodDays;
-    private long meanDurationMs;
-    private String meanDurationFormatted;
+    public record SlaSummaryPct(
+            int totalRuns,
+            int slaMetCount,
+            double slaMetPct,
+            int lateCount,
+            double latePct,
+            int veryLateCount,
+            double veryLatePct
+    ) {}
 
-    // SLA stacked bar (percentages MUST sum to 100%)
-    private SlaSummaryPct slaSummary;
+    public record RunBar(
+            String runId,
+            LocalDate reportingDate,
+            String dateFormatted,
+            BigDecimal startHourCet,
+            BigDecimal endHourCet,
+            String startTimeCet,
+            String endTimeCet,
+            long durationMs,
+            String durationFormatted,
+            String slaStatus
+    ) {}
 
-    // Individual runs for bar chart (ordered chronologically: oldest first)
-    private List<RunBar> runs;
-
-    // Horizontal reference lines for chart
-    private ReferenceLines referenceLines;
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ScheduleInfo implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private String estimatedStartTimeCet; // "10:00"
-        private String frequency;             // "DAILY" or "MONTHLY"
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class SlaSummaryPct implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private int totalRuns;
-        private int slaMetCount;
-        private double slaMetPct;      // dark green — "SLA met"
-        private int lateCount;
-        private double latePct;        // amber — "Late" (LOW/MEDIUM)
-        private int veryLateCount;
-        private double veryLatePct;    // red — "Very late" (HIGH/CRITICAL)
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class RunBar implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private String runId;
-        private LocalDate reportingDate;
-        private String dateFormatted;       // "Tue 27 Jan 2026"
-        private BigDecimal startHourCet;    // Y-axis bar bottom
-        private BigDecimal endHourCet;      // Y-axis bar top
-        private String startTimeCet;        // "11:07 CET"
-        private String endTimeCet;          // "13:14 CET"
-        private long durationMs;
-        private String durationFormatted;   // "2hrs 7mins"
-        private String slaStatus;           // SLA_MET, LATE, VERY_LATE
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ReferenceLines implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private BigDecimal slaStartHourCet;  // circle markers
-        private BigDecimal slaEndHourCet;    // diamond markers
-    }
+    public record ReferenceLines(
+            BigDecimal slaStartHourCet,
+            BigDecimal slaEndHourCet
+    ) {}
 }

@@ -1,28 +1,19 @@
 package com.company.observability.dto.response;
 
-import lombok.*;
-import java.io.Serializable;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class RunStatusInfo implements Serializable {
-    private static final long serialVersionUID = 1L;
-
-    private String runId;
-    private String status; // RUNNING, COMPLETED, FAILED, TIMEOUT, NOT_STARTED
-    private Instant start;
-    private Instant end;
-    private Instant estimatedStart;
-    private Instant estimatedEnd;
-    private Instant sla; // Absolute SLA deadline time
-
-    // Additional useful attributes
-    private Long durationMs;
-    private String durationFormatted;
-    private Boolean slaBreached;
-    private String slaBreachReason;
-
-}
+public record RunStatusInfo(
+        String runId,
+        @Schema(description = "Run status", allowableValues = {"RUNNING", "SUCCESS", "FAILED", "TIMEOUT", "CANCELLED"})
+        String status,
+        Instant start,
+        Instant end,
+        Instant estimatedStart,
+        Instant estimatedEnd,
+        Instant sla,
+        Long durationMs,
+        String durationFormatted,
+        Boolean slaBreached,
+        String slaBreachReason
+) {}
