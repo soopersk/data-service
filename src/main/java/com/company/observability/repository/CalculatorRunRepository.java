@@ -5,6 +5,7 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.Severity;
 import com.company.observability.util.JsonbConverter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -416,29 +417,25 @@ public class CalculatorRunRepository {
             """;
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
-            Timestamp startTs = rs.getTimestamp("start_time");
-            Timestamp endTs = rs.getTimestamp("end_time");
-            Timestamp slaTs = rs.getTimestamp("sla_time");
-            Timestamp estStartTs = rs.getTimestamp("estimated_start_time");
-
-            return RunWithSlaStatus.builder()
-                    .runId(rs.getString("run_id"))
-                    .calculatorId(rs.getString("calculator_id"))
-                    .calculatorName(rs.getString("calculator_name"))
-                    .reportingDate(rs.getObject("reporting_date", LocalDate.class))
-                    .startTime(startTs != null ? startTs.toInstant() : null)
-                    .endTime(endTs != null ? endTs.toInstant() : null)
-                    .durationMs(rs.getObject("duration_ms", Long.class))
-                    .startHourCet(rs.getBigDecimal("start_hour_cet"))
-                    .endHourCet(rs.getBigDecimal("end_hour_cet"))
-                    .slaTime(slaTs != null ? slaTs.toInstant() : null)
-                    .estimatedStartTime(estStartTs != null ? estStartTs.toInstant() : null)
-                    .frequency(rs.getString("frequency"))
-                    .status(rs.getString("status"))
-                    .slaBreached(rs.getBoolean("sla_breached"))
-                    .slaBreachReason(rs.getString("sla_breach_reason"))
-                    .severity(rs.getString("severity"))
-                    .build();
+            String severityStr = rs.getString("severity"); // nullable from LEFT JOIN
+            return new RunWithSlaStatus(
+                    rs.getString("run_id"),
+                    rs.getString("calculator_id"),
+                    rs.getString("calculator_name"),
+                    rs.getObject("reporting_date", LocalDate.class),
+                    getInstant(rs, "start_time"),
+                    getInstant(rs, "end_time"),
+                    rs.getObject("duration_ms", Long.class),
+                    rs.getBigDecimal("start_hour_cet"),
+                    rs.getBigDecimal("end_hour_cet"),
+                    getInstant(rs, "sla_time"),
+                    getInstant(rs, "estimated_start_time"),
+                    CalculatorFrequency.from(rs.getString("frequency")),
+                    RunStatus.fromString(rs.getString("status")),
+                    rs.getObject("sla_breached", Boolean.class),
+                    rs.getString("sla_breach_reason"),
+                    severityStr != null ? Severity.fromString(severityStr) : null
+            );
         }, calculatorId, tenantId, frequency.name(), days);
     }
 

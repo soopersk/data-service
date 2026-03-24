@@ -1,32 +1,32 @@
 package com.company.observability.domain;
 
-import lombok.*;
+import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.Severity;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
 /**
- * Lightweight projection for performance card: calculator_runs LEFT JOIN sla_breach_events
+ * Lightweight projection for performance card: calculator_runs LEFT JOIN sla_breach_events.
+ * Severity is nullable (LEFT JOIN — null when no breach exists).
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class RunWithSlaStatus {
-    private String runId;
-    private String calculatorId;
-    private String calculatorName;
-    private LocalDate reportingDate;
-    private Instant startTime;
-    private Instant endTime;
-    private Long durationMs;
-    private BigDecimal startHourCet;
-    private BigDecimal endHourCet;
-    private Instant slaTime;
-    private Instant estimatedStartTime;
-    private String frequency;
-    private String status;
-    private Boolean slaBreached;
-    private String slaBreachReason;
-    private String severity; // from sla_breach_events (nullable)
-}
+public record RunWithSlaStatus(
+        String runId,
+        String calculatorId,
+        String calculatorName,
+        LocalDate reportingDate,
+        Instant startTime,
+        Instant endTime,
+        Long durationMs,
+        BigDecimal startHourCet,
+        BigDecimal endHourCet,
+        Instant slaTime,
+        Instant estimatedStartTime,
+        CalculatorFrequency frequency,
+        RunStatus status,
+        Boolean slaBreached,
+        String slaBreachReason,
+        Severity severity
+) {}
