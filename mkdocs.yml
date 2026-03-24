@@ -1,0 +1,80 @@
+site_name: Observability Service
+site_description: Enterprise-grade calculator run lifecycle tracking, SLA monitoring, and analytics platform
+site_author: Platform Team
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Overview: user/index.md
+    - Local Setup: user/local-setup.md
+    - Authentication: user/authentication.md
+    - Quick Start: user/quickstart.md
+    - Ingestion API: user/ingestion-api.md
+    - Query API: user/query-api.md
+    - Analytics API: user/analytics-api.md
+    - SLA Monitoring: user/sla-monitoring.md
+  - Technical Specification:
+    - Overview: spec/index.md
+    - Architecture: spec/architecture.md
+    - Data Architecture: spec/data-architecture.md
+    - Redis Architecture: spec/redis-architecture.md
+    - API Reference: spec/api-reference.md
+    - Ingestion & Event Flow: spec/ingestion-flow.md
+    - SLA Architecture: spec/sla-architecture.md
+    - Performance Model: spec/performance.md
+    - Configuration & Profiles: spec/configuration.md
+    - Observability: spec/observability.md
+    - Failure Modes & Recovery: spec/failure-modes.md
+    - Extension Guide: spec/extension-guide.md
+    - Technical Debt: spec/tech-debt.md
