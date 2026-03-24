@@ -6,10 +6,10 @@ import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.*;
 import com.company.observability.exception.DomainNotFoundException;
 import com.company.observability.repository.CalculatorRunRepository;
+import com.company.observability.util.MdcContextUtil;
 import com.company.observability.util.TimeUtils;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tag;
-import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static com.company.observability.util.ObservabilityConstants.*;
 
 /**
  * Query service
@@ -31,7 +33,19 @@ public class RunQueryService {
     private final MeterRegistry meterRegistry;
 
     public CalculatorStatusResponse getCalculatorStatus(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, 
+            String calculatorId, String tenantId, CalculatorFrequency frequency,
+            int historyLimit, boolean bypassCache) {
+
+        var prev = MdcContextUtil.setCalculatorContext(calculatorId, "-");
+        try {
+            return doGetCalculatorStatus(calculatorId, tenantId, frequency, historyLimit, bypassCache);
+        } finally {
+            MdcContextUtil.restoreContext(prev);
+        }
+    }
+
+    private CalculatorStatusResponse doGetCalculatorStatus(
+            String calculatorId, String tenantId, CalculatorFrequency frequency,
             int historyLimit, boolean bypassCache) {
 
         // Check cache (unless bypassed)
@@ -40,11 +54,8 @@ public class RunQueryService {
                     redisCache.getStatusResponse(calculatorId, tenantId, frequency, historyLimit);
 
             if (cachedResponse.isPresent()) {
-                meterRegistry.counter("query.calculator_status.cache_hit",
-                        Tags.of(
-                                Tag.of("tier", "response_cache"),
-                                Tag.of("frequency", frequency.name())
-                        )
+                meterRegistry.counter(QUERY_STATUS_CACHE_HIT,
+                        "frequency", frequency.name()
                 ).increment();
                 return cachedResponse.get();
             }
@@ -75,21 +86,18 @@ public class RunQueryService {
             redisCache.cacheStatusResponse(calculatorId, tenantId, frequency, historyLimit, response);
         }
 
-        meterRegistry.counter("query.calculator_status.cache_miss",
-                Tags.of(
-                        Tag.of("tier", "response_cache"),
-                        Tag.of("frequency", frequency.name())
-                )
+        meterRegistry.counter(QUERY_STATUS_CACHE_MISS,
+                "frequency", frequency.name()
         ).increment();
 
         return response;
     }
 
     public List<CalculatorStatusResponse> getBatchCalculatorStatus(
-            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, 
+            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency,
             int historyLimit, boolean allowStale) {
 
-        long startTime = System.currentTimeMillis();
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         // 1. Determine cached responses (effectively final)
         final Map<String, CalculatorStatusResponse> cachedResponses = allowStale
@@ -101,7 +109,7 @@ public class RunQueryService {
                 .filter(id -> !cachedResponses.containsKey(id))
                 .collect(Collectors.toList());
 
-        log.debug("BATCH ({}): {} cache hits, {} misses (allowStale: {})",
+        log.debug("event=query.batch outcome=success freq={} cacheHits={} cacheMisses={} allowStale={}",
                 frequency, cachedResponses.size(), cacheMisses.size(), allowStale);
 
         // Query missing calculators
@@ -115,7 +123,8 @@ public class RunQueryService {
                 List<CalculatorRun> runs = runsByCalculator.get(calcId);
 
                 if (runs == null || runs.isEmpty()) {
-                    log.warn("No {} runs found for calculator {}", frequency, calcId);
+                    log.warn("event=query.batch.calc_missing outcome=skipped freq={} calculatorId={}",
+                            frequency, calcId);
                     continue;
                 }
 
@@ -151,30 +160,20 @@ public class RunQueryService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-        long duration = System.currentTimeMillis() - startTime;
+        sample.stop(meterRegistry.timer(QUERY_BATCH_DURATION,
+                "frequency", frequency.name()));
 
-        meterRegistry.counter("query.batch_status.requests",
-                Tags.of(
-                        Tag.of("tier", "response_cache"),
-                        Tag.of("frequency", frequency.name())
-                )
+        meterRegistry.counter(QUERY_BATCH_PROCESSED,
+                "frequency", frequency.name()
         ).increment();
 
-        meterRegistry.timer("query.batch_status.duration",
-                Tags.of(
-                        Tag.of("frequency", frequency.name())
-                )
-        ).record(java.time.Duration.ofMillis(duration));
-
-        meterRegistry.summary("query.batch_status.batch_size",
-                Tags.of(
-                    Tag.of("frequency", frequency.name()),
-                    Tag.of("allow_stale", String.valueOf(allowStale))
-                )
+        meterRegistry.summary(QUERY_BATCH_SIZE,
+                "frequency", frequency.name(),
+                "allow_stale", String.valueOf(allowStale)
         ).record(calculatorIds.size());
 
-        log.debug("Batch query ({}) completed in {}ms: {}/{} calculators",
-                frequency, duration, result.size(), calculatorIds.size());
+        log.debug("event=query.batch.completed outcome=success freq={} returned={} total={}",
+                frequency, result.size(), calculatorIds.size());
 
         return result;
     }

@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -14,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SlaEvaluationServiceTest {
 
-    private final SlaEvaluationService service = new SlaEvaluationService();
+    private final SlaEvaluationService service = new SlaEvaluationService(new SimpleMeterRegistry());
 
     @Test
     void evaluateSla_returnsNoBreachForOnTimeSuccessfulRun() {

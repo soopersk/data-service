@@ -5,8 +5,10 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.CalculatorRunRepository;
+import com.company.observability.util.MdcContextUtil;
 import com.company.observability.util.SlaEvaluationResult;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +25,8 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+
+import static com.company.observability.util.ObservabilityConstants.*;
 
 /**
  * LIVE SLA BREACH DETECTION (every 15 seconds)
@@ -52,9 +56,9 @@ public class LiveSlaBreachDetectionJob {
 
     @PostConstruct
     void registerGauges() {
-        meterRegistry.gauge("sla.approaching.count", approachingRunsGauge);
-        meterRegistry.gauge("sla.breach.live_detection.last_breaches", lastBreachesGauge);
-        meterRegistry.gauge("sla.monitoring.active_runs", activeRunsGauge);
+        meterRegistry.gauge(SLA_APPROACHING_COUNT, approachingRunsGauge);
+        meterRegistry.gauge(SLA_DETECTION_LAST_BREACHES, lastBreachesGauge);
+        meterRegistry.gauge(SLA_MONITORING_ACTIVE, activeRunsGauge);
     }
 
     /**
@@ -67,19 +71,19 @@ public class LiveSlaBreachDetectionJob {
     )
     @Transactional
     public void detectLiveSlaBreaches() {
-        Instant startTime = Instant.now();
+        Map<String, String> snapshot = MdcContextUtil.setJobContext("live-sla-detection");
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
-            // Get runs that exceeded SLA from Redis (very fast)
             List<Map<String, Object>> breachedRuns = slaMonitoringCache.getBreachedRuns();
 
             if (breachedRuns.isEmpty()) {
-                log.debug("No live SLA breaches detected");
-                recordMetrics(0, Duration.between(startTime, Instant.now()));
+                log.debug("event=sla.live_detection outcome=none_found");
+                recordMetrics(sample, 0);
                 return;
             }
 
-            log.warn("LIVE DETECTION: Found {} runs past SLA deadline", breachedRuns.size());
+            log.warn("event=sla.live_detection outcome=breaches_found count={}", breachedRuns.size());
 
             int processedCount = 0;
 
@@ -92,40 +96,39 @@ public class LiveSlaBreachDetectionJob {
                     reportingDate = LocalDate.parse(reportingDateStr);
                 }
 
+                Map<String, String> runSnapshot = MdcContextUtil.setCalculatorContext(
+                        (String) runInfo.get("calculatorId"), runId);
+
                 try {
-                    // Verify run is still RUNNING in database
                     Optional<CalculatorRun> runOpt = reportingDate != null
                             ? runRepository.findById(runId, reportingDate)
                             : runRepository.findById(runId);
 
                     if (runOpt.isEmpty()) {
-                        log.warn("Run {} not found in database, deregistering", runId);
+                        log.warn("event=sla.live_detection.run_lookup outcome=not_found runId={}", runId);
                         slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         continue;
                     }
 
                     CalculatorRun run = runOpt.get();
 
-                    // Check if already marked as breached or completed
                     if (run.getStatus() != RunStatus.RUNNING) {
-                        log.debug("Run {} already completed, deregistering", runId);
+                        log.debug("event=sla.live_detection.run_check outcome=already_completed runId={}", runId);
                         slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         continue;
                     }
 
                     if (Boolean.TRUE.equals(run.getSlaBreached())) {
-                        log.debug("Run {} already marked as breached", runId);
+                        log.debug("event=sla.live_detection.run_check outcome=already_breached runId={}", runId);
                         slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         continue;
                     }
 
-                    // Mark as breached in database
                     String breachReason = buildBreachReason(run);
                     int updated = runRepository.markSlaBreached(
                             runId, breachReason, run.getReportingDate());
 
                     if (updated > 0) {
-                        // Publish breach event
                         String severity = determineSeverity(run);
                         SlaEvaluationResult result = new SlaEvaluationResult(
                                 true,
@@ -137,33 +140,34 @@ public class LiveSlaBreachDetectionJob {
                         run.setSlaBreachReason(breachReason);
 
                         eventPublisher.publishEvent(new SlaBreachedEvent(run, result));
-
-                        // Deregister (no longer need to monitor)
                         slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
-
                         processedCount++;
 
-                        log.warn("LIVE BREACH: Run {} marked as breached ({})", runId, breachReason);
+                        log.warn("event=sla.live_breach outcome=marked runId={} reason={} severity={}",
+                                runId, breachReason, severity);
 
-                        meterRegistry.counter("sla.breaches.live_detected",
+                        meterRegistry.counter(SLA_BREACH_LIVE_DETECTED,
                                 "severity", severity
                         ).increment();
                     }
 
                 } catch (Exception e) {
-                    log.error("Failed to process live SLA breach for run {}", runId, e);
+                    log.error("event=sla.live_detection.run_process outcome=failure runId={}", runId, e);
+                } finally {
+                    MdcContextUtil.restoreContext(runSnapshot);
                 }
             }
 
-            Duration executionTime = Duration.between(startTime, Instant.now());
-            log.info("Live SLA detection completed: {}/{} breaches processed in {}ms",
-                    processedCount, breachedRuns.size(), executionTime.toMillis());
+            log.info("event=sla.live_detection.completed outcome=success processed={} total={}",
+                    processedCount, breachedRuns.size());
 
-            recordMetrics(processedCount, executionTime);
+            recordMetrics(sample, processedCount);
 
         } catch (Exception e) {
-            log.error("Live SLA breach detection job failed", e);
-            meterRegistry.counter("sla.breach.live_detection.failures").increment();
+            log.error("event=sla.live_detection outcome=failure", e);
+            meterRegistry.counter(SLA_DETECTION_FAILURE).increment();
+        } finally {
+            MdcContextUtil.restoreContext(snapshot);
         }
     }
 
@@ -175,27 +179,28 @@ public class LiveSlaBreachDetectionJob {
             initialDelayString = "30000"
     )
     public void detectApproachingSla() {
+        Map<String, String> snapshot = MdcContextUtil.setJobContext("sla-early-warning");
+
         try {
-            // Get runs that will breach SLA in next 10 minutes
             List<Map<String, Object>> approachingRuns =
                     slaMonitoringCache.getApproachingSlaRuns(10);
 
             if (!approachingRuns.isEmpty()) {
-                log.info("EARLY WARNING: {} runs approaching SLA deadline (within 10 min)",
-                        approachingRuns.size());
+                log.info("event=sla.early_warning outcome=runs_approaching count={}", approachingRuns.size());
 
                 for (Map<String, Object> runInfo : approachingRuns) {
-                    log.warn("Run {} approaching SLA: calculator={}, deadline in ~{} min",
+                    log.warn("event=sla.early_warning.run runId={} calculator={} minutesUntilSla={}",
                             runInfo.get("runId"),
                             runInfo.get("calculatorName"),
                             calculateMinutesUntilSla(runInfo));
                 }
-
             }
             approachingRunsGauge.set(approachingRuns.size());
 
         } catch (Exception e) {
-            log.error("Failed to detect approaching SLA runs", e);
+            log.error("event=sla.early_warning outcome=failure", e);
+        } finally {
+            MdcContextUtil.restoreContext(snapshot);
         }
     }
 
@@ -222,13 +227,12 @@ public class LiveSlaBreachDetectionJob {
         return (slaTime - now) / 60000;
     }
 
-    private void recordMetrics(int breachedCount, Duration executionTime) {
-        meterRegistry.counter("sla.breach.live_detection.runs").increment();
-        meterRegistry.timer("sla.breach.live_detection.duration").record(executionTime);
+    private void recordMetrics(Timer.Sample sample, int breachedCount) {
+        meterRegistry.counter(SLA_DETECTION_EXECUTION).increment();
+        sample.stop(meterRegistry.timer(SLA_DETECTION_DURATION));
 
         lastBreachesGauge.set(breachedCount);
 
-        // Record monitored run count
         long monitoredCount = slaMonitoringCache.getMonitoredRunCount();
         activeRunsGauge.set(monitoredCount);
     }

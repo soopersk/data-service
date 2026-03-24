@@ -3,7 +3,9 @@ package com.company.observability.controller;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.*;
 import com.company.observability.service.AnalyticsService;
+import com.company.observability.util.ObservabilityConstants;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -42,14 +44,19 @@ public class AnalyticsController {
             @RequestParam(defaultValue = "DAILY") String frequency) {
 
         CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
-        meterRegistry.counter("api.analytics.runtime.requests").increment();
 
-        RuntimeAnalyticsResponse response = analyticsService
-                .getRuntimeAnalytics(calculatorId, tenantId, days, freq);
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            RuntimeAnalyticsResponse response = analyticsService
+                    .getRuntimeAnalytics(calculatorId, tenantId, days, freq);
 
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
-                .body(response);
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
+                    "endpoint", "/runtime"));
+        }
     }
 
     @GetMapping("/calculators/{calculatorId}/sla-summary")
@@ -63,14 +70,18 @@ public class AnalyticsController {
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam @Min(1) @Max(365) int days) {
 
-        meterRegistry.counter("api.analytics.sla-summary.requests").increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            SlaSummaryResponse response = analyticsService
+                    .getSlaSummary(calculatorId, tenantId, days);
 
-        SlaSummaryResponse response = analyticsService
-                .getSlaSummary(calculatorId, tenantId, days);
-
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
-                .body(response);
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
+                    "endpoint", "/sla-summary"));
+        }
     }
 
     @GetMapping("/calculators/{calculatorId}/trends")
@@ -85,14 +96,18 @@ public class AnalyticsController {
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam @Min(1) @Max(365) int days) {
 
-        meterRegistry.counter("api.analytics.trends.requests").increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            TrendAnalyticsResponse response = analyticsService
+                    .getTrends(calculatorId, tenantId, days);
 
-        TrendAnalyticsResponse response = analyticsService
-                .getTrends(calculatorId, tenantId, days);
-
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
-                .body(response);
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
+                    "endpoint", "/trends"));
+        }
     }
 
     @GetMapping("/calculators/{calculatorId}/sla-breaches")
@@ -114,14 +129,18 @@ public class AnalyticsController {
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
 
-        meterRegistry.counter("api.analytics.sla-breaches.requests").increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            PagedResponse<SlaBreachDetailResponse> response = analyticsService
+                    .getSlaBreachDetails(calculatorId, tenantId, days, severity, page, size, cursor);
 
-        PagedResponse<SlaBreachDetailResponse> response = analyticsService
-                .getSlaBreachDetails(calculatorId, tenantId, days, severity, page, size, cursor);
-
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.noCache())
-                .body(response);
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.noCache())
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
+                    "endpoint", "/sla-breaches"));
+        }
     }
 
     @GetMapping("/calculators/{calculatorId}/performance-card")
@@ -140,13 +159,18 @@ public class AnalyticsController {
             @RequestParam(defaultValue = "DAILY") String frequency) {
 
         CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
-        meterRegistry.counter("api.analytics.performance-card.requests").increment();
 
-        PerformanceCardResponse response = analyticsService
-                .getPerformanceCard(calculatorId, tenantId, days, freq);
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            PerformanceCardResponse response = analyticsService
+                    .getPerformanceCard(calculatorId, tenantId, days, freq);
 
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
-                .body(response);
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
+                    "endpoint", "/performance-card"));
+        }
     }
 }

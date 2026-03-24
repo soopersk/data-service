@@ -3,6 +3,7 @@ package com.company.observability.service;
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.event.*;
+import com.company.observability.util.ObservabilityConstants;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
@@ -43,18 +44,17 @@ public class CacheEvictionService {
             // Evict status response cache for this frequency
             redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
 
-            // FIXED: Reduced cardinality
-            meterRegistry.counter("cache.evictions",
+            meterRegistry.counter(ObservabilityConstants.CACHE_EVICTION_TOTAL,
                     Tags.of(
                             Tag.of("event", "completed"),
                             Tag.of("frequency", run.getFrequency().name())
                     )
             ).increment();
 
-            log.debug("Evicted cache for {} after completion", run.getCalculatorId());
-            
+            log.debug("event=cache_evict_complete calculator_id={} frequency={}", run.getCalculatorId(), run.getFrequency().name());
+
         } catch (Exception e) {
-            log.error("Failed to evict cache after run completion", e);
+            log.error("event=cache_evict_failure trigger=completed calculator_id={}", run.getCalculatorId(), e);
         }
     }
 
@@ -66,15 +66,15 @@ public class CacheEvictionService {
         try {
             redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
 
-            meterRegistry.counter("cache.evictions",
+            meterRegistry.counter(ObservabilityConstants.CACHE_EVICTION_TOTAL,
                     Tags.of(
                             Tag.of("event", "started"),
                             Tag.of("frequency", run.getFrequency().name())
                     )
             ).increment();
-            
+
         } catch (Exception e) {
-            log.error("Failed to evict cache after run start", e);
+            log.error("event=cache_evict_failure trigger=started calculator_id={}", run.getCalculatorId(), e);
         }
     }
 
@@ -89,21 +89,21 @@ public class CacheEvictionService {
         try {
             // FIXED: Update run in ZSET cache (not just evict response cache)
             redisCache.updateRunInCache(run);
-            
+
             // Also evict status response cache
             redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
 
-            meterRegistry.counter("cache.evictions",
+            meterRegistry.counter(ObservabilityConstants.CACHE_EVICTION_TOTAL,
                     Tags.of(
                             Tag.of("event", "sla_breached"),
                             Tag.of("frequency", run.getFrequency().name())
                     )
             ).increment();
-            
-            log.debug("Updated cache for {} after SLA breach", run.getCalculatorId());
-            
+
+            log.debug("event=cache_evict_sla_breach calculator_id={} frequency={}", run.getCalculatorId(), run.getFrequency().name());
+
         } catch (Exception e) {
-            log.error("Failed to update cache after SLA breach", e);
+            log.error("event=cache_evict_failure trigger=sla_breached calculator_id={}", run.getCalculatorId(), e);
         }
     }
 }

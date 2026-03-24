@@ -1,6 +1,8 @@
 package com.company.observability.repository;
 
 import com.company.observability.domain.DailyAggregate;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,6 +13,8 @@ import java.sql.*;
 import java.time.LocalDate;
 import java.util.*;
 
+import static com.company.observability.util.ObservabilityConstants.*;
+
 /**
  * Daily aggregate repository with reporting_date alignment
  */
@@ -20,6 +24,7 @@ import java.util.*;
 public class DailyAggregateRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Atomic upsert using reporting_date (matches partition key)
@@ -39,7 +44,7 @@ public class DailyAggregateRepository {
                 success_runs = calculator_sli_daily.success_runs + EXCLUDED.success_runs,
                 sla_breaches = calculator_sli_daily.sla_breaches + EXCLUDED.sla_breaches,
                 avg_duration_ms = (
-                    (calculator_sli_daily.avg_duration_ms * calculator_sli_daily.total_runs + EXCLUDED.avg_duration_ms) 
+                    (calculator_sli_daily.avg_duration_ms * calculator_sli_daily.total_runs + EXCLUDED.avg_duration_ms)
                     / (calculator_sli_daily.total_runs + 1)
                 ),
                 avg_start_min_cet = (
@@ -57,12 +62,14 @@ public class DailyAggregateRepository {
         int breachIncr = slaBreached ? 1 : 0;
 
         try {
+            Timer.Sample sample = Timer.start(meterRegistry);
             jdbcTemplate.update(sql,
                     calculatorId, tenantId, reportingDate,
                     successIncr, breachIncr, durationMs, startMinCet, endMinCet
             );
+            sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "upsert_daily").register(meterRegistry));
         } catch (Exception e) {
-            log.error("Failed to upsert daily aggregate for calculator {} on {}",
+            log.error("event=upsert_daily_failed calculator_id={} reporting_date={}",
                     calculatorId, reportingDate, e);
             throw new RuntimeException("Failed to update daily aggregate", e);
         }
@@ -84,10 +91,13 @@ public class DailyAggregateRepository {
             """;
 
         try {
-            return jdbcTemplate.query(sql, new DailyAggregateRowMapper(),
+            Timer.Sample sample = Timer.start(meterRegistry);
+            List<DailyAggregate> results = jdbcTemplate.query(sql, new DailyAggregateRowMapper(),
                     calculatorId, tenantId, days);
+            sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_recent_agg").register(meterRegistry));
+            return results;
         } catch (Exception e) {
-            log.error("Failed to fetch recent aggregates for calculator {}", calculatorId, e);
+            log.error("event=find_recent_agg_failed calculator_id={}", calculatorId, e);
             throw new RuntimeException("Failed to fetch daily aggregates", e);
         }
     }
@@ -123,7 +133,7 @@ public class DailyAggregateRepository {
         try {
             return jdbcTemplate.query(sql, new DailyAggregateRowMapper(), params);
         } catch (Exception e) {
-            log.error("Failed to fetch aggregates by reporting dates", e);
+            log.error("event=find_by_reporting_dates_failed calculator_id={}", calculatorId, e);
             throw new RuntimeException("Failed to fetch aggregates by date", e);
         }
     }

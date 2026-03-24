@@ -1,9 +1,11 @@
 package com.company.observability.exception;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.ConstraintViolationException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.Map;
 
@@ -11,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class GlobalExceptionHandlerTest {
 
-    private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+    private final GlobalExceptionHandler handler = new GlobalExceptionHandler(new SimpleMeterRegistry());
 
     @Test
     void handleDomainNotFound_returns404() {
@@ -56,7 +58,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void handleGenericException_returns500WithStableMessage() {
         ResponseEntity<Map<String, Object>> response =
-                handler.handleGenericException(new RuntimeException("internal details"));
+                handler.handleGenericException(new RuntimeException("internal details"), new MockHttpServletRequest());
 
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         assertEquals(500, response.getBody().get("status"));

@@ -69,8 +69,8 @@ class AlertHandlerServiceTest {
 
         assertTrue(Boolean.TRUE.equals(updated.getAlerted()));
         assertEquals(AlertStatus.SENT, updated.getAlertStatus());
-        assertEquals(1.0, meterRegistry.get("sla.breaches.created").counter().count());
-        assertEquals(1.0, meterRegistry.get("sla.alerts.sent").counter().count());
+        assertEquals(1.0, meterRegistry.get("obs.sla.breach.created").counter().count());
+        assertEquals(1.0, meterRegistry.get("obs.sla.alert.sent").counter().count());
     }
 
     @Test
@@ -85,7 +85,7 @@ class AlertHandlerServiceTest {
 
         verify(breachRepository).save(any(SlaBreachEvent.class));
         verify(breachRepository, never()).update(any(SlaBreachEvent.class));
-        assertEquals(1.0, meterRegistry.get("sla.breaches.duplicate").counter().count());
+        assertEquals(1.0, meterRegistry.get("obs.sla.breach.duplicate").counter().count());
     }
 
     private CalculatorRun baseRun() {

@@ -1,6 +1,7 @@
 package com.company.observability.repository;
 
 import com.company.observability.domain.SlaBreachEvent;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,7 +30,7 @@ class SlaBreachEventRepositoryTest {
 
     @BeforeEach
     void setUp() {
-        repository = new SlaBreachEventRepository(jdbcTemplate);
+        repository = new SlaBreachEventRepository(jdbcTemplate, new SimpleMeterRegistry());
     }
 
     @Test

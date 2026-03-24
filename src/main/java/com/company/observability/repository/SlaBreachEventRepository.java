@@ -4,6 +4,8 @@ import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.BreachType;
 import com.company.observability.domain.enums.Severity;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -18,12 +20,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 
+import static com.company.observability.util.ObservabilityConstants.*;
+
 @Repository
 @RequiredArgsConstructor
 @Slf4j
 public class SlaBreachEventRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final MeterRegistry meterRegistry;
 
     private static final String SELECT_COLUMNS = """
             breach_id, run_id, calculator_id, calculator_name, tenant_id,
@@ -59,6 +64,7 @@ public class SlaBreachEventRepository {
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
 
+        Timer.Sample sample = Timer.start(meterRegistry);
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, breach.getRunId());
@@ -77,6 +83,7 @@ public class SlaBreachEventRepository {
             ps.setTimestamp(14, Timestamp.from(breach.getCreatedAt()));
             return ps;
         }, keyHolder);
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "save_breach").register(meterRegistry));
 
         breach.setBreachId(keyHolder.getKey().longValue());
         return breach;
@@ -132,12 +139,14 @@ public class SlaBreachEventRepository {
             GROUP BY severity""";
 
         Map<String, Integer> result = new HashMap<>();
+        Timer.Sample sample = Timer.start(meterRegistry);
         jdbcTemplate.query(sql, rs -> {
             result.put(
                     rs.getString("severity"),
                     ((Number) rs.getObject("cnt")).intValue()
             );
         }, calculatorId, tenantId, days);
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "count_by_severity").register(meterRegistry));
         return result;
     }
 
@@ -215,7 +224,10 @@ public class SlaBreachEventRepository {
         params.add(limit);
         params.add(offset);
 
-        return jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<SlaBreachEvent> results = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_breaches").register(meterRegistry));
+        return results;
     }
 
     /**
@@ -246,7 +258,10 @@ public class SlaBreachEventRepository {
         sql.append("\nLIMIT ?");
         params.add(limit);
 
-        return jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<SlaBreachEvent> results = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_breaches").register(meterRegistry));
+        return results;
     }
 
     /**

@@ -3,6 +3,8 @@ package com.company.observability.cache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +15,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
+
+import static com.company.observability.util.ObservabilityConstants.CACHE_REDIS_DURATION;
 
 /**
  * LIVE SLA MONITORING using Redis Sorted Set
@@ -25,6 +29,7 @@ public class SlaMonitoringCache {
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
 
     @Value("${observability.sla.live-tracking.enabled:true}")
     private boolean liveTrackingEnabled;
@@ -41,27 +46,26 @@ public class SlaMonitoringCache {
      */
     public void registerForSlaMonitoring(CalculatorRun run) {
         if (!liveTrackingEnabled) {
-            log.debug("Live SLA tracking disabled, skipping monitoring for run {}", run.getRunId());
+            log.debug("event=sla.monitor.register outcome=skipped reason=tracking_disabled runId={}", run.getRunId());
             return;
         }
 
         if (run.getSlaTime() == null) {
-            log.debug("No SLA time for run {}, skipping monitoring", run.getRunId());
+            log.debug("event=sla.monitor.register outcome=skipped reason=no_sla_time runId={}", run.getRunId());
             return;
         }
 
         if (run.getStatus() != RunStatus.RUNNING) {
-            log.debug("Run {} not in RUNNING status, skipping SLA monitoring", run.getRunId());
+            log.debug("event=sla.monitor.register outcome=skipped reason=not_running runId={}", run.getRunId());
             return;
         }
 
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             String runKey = buildRunKey(run.getTenantId(), run.getRunId(), run.getReportingDate());
 
-            // Calculate score (SLA deadline as epoch millis)
             long slaDeadlineScore = run.getSlaTime().toEpochMilli();
 
-            // Create minimal run info for quick lookups
             Map<String, Object> runInfo = new HashMap<>();
             runInfo.put("runKey", runKey);
             runInfo.put("runId", run.getRunId());
@@ -74,29 +78,18 @@ public class SlaMonitoringCache {
 
             String runInfoJson = objectMapper.writeValueAsString(runInfo);
 
-            // Add to sorted set (score = SLA deadline)
-            redisTemplate.opsForZSet().add(
-                    SLA_DEADLINES_ZSET,
-                    runKey,
-                    slaDeadlineScore
-            );
-
-            // Store run info in hash for quick retrieval
-            redisTemplate.opsForHash().put(
-                    SLA_RUN_INFO_HASH,
-                    runKey,
-                    runInfoJson
-            );
-
-            // Set TTL on both structures (24 hours safety)
+            redisTemplate.opsForZSet().add(SLA_DEADLINES_ZSET, runKey, slaDeadlineScore);
+            redisTemplate.opsForHash().put(SLA_RUN_INFO_HASH, runKey, runInfoJson);
             redisTemplate.expire(SLA_DEADLINES_ZSET, Duration.ofHours(24));
             redisTemplate.expire(SLA_RUN_INFO_HASH, Duration.ofHours(24));
 
-            log.debug("Registered run {} for SLA monitoring (deadline: {})",
+            log.debug("event=sla.monitor.register outcome=success runId={} deadline={}",
                     run.getRunId(), run.getSlaTime());
 
         } catch (Exception e) {
-            log.error("Failed to register run for SLA monitoring", e);
+            log.error("event=sla.monitor.register outcome=failure runId={}", run.getRunId(), e);
+        } finally {
+            sample.stop(meterRegistry.timer(CACHE_REDIS_DURATION, "operation", "register", "tier", "sla"));
         }
     }
 
@@ -104,15 +97,18 @@ public class SlaMonitoringCache {
      * Deregister a run (called when run completes)
      */
     public void deregisterFromSlaMonitoring(String runId, String tenantId, LocalDate reportingDate) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             String runKey = buildRunKey(tenantId, runId, reportingDate);
             redisTemplate.opsForZSet().remove(SLA_DEADLINES_ZSET, runKey);
             redisTemplate.opsForHash().delete(SLA_RUN_INFO_HASH, runKey);
 
-            log.debug("Deregistered run {} from SLA monitoring", runId);
+            log.debug("event=sla.monitor.deregister outcome=success runId={}", runId);
 
         } catch (Exception e) {
-            log.error("Failed to deregister run from SLA monitoring", e);
+            log.error("event=sla.monitor.deregister outcome=failure runId={}", runId, e);
+        } finally {
+            sample.stop(meterRegistry.timer(CACHE_REDIS_DURATION, "operation", "deregister", "tier", "sla"));
         }
     }
 
@@ -121,10 +117,10 @@ public class SlaMonitoringCache {
      * Score range: -∞ to NOW
      */
     public List<Map<String, Object>> getBreachedRuns() {
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             long now = Instant.now().toEpochMilli();
 
-            // Get all runs with SLA deadline <= NOW
             Set<Object> breachedRunKeys = redisTemplate.opsForZSet()
                     .rangeByScore(SLA_DEADLINES_ZSET, 0, now);
 
@@ -134,7 +130,6 @@ public class SlaMonitoringCache {
 
             List<Map<String, Object>> breachedRuns = new ArrayList<>();
 
-            // Fetch run info for each breached run
             for (Object runKeyObj : breachedRunKeys) {
                 String runKey = runKeyObj.toString();
                 Object runInfoJson = redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runKey);
@@ -149,13 +144,15 @@ public class SlaMonitoringCache {
                 }
             }
 
-            log.debug("Found {} runs that exceeded SLA deadline", breachedRuns.size());
+            log.debug("event=sla.monitor.read_breached outcome=success count={}", breachedRuns.size());
 
             return breachedRuns;
 
         } catch (Exception e) {
-            log.error("Failed to get breached runs", e);
+            log.error("event=sla.monitor.read_breached outcome=failure", e);
             return Collections.emptyList();
+        } finally {
+            sample.stop(meterRegistry.timer(CACHE_REDIS_DURATION, "operation", "read_breached", "tier", "sla"));
         }
     }
 
@@ -191,13 +188,13 @@ public class SlaMonitoringCache {
                 }
             }
 
-            log.debug("Found {} runs approaching SLA deadline (within {} min)",
+            log.debug("event=sla.monitor.read_approaching outcome=success count={} minutesAhead={}",
                     approachingRuns.size(), minutesAhead);
 
             return approachingRuns;
 
         } catch (Exception e) {
-            log.error("Failed to get approaching SLA runs", e);
+            log.error("event=sla.monitor.read_approaching outcome=failure", e);
             return Collections.emptyList();
         }
     }
@@ -210,7 +207,7 @@ public class SlaMonitoringCache {
             Long count = redisTemplate.opsForZSet().size(SLA_DEADLINES_ZSET);
             return count != null ? count : 0;
         } catch (Exception e) {
-            log.error("Failed to get monitored run count", e);
+            log.error("event=sla.monitor.count outcome=failure", e);
             return 0;
         }
     }
@@ -237,7 +234,7 @@ public class SlaMonitoringCache {
             return Optional.empty();
 
         } catch (Exception e) {
-            log.error("Failed to get next SLA deadline", e);
+            log.error("event=sla.monitor.next_deadline outcome=failure", e);
             return Optional.empty();
         }
     }

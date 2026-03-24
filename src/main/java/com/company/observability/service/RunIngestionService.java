@@ -21,8 +21,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+
+import static com.company.observability.util.ObservabilityConstants.*;
 
 @Service
 @Slf4j
@@ -41,18 +44,27 @@ public class RunIngestionService {
 
     @Transactional
     public CalculatorRun startRun(StartRunRequest request, String tenantId) {
+        var prev = MdcContextUtil.setCalculatorContext(request.getCalculatorId(), request.getRunId());
+        try {
+            return doStartRun(request, tenantId);
+        } finally {
+            MdcContextUtil.restoreContext(prev);
+        }
+    }
+
+    private CalculatorRun doStartRun(StartRunRequest request, String tenantId) {
         // Check for existing run using partition key
         Optional<CalculatorRun> existing = runRepository.findById(
                 request.getRunId(), request.getReportingDate());
 
         if (existing.isPresent()) {
-            log.info("Duplicate start request for run {}", request.getRunId());
-            meterRegistry.counter("calculator.runs.start.duplicate").increment();
+            log.warn("event=run.start.accepted outcome=duplicate");
+            meterRegistry.counter(INGESTION_RUN_DUPLICATE, "phase", "start").increment();
             return existing.get();
         }
 
-        log.info("Starting new run {} for calculator {} (reporting_date: {})",
-                request.getRunId(), request.getCalculatorId(), request.getReportingDate());
+        log.info("event=run.start.accepted outcome=success freq={} reportingDate={}",
+                request.getFrequency(), request.getReportingDate());
 
         // Validate reporting_date matches frequency expectations
         validateReportingDate(request);
@@ -77,8 +89,7 @@ public class RunIngestionService {
                     slaDeadline,
                     request.getReportingDate()
             );
-            log.warn("SLA already breached at start for run {}: {}",
-                    request.getRunId(), breachReasonAtStart);
+            log.warn("event=run.start.sla_breached outcome=failure reason=start_after_deadline");
         }
 
         Instant estimatedEndTime = null;
@@ -86,9 +97,6 @@ public class RunIngestionService {
             estimatedEndTime = TimeUtils.calculateEstimatedEndTime(
                     request.getStartTime(), request.getExpectedDurationMs());
         }
-
-        log.info("RunId: {} for calculator {} , startTime: {}, slaDeadline: {}",
-                request.getRunId(), request.getCalculatorId(), request.getStartTime(), slaDeadline);
 
         CalculatorRun run = CalculatorRun.builder()
                 .runId(request.getRunId())
@@ -131,12 +139,12 @@ public class RunIngestionService {
 
         eventPublisher.publishEvent(new RunStartedEvent(run));
 
-        meterRegistry.counter("calculator.runs.started",
+        meterRegistry.counter(INGESTION_RUN_STARTED,
                 "frequency", run.getFrequency().name()
         ).increment();
 
-        log.info("Run {} started (reporting_date: {}, SLA deadline: {}, live_tracking: {})",
-                run.getRunId(), run.getReportingDate(), slaDeadline, liveTrackingEnabled);
+        log.info("event=run.start.completed outcome=success slaDeadline={} liveTracking={}",
+                slaDeadline, liveTrackingEnabled);
 
         return run;
     }
@@ -152,13 +160,22 @@ public class RunIngestionService {
 
         CalculatorRun run = runOpt.get();
 
+        var prev = MdcContextUtil.setCalculatorContext(run.getCalculatorId(), runId);
+        try {
+            return doCompleteRun(run, request, tenantId);
+        } finally {
+            MdcContextUtil.restoreContext(prev);
+        }
+    }
+
+    private CalculatorRun doCompleteRun(CalculatorRun run, CompleteRunRequest request, String tenantId) {
         if (!run.getTenantId().equals(tenantId)) {
-            throw new DomainAccessDeniedException("Access denied to run " + runId + " for tenant " + tenantId);
+            throw new DomainAccessDeniedException("Access denied to run " + run.getRunId() + " for tenant " + tenantId);
         }
 
         if (run.getStatus() != RunStatus.RUNNING) {
-            log.info("Run {} already completed", runId);
-            meterRegistry.counter("calculator.runs.complete.duplicate").increment();
+            log.warn("event=run.complete.accepted outcome=duplicate");
+            meterRegistry.counter(INGESTION_RUN_DUPLICATE, "phase", "complete").increment();
             return run;
         }
 
@@ -192,7 +209,7 @@ public class RunIngestionService {
 
         updateDailyAggregate(run);
 
-        meterRegistry.counter("calculator.runs.completed",
+        meterRegistry.counter(INGESTION_RUN_COMPLETED,
                 "frequency", run.getFrequency().name(),
                 "status", run.getStatus().name(),
                 "sla_breached", String.valueOf(run.getSlaBreached())
@@ -205,7 +222,8 @@ public class RunIngestionService {
             eventPublisher.publishEvent(new RunCompletedEvent(run));
         }
 
-        log.info("Run {} completed (reporting_date: {})", runId, run.getReportingDate());
+        log.info("event=run.complete.accepted outcome=success reportingDate={}",
+                run.getReportingDate());
 
         return run;
     }
@@ -238,9 +256,8 @@ public class RunIngestionService {
             LocalDate nextDay = reportingDate.plusDays(1);
 
             if (nextDay.getMonth() == reportingDate.getMonth()) {
-                log.warn("MONTHLY run {} has non-end-of-month reporting_date: {}",
-                        request.getRunId(), reportingDate);
-                // Don't fail - just warn
+                log.warn("event=run.validate.reporting_date outcome=skipped reason=non_eom_monthly reportingDate={}",
+                        reportingDate);
             }
         }
     }
@@ -258,7 +275,8 @@ public class RunIngestionService {
                     TimeUtils.calculateCetMinute(run.getEndTime())
             );
         } catch (Exception e) {
-            log.error("Failed to update daily aggregate", e);
+            log.error("event=daily_aggregate.upsert outcome=failure reportingDate={}",
+                    run.getReportingDate(), e);
         }
     }
 }

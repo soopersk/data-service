@@ -5,7 +5,9 @@ import com.company.observability.dto.request.CompleteRunRequest;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.dto.response.RunResponse;
 import com.company.observability.service.RunIngestionService;
+import com.company.observability.util.ObservabilityConstants;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,16 +43,20 @@ public class RunIngestionController {
 
         String userId = principal != null ? principal.getName() : "unknown";
 
-        log.info("Start run request from user {} for calculator {} in tenant {}",
+        log.info("Start run request from user={} calculator={} tenant={}",
                 userId, request.getCalculatorId(), tenantId);
 
-        meterRegistry.counter("api.runs.start.requests").increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            CalculatorRun run = ingestionService.startRun(request, tenantId);
 
-        CalculatorRun run = ingestionService.startRun(request, tenantId);
-
-        return ResponseEntity
-                .created(URI.create("/api/v1/runs/" + run.getRunId()))
-                .body(toRunResponse(run));
+            return ResponseEntity
+                    .created(URI.create("/api/v1/runs/" + run.getRunId()))
+                    .body(toRunResponse(run));
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_INGESTION_DURATION,
+                    "endpoint", "/api/v1/runs/start"));
+        }
     }
 
     @PostMapping("/{runId}/complete")
@@ -63,14 +69,18 @@ public class RunIngestionController {
 
         String userId = principal != null ? principal.getName() : "unknown";
 
-        log.info("Complete run request from user {} for run {} in tenant {}",
+        log.info("Complete run request from user={} runId={} tenant={}",
                 userId, runId, tenantId);
 
-        meterRegistry.counter("api.runs.complete.requests").increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            CalculatorRun run = ingestionService.completeRun(runId, request, tenantId);
 
-        CalculatorRun run = ingestionService.completeRun(runId, request, tenantId);
-
-        return ResponseEntity.ok(toRunResponse(run));
+            return ResponseEntity.ok(toRunResponse(run));
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_INGESTION_DURATION,
+                    "endpoint", "/api/v1/runs/{runId}/complete"));
+        }
     }
 
     private RunResponse toRunResponse(CalculatorRun run) {

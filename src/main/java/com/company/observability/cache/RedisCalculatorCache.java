@@ -4,6 +4,8 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.response.CalculatorStatusResponse;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisCallback;
@@ -15,6 +17,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
+import static com.company.observability.util.ObservabilityConstants.*;
+
 /**
  * Redis cache with proper enum support
  */
@@ -24,6 +28,7 @@ import java.util.*;
 public class RedisCalculatorCache {
 
     private final RedisTemplate<String, Object> redisTemplate;
+    private final MeterRegistry meterRegistry;
 
     // Cache key prefixes
     private static final String RECENT_RUNS_ZSET = "obs:runs:zset:";
@@ -49,6 +54,7 @@ public class RedisCalculatorCache {
     // ================================================================
 
     public void cacheRunOnWrite(CalculatorRun run) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             CalculatorFrequency frequency = run.getFrequency();
             String key = buildRecentRunsKey(run.getCalculatorId(), run.getTenantId(), frequency);
@@ -77,10 +83,19 @@ public class RedisCalculatorCache {
             // Add to bloom filter
             addToBloomFilter(run.getCalculatorId());
 
-            log.debug("Cached run {} in frequency-specific ZSET with TTL {}", run.getRunId(), ttl);
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "write")
+                    .tag("tier", "zset")
+                    .register(meterRegistry));
+
+            log.debug("event=cache.write outcome=success runId={} ttl={}", run.getRunId(), ttl);
 
         } catch (Exception e) {
-            log.warn("Failed to cache run on write: {}", e.getMessage());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "write")
+                    .tag("tier", "zset")
+                    .register(meterRegistry));
+            log.warn("event=cache.write outcome=failure runId={} error={}", run.getRunId(), e.getMessage());
         }
     }
 
@@ -98,16 +113,16 @@ public class RedisCalculatorCache {
             // Add updated version
             redisTemplate.opsForZSet().add(key, run, run.getCreatedAt().toEpochMilli());
 
-            log.debug("Updated run {} in cache (SLA breach update)", run.getRunId());
+            log.debug("event=cache.write outcome=success action=update runId={}", run.getRunId());
 
         } catch (Exception e) {
-            log.warn("Failed to update run in cache: {}", e.getMessage());
+            log.warn("event=cache.write outcome=failure action=update runId={} error={}", run.getRunId(), e.getMessage());
         }
     }
 
     private Duration calculateSmartTTL(CalculatorRun run, CalculatorFrequency frequency) {
         RunStatus status = run.getStatus();
-        
+
         if (status == RunStatus.RUNNING) {
             return Duration.ofMinutes(5);
         }
@@ -134,11 +149,16 @@ public class RedisCalculatorCache {
             String calculatorId, String tenantId, CalculatorFrequency frequency, int limit) {
 
         String key = buildRecentRunsKey(calculatorId, tenantId, frequency);
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
             Set<Object> runs = redisTemplate.opsForZSet().reverseRange(key, 0, limit - 1);
 
             if (runs == null || runs.isEmpty()) {
+                sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                        .tag("operation", "read")
+                        .tag("tier", "zset")
+                        .register(meterRegistry));
                 return Optional.empty();
             }
 
@@ -149,22 +169,32 @@ public class RedisCalculatorCache {
                 }
             }
 
-            log.debug("REDIS HIT: Retrieved {} runs for {} (frequency: {})", 
-                    result.size(), calculatorId, frequency);
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "read")
+                    .tag("tier", "zset")
+                    .register(meterRegistry));
+
+            log.debug("event=cache.read outcome=hit calculatorId={} frequency={} count={}",
+                    calculatorId, frequency, result.size());
             return Optional.of(result);
 
         } catch (Exception e) {
-            log.warn("Failed to retrieve from Redis: {}", e.getMessage());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "read")
+                    .tag("tier", "zset")
+                    .register(meterRegistry));
+            log.warn("event=cache.read outcome=failure calculatorId={} error={}", calculatorId, e.getMessage());
             return Optional.empty();
         }
     }
 
     public void cacheStatusResponse(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, 
+            String calculatorId, String tenantId, CalculatorFrequency frequency,
             int historyLimit, CalculatorStatusResponse response) {
 
         String hashKey = buildStatusHashKey(calculatorId, tenantId, frequency);
         String field = String.valueOf(historyLimit);
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
             RunStatus currentStatus = response.current() != null
@@ -178,11 +208,20 @@ public class RedisCalculatorCache {
             redisTemplate.opsForHash().put(hashKey, field, response);
             redisTemplate.expire(hashKey, ttl);
 
-            log.debug("Cached status response for {} (freq: {}, limit: {}) with TTL {}",
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "write")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+
+            log.debug("event=cache.write outcome=success calculatorId={} frequency={} historyLimit={} ttl={}",
                     calculatorId, frequency, historyLimit, ttl);
 
         } catch (Exception e) {
-            log.warn("Failed to cache status response: {}", e.getMessage());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "write")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+            log.warn("event=cache.write outcome=failure calculatorId={} error={}", calculatorId, e.getMessage());
         }
     }
 
@@ -191,32 +230,56 @@ public class RedisCalculatorCache {
 
         String hashKey = buildStatusHashKey(calculatorId, tenantId, frequency);
         String field = String.valueOf(historyLimit);
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
             Object cached = redisTemplate.opsForHash().get(hashKey, field);
 
             if (cached instanceof CalculatorStatusResponse) {
-                log.debug("REDIS HIT: Status response for {} (freq: {}, limit: {})", 
+                sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                        .tag("operation", "read")
+                        .tag("tier", "hash")
+                        .register(meterRegistry));
+                log.debug("event=cache.read outcome=hit calculatorId={} frequency={} historyLimit={}",
                         calculatorId, frequency, historyLimit);
                 return Optional.of((CalculatorStatusResponse) cached);
             }
 
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "read")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
             return Optional.empty();
 
         } catch (Exception e) {
-            log.warn("Failed to get status response: {}", e.getMessage());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "read")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+            log.warn("event=cache.read outcome=failure calculatorId={} error={}", calculatorId, e.getMessage());
             return Optional.empty();
         }
     }
 
     public void evictStatusResponse(String calculatorId, String tenantId, CalculatorFrequency frequency) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             // Evict all history limits for this calculator+frequency (hash delete)
             String hashKey = buildStatusHashKey(calculatorId, tenantId, frequency);
             redisTemplate.delete(hashKey);
-            log.debug("Evicted status responses for {} (frequency: {})", calculatorId, frequency);
+
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "evict")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+
+            log.debug("event=cache.evict outcome=success calculatorId={} frequency={}", calculatorId, frequency);
         } catch (Exception e) {
-            log.warn("Failed to evict status response: {}", e.getMessage());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "evict")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+            log.warn("event=cache.evict outcome=failure calculatorId={} error={}", calculatorId, e.getMessage());
         }
     }
 
@@ -224,9 +287,10 @@ public class RedisCalculatorCache {
         try {
             evictStatusResponse(calculatorId, tenantId, CalculatorFrequency.DAILY);
             evictStatusResponse(calculatorId, tenantId, CalculatorFrequency.MONTHLY);
-            log.debug("Evicted all frequency responses for {}", calculatorId);
+            log.debug("event=cache.evict outcome=success calculatorId={} scope=all_frequencies", calculatorId);
         } catch (Exception e) {
-            log.warn("Failed to evict all frequencies: {}", e.getMessage());
+            log.warn("event=cache.evict outcome=failure calculatorId={} scope=all_frequencies error={}",
+                    calculatorId, e.getMessage());
         }
     }
 
@@ -234,9 +298,11 @@ public class RedisCalculatorCache {
         try {
             String key = buildRecentRunsKey(calculatorId, tenantId, frequency);
             redisTemplate.delete(key);
-            log.debug("Evicted recent runs ZSET for {} (frequency: {})", calculatorId, frequency);
+            log.debug("event=cache.evict outcome=success calculatorId={} frequency={} tier=zset",
+                    calculatorId, frequency);
         } catch (Exception e) {
-            log.warn("Failed to evict recent runs: {}", e.getMessage());
+            log.warn("event=cache.evict outcome=failure calculatorId={} frequency={} tier=zset error={}",
+                    calculatorId, frequency, e.getMessage());
         }
     }
 
@@ -250,6 +316,7 @@ public class RedisCalculatorCache {
 
         Map<String, CalculatorStatusResponse> results = new HashMap<>();
         String field = String.valueOf(historyLimit);
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
             RedisSerializer<String> keySerializer =
@@ -280,11 +347,20 @@ public class RedisCalculatorCache {
                 }
             }
 
-            log.debug("REDIS BATCH: Retrieved {}/{} status responses (freq: {}, limit: {})",
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "read_batch")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+
+            log.debug("event=cache.read outcome=batch_complete hit={} total={} frequency={} historyLimit={}",
                     results.size(), calculatorIds.size(), frequency, historyLimit);
 
         } catch (Exception e) {
-            log.warn("Failed to batch get status responses: {}", e.getMessage());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "read_batch")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+            log.warn("event=cache.read outcome=failure operation=batch error={}", e.getMessage());
         }
 
         return results;
@@ -292,8 +368,10 @@ public class RedisCalculatorCache {
 
     @SuppressWarnings("unchecked")
     public void cacheBatchStatusResponses(
-            Map<String, CalculatorStatusResponse> responses, 
+            Map<String, CalculatorStatusResponse> responses,
             String tenantId, CalculatorFrequency frequency, int historyLimit) {
+
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
             RedisSerializer<String> keySerializer =
@@ -308,11 +386,11 @@ public class RedisCalculatorCache {
                 responses.forEach((calcId, response) -> {
                     String hashKey = buildStatusHashKey(calcId, tenantId, frequency);
                     String field = String.valueOf(historyLimit);
-                    
+
                     RunStatus currentStatus = response.current() != null
                             ? RunStatus.fromString(response.current().status())
                             : RunStatus.SUCCESS;
-                            
+
                     Duration ttl = currentStatus == RunStatus.RUNNING
                             ? Duration.ofSeconds(30)
                             : Duration.ofSeconds(60);
@@ -330,10 +408,19 @@ public class RedisCalculatorCache {
                 return null;
             });
 
-            log.debug("REDIS BATCH: Cached {} status responses", responses.size());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "write_batch")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+
+            log.debug("event=cache.write outcome=batch_complete count={}", responses.size());
 
         } catch (Exception e) {
-            log.warn("Failed to batch cache status responses: {}", e.getMessage());
+            sample.stop(Timer.builder(CACHE_REDIS_DURATION)
+                    .tag("operation", "write_batch")
+                    .tag("tier", "hash")
+                    .register(meterRegistry));
+            log.warn("event=cache.write outcome=failure operation=batch error={}", e.getMessage());
         }
     }
 
@@ -356,7 +443,7 @@ public class RedisCalculatorCache {
             redisTemplate.opsForSet().add(ACTIVE_BLOOM, calculatorId);
             redisTemplate.expire(ACTIVE_BLOOM, Duration.ofHours(24));
         } catch (Exception e) {
-            log.warn("Failed to add to bloom filter: {}", e.getMessage());
+            log.warn("event=cache.write outcome=failure tier=bloom error={}", e.getMessage());
         }
     }
 
@@ -387,7 +474,7 @@ public class RedisCalculatorCache {
             return result;
 
         } catch (Exception e) {
-            log.warn("Failed to get running calculators: {}", e.getMessage());
+            log.warn("event=cache.read outcome=failure tier=running_set error={}", e.getMessage());
             return Collections.emptySet();
         }
     }

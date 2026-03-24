@@ -3,19 +3,29 @@ package com.company.observability.service;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.util.SlaEvaluationResult;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
 import java.time.Instant;
 import java.util.*;
 
+import static com.company.observability.util.ObservabilityConstants.SLA_EVALUATION_DURATION;
+
 @Service
+@RequiredArgsConstructor
 @Slf4j
 public class SlaEvaluationService {
+
+    private final MeterRegistry meterRegistry;
 
     /**
      * UPDATED: Evaluate SLA based on absolute time deadline (CET)
      */
     public SlaEvaluationResult evaluateSla(CalculatorRun run) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         List<String> breachReasons = new ArrayList<>();
 
         // Check 1: End time exceeded SLA deadline (absolute time in CET)
@@ -69,6 +79,11 @@ public class SlaEvaluationService {
 
         boolean breached = !breachReasons.isEmpty();
         String reason = breached ? String.join("; ", breachReasons) : null;
+        String resultTag = breached ? "breached" : "clear";
+
+        sample.stop(Timer.builder(SLA_EVALUATION_DURATION)
+                .tag("result", resultTag)
+                .register(meterRegistry));
 
         return new SlaEvaluationResult(breached, reason, determineSeverity(run, breachReasons));
     }

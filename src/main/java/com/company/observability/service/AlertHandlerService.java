@@ -7,10 +7,9 @@ import com.company.observability.domain.enums.BreachType;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.SlaBreachEventRepository;
+import com.company.observability.util.MdcContextUtil;
 import com.company.observability.util.SlaEvaluationResult;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tag;
-import io.micrometer.core.instrument.Tags;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -23,10 +22,8 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.Instant;
 
-/**
- * FIXED: Use TransactionalEventListener to prevent alerts before DB commit
- * FIXED: Reduced cardinality in metrics
- */
+import static com.company.observability.util.ObservabilityConstants.*;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -35,10 +32,6 @@ public class AlertHandlerService {
     private final SlaBreachEventRepository breachRepository;
     private final MeterRegistry meterRegistry;
 
-    /**
-     * FIXED: Only send alerts after transaction commits
-     * FIXED: New transaction for alert processing
-     */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -46,7 +39,16 @@ public class AlertHandlerService {
         CalculatorRun run = event.getRun();
         SlaEvaluationResult result = event.getResult();
 
-        log.warn("Processing SLA breach for run {}: {}", run.getRunId(), result.getReason());
+        var prev = MdcContextUtil.setCalculatorContext(run.getCalculatorId(), run.getRunId());
+        try {
+            doHandleSlaBreachEvent(run, result);
+        } finally {
+            MdcContextUtil.restoreContext(prev);
+        }
+    }
+
+    private void doHandleSlaBreachEvent(CalculatorRun run, SlaEvaluationResult result) {
+        log.info("event=sla.breach.processing outcome=success reason={}", result.getReason());
 
         SlaBreachEvent breach = SlaBreachEvent.builder()
                 .runId(run.getRunId())
@@ -68,22 +70,16 @@ public class AlertHandlerService {
         try {
             savedBreach = breachRepository.save(breach);
 
-            // FIXED: Reduced cardinality - no calculatorId
-            meterRegistry.counter("sla.breaches.created",
-                    Tags.of(
-                            Tag.of("severity", result.getSeverity()),
-                            Tag.of("frequency", run.getFrequency().name())
-                    )
+            meterRegistry.counter(SLA_BREACH_CREATED,
+                    "severity", result.getSeverity(),
+                    "frequency", run.getFrequency().name()
             ).increment();
 
         } catch (DuplicateKeyException e) {
-            log.warn("SLA breach already recorded for run {}, skipping duplicate alert",
-                    run.getRunId());
+            log.warn("event=sla.breach.duplicate outcome=duplicate");
 
-            meterRegistry.counter("sla.breaches.duplicate",
-                    Tags.of(
-                            Tag.of("frequency", run.getFrequency().name())
-                    )
+            meterRegistry.counter(SLA_BREACH_DUPLICATE,
+                    "frequency", run.getFrequency().name()
             ).increment();
 
             return;
@@ -95,39 +91,31 @@ public class AlertHandlerService {
 
     private void sendSimpleAlert(SlaBreachEvent breach, CalculatorRun run) {
         try {
-            log.warn("SLA breach alert: runId={}, calculator={}, severity={}, reason={}",
-                    breach.getRunId(),
-                    breach.getCalculatorName(),
-                    breach.getSeverity(),
-                    run.getSlaBreachReason());
+            log.warn("event=sla.alert.send outcome=success severity={} reason={}",
+                    breach.getSeverity(), run.getSlaBreachReason());
 
             breach.setAlerted(true);
             breach.setAlertedAt(Instant.now());
             breach.setAlertStatus(AlertStatus.SENT);
             breachRepository.update(breach);
 
-            // FIXED: Reduced cardinality
-            meterRegistry.counter("sla.alerts.sent",
-                    Tags.of(
-                            Tag.of("severity", breach.getSeverity().name()),
-                            Tag.of("frequency", run.getFrequency().name())
-                    )
+            meterRegistry.counter(SLA_ALERT_SENT,
+                    "severity", breach.getSeverity().name(),
+                    "frequency", run.getFrequency().name()
             ).increment();
 
-            log.info("Alert sent successfully for breach {}", breach.getBreachId());
+            log.info("event=sla.alert.send outcome=success breachId={}", breach.getBreachId());
 
         } catch (Exception e) {
-            log.error("Failed to send alert for breach {}", breach.getBreachId(), e);
+            log.error("event=sla.alert.send outcome=failure breachId={}", breach.getBreachId(), e);
 
             breach.setAlertStatus(AlertStatus.FAILED);
             breach.setRetryCount(breach.getRetryCount() + 1);
             breach.setLastError(e.getMessage());
             breachRepository.update(breach);
 
-            meterRegistry.counter("sla.alerts.failed",
-                    Tags.of(
-                            Tag.of("frequency", run.getFrequency().name())
-                    )
+            meterRegistry.counter(SLA_ALERT_FAILED,
+                    "frequency", run.getFrequency().name()
             ).increment();
 
             throw e;

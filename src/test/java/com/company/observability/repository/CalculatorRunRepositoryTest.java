@@ -5,6 +5,7 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.util.JsonbConverter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +44,7 @@ class CalculatorRunRepositoryTest {
 
     @BeforeEach
     void setUp() {
-        repository = new CalculatorRunRepository(jdbcTemplate, redisCache, jsonbConverter);
+        repository = new CalculatorRunRepository(jdbcTemplate, redisCache, jsonbConverter, new SimpleMeterRegistry());
     }
 
     @Test

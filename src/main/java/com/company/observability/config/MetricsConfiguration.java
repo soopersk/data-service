@@ -1,6 +1,7 @@
 package com.company.observability.config;
 
 import com.company.observability.repository.CalculatorRunRepository;
+import com.company.observability.util.ObservabilityConstants;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
@@ -23,18 +24,19 @@ public class MetricsConfiguration {
     public MeterBinder customMetrics(MeterRegistry registry) {
         return (reg) -> {
             // Active calculator runs gauge
-            Gauge.builder("calculator.runs.active", runRepository, repo -> {
+            Gauge.builder(ObservabilityConstants.INGESTION_RUN_ACTIVE, runRepository, repo -> {
                         try {
                             return repo.countRunning();
                         } catch (Exception e) {
-                            log.warn("Failed to count running calculators", e);
+                            log.warn("event=metrics.gauge outcome=failure gauge={} error={}",
+                                    ObservabilityConstants.INGESTION_RUN_ACTIVE, e.getMessage());
                             return 0;
                         }
                     })
                     .description("Number of currently running calculator runs")
                     .register(reg);
 
-            log.info("Custom metrics registered");
+            log.info("event=metrics.registered gauges=[{}]", ObservabilityConstants.INGESTION_RUN_ACTIVE);
         };
     }
 }

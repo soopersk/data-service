@@ -4,6 +4,7 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.event.RunCompletedEvent;
 import com.company.observability.event.SlaBreachedEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -17,6 +18,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static com.company.observability.util.ObservabilityConstants.*;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -24,6 +27,7 @@ public class AnalyticsCacheService {
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
 
     private static final String ANALYTICS_PREFIX = "obs:analytics:";
     private static final String ANALYTICS_INDEX_PREFIX = "obs:analytics:index:";
@@ -40,10 +44,12 @@ public class AnalyticsCacheService {
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
+                meterRegistry.counter(CACHE_ANALYTICS_HIT, "prefix", keyPrefix).increment();
+                log.debug("event=cache.read outcome=hit key={}", key);
                 return convertCached(cached, responseType);
             }
         } catch (Exception e) {
-            log.warn("Redis read failed for key {}, falling back to DB", key, e);
+            log.warn("event=cache.read outcome=failure key={} error={}", key, e.getMessage());
         }
         return null;
     }
@@ -54,10 +60,12 @@ public class AnalyticsCacheService {
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
+                meterRegistry.counter(CACHE_ANALYTICS_HIT, "prefix", keyPrefix).increment();
+                log.debug("event=cache.read outcome=hit key={}", key);
                 return convertCached(cached, responseType);
             }
         } catch (Exception e) {
-            log.warn("Redis read failed for key {}, falling back to DB", key, e);
+            log.warn("event=cache.read outcome=failure key={} error={}", key, e.getMessage());
         }
         return null;
     }
@@ -69,9 +77,9 @@ public class AnalyticsCacheService {
         try {
             redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
             trackKey(indexKey, key);
-            log.debug("Cached analytics response: {}", key);
+            log.debug("event=cache.write outcome=success key={}", key);
         } catch (Exception e) {
-            log.warn("Redis write failed for key {}", key, e);
+            log.warn("event=cache.write outcome=failure key={} error={}", key, e.getMessage());
         }
     }
 
@@ -82,9 +90,9 @@ public class AnalyticsCacheService {
         try {
             redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
             trackKey(indexKey, key);
-            log.debug("Cached analytics response: {}", key);
+            log.debug("event=cache.write outcome=success key={}", key);
         } catch (Exception e) {
-            log.warn("Redis write failed for key {}", key, e);
+            log.warn("event=cache.write outcome=failure key={} error={}", key, e.getMessage());
         }
     }
 
@@ -114,12 +122,13 @@ public class AnalyticsCacheService {
                         .collect(Collectors.toList());
                 keysToDelete.add(indexKey);
                 redisTemplate.delete(keysToDelete);
-                log.debug("Evicted {} analytics cache keys for calculator {}",
-                        indexedKeys.size(), run.getCalculatorId());
+                meterRegistry.counter(CACHE_ANALYTICS_EVICTION).increment();
+                log.debug("event=cache.evict outcome=success calculatorId={} keysEvicted={}",
+                        run.getCalculatorId(), indexedKeys.size());
             }
         } catch (Exception e) {
-            log.warn("Failed to evict analytics cache for calculator {}",
-                    run.getCalculatorId(), e);
+            log.warn("event=cache.evict outcome=failure calculatorId={} error={}",
+                    run.getCalculatorId(), e.getMessage());
         }
     }
 

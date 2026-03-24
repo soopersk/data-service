@@ -3,7 +3,9 @@ package com.company.observability.controller;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.service.RunQueryService;
+import com.company.observability.util.ObservabilityConstants;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,34 +41,36 @@ public class RunQueryController {
     public ResponseEntity<CalculatorStatusResponse> getCalculatorStatus(
             @PathVariable String calculatorId,
             @RequestHeader("X-Tenant-Id") String tenantId,
-            
+
             @Parameter(description = "Frequency: DAILY, MONTHLY, D, or M (case-insensitive)")
             @RequestParam String frequency,
-            
+
             @Parameter(description = "Number of historical runs to return (1-100)")
             @RequestParam(defaultValue = "5") @Min(1) @Max(100) int historyLimit,
-            
+
             @Parameter(description = "Bypass all caches and force database query")
             @RequestParam(defaultValue = "false") boolean bypassCache) {
-        
+
         // Parse frequency using enum's built-in parser
         CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
 
-        meterRegistry.counter("api.calculators.status.requests",
-                "frequency", freq.name(),
-                "bypass_cache", String.valueOf(bypassCache)
-        ).increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            CalculatorStatusResponse response = queryService.getCalculatorStatus(
+                    calculatorId, tenantId, freq, historyLimit, bypassCache);
 
-        CalculatorStatusResponse response = queryService.getCalculatorStatus(
-                calculatorId, tenantId, freq, historyLimit, bypassCache);
+            CacheControl cacheControl = bypassCache
+                    ? CacheControl.noCache()
+                    : CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate();
 
-        CacheControl cacheControl = bypassCache
-                ? CacheControl.noCache()
-                : CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate();
-
-        return ResponseEntity.ok()
-                .cacheControl(cacheControl)
-                .body(response);
+            return ResponseEntity.ok()
+                    .cacheControl(cacheControl)
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_QUERY_DURATION,
+                    "endpoint", "/api/v1/calculators/{calculatorId}/status",
+                    "frequency", freq.name()));
+        }
     }
 
     @PostMapping("/batch/status")
@@ -78,36 +82,38 @@ public class RunQueryController {
     public ResponseEntity<List<CalculatorStatusResponse>> getBatchCalculatorStatus(
             @RequestBody @NotEmpty @Size(max = 100) List<String> calculatorIds,
             @RequestHeader("X-Tenant-Id") String tenantId,
-            
+
             @Parameter(description = "Frequency: DAILY, MONTHLY, D, or M")
             @RequestParam String frequency,
-            
+
             @Parameter(description = "Number of historical runs per calculator (1-50)")
             @RequestParam(defaultValue = "5") @Min(1) @Max(50) int historyLimit,
-            
+
             @Parameter(description = "Allow stale cached data. Set false to force fresh queries.")
             @RequestParam(defaultValue = "true") boolean allowStale) {
-        
+
         // Parse frequency using enum
         CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
 
         log.debug("Batch status query for {} calculators (frequency={}, allowStale={})",
                 calculatorIds.size(), freq, allowStale);
 
-        meterRegistry.counter("api.calculators.batch.requests",
-                "frequency", freq.name(),
-                "allow_stale", String.valueOf(allowStale)
-        ).increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            List<CalculatorStatusResponse> response = queryService.getBatchCalculatorStatus(
+                    calculatorIds, tenantId, freq, historyLimit, allowStale);
 
-        List<CalculatorStatusResponse> response = queryService.getBatchCalculatorStatus(
-                calculatorIds, tenantId, freq, historyLimit, allowStale);
+            CacheControl cacheControl = allowStale
+                    ? CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate()
+                    : CacheControl.noCache();
 
-        CacheControl cacheControl = allowStale
-                ? CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate()
-                : CacheControl.noCache();
-
-        return ResponseEntity.ok()
-                .cacheControl(cacheControl)
-                .body(response);
+            return ResponseEntity.ok()
+                    .cacheControl(cacheControl)
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_QUERY_DURATION,
+                    "endpoint", "/api/v1/calculators/batch/status",
+                    "frequency", freq.name()));
+        }
     }
 }
