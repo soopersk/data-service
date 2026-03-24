@@ -44,12 +44,10 @@ class RunQueryServiceTest {
 
     @Test
     void getBatchCalculatorStatus_usesDbOnlyPathForResponseCacheMisses() {
-        CalculatorStatusResponse cachedResponse = CalculatorStatusResponse.builder()
-                .calculatorName("Calculator 1")
-                .lastRefreshed(Instant.now())
-                .current(new RunStatusInfo("run-1", "RUNNING", null, null, null, null, null, null, null, null, null))
-                .history(List.of())
-                .build();
+        CalculatorStatusResponse cachedResponse = new CalculatorStatusResponse(
+                "Calculator 1", Instant.now(),
+                new RunStatusInfo("run-1", "RUNNING", null, null, null, null, null, null, null, null, null),
+                List.of());
 
         when(redisCache.getBatchStatusResponses(
                 List.of("calc-1", "calc-2"), "tenant-1", CalculatorFrequency.DAILY, 2))

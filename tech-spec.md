@@ -159,8 +159,8 @@ All events are synchronous Spring `ApplicationEvent`s published via `Application
 | Event | Published by | Listeners |
 |-------|-------------|-----------|
 | `RunStartedEvent` | `RunIngestionService.startRun()` | `CacheWarmingService.onRunStarted()` |
-| `RunCompletedEvent` | `RunIngestionService.completeRun()` (non-breach) | `CacheWarmingService.onRunCompleted()`, `CacheEvictionService.onRunCompleted()` (disabled) |
-| `SlaBreachedEvent` | `RunIngestionService.startRun()` (start-time breach), `RunIngestionService.completeRun()` (completion breach), `LiveSlaBreachDetectionJob` | `AlertHandlerService.handleSlaBreachEvent()`, `CacheWarmingService.onSlaBreached()`, `CacheEvictionService.onSlaBreached()` (disabled) |
+| `RunCompletedEvent` | `RunIngestionService.completeRun()` (non-breach) | `CacheWarmingService.onRunCompleted()`, `AnalyticsCacheService.onRunCompleted()`, `CacheEvictionService.onRunCompleted()` (disabled) |
+| `SlaBreachedEvent` | `RunIngestionService.startRun()` (start-time breach), `RunIngestionService.completeRun()` (completion breach), `LiveSlaBreachDetectionJob` | `AlertHandlerService.handleSlaBreachEvent()`, `CacheWarmingService.onSlaBreached()`, `AnalyticsCacheService.onSlaBreached()`, `CacheEvictionService.onSlaBreached()` (disabled) |
 
 **`CacheEvictionService`** is conditionally disabled (property `observability.cache.legacy-eviction-listener.enabled`, default `false`). `CacheWarmingService` is the active cache manager (property `observability.cache.warm-on-completion`, default `true`).
 
@@ -414,7 +414,7 @@ The expression `reporting_date = (DATE_TRUNC('month', reporting_date) + INTERVAL
 |------------|----------------|-----|---------|
 | `obs:runs:zset:{calcId}:{tenantId}:{frequency}` | ZSET | 5m (RUNNING) / 15m (completed <30m ago) / 1h (DAILY older) / 4h (MONTHLY older) | Recent run objects, scored by `createdAt.toEpochMilli()`, capped at 100 members |
 | `obs:status:hash:{calcId}:{tenantId}:{frequency}` | Hash | 30s (RUNNING current) / 60s (completed) | `CalculatorStatusResponse` objects, keyed by `historyLimit` integer |
-| `obs:running` | Set | 2h (implicit) | Members = `{calcId}:{tenantId}:{frequency}` — tracks all currently RUNNING runs |
+| `obs:running` | Set | 2h | Members = `{calcId}:{tenantId}:{frequency}` — tracks all currently RUNNING runs. Written by `cacheRunOnWrite()`: SADD on RUNNING, SREM on completion. |
 | `obs:active:bloom` | Set | 24h | Simulated bloom filter — set of calculator IDs seen in last 24h |
 | `obs:sla:deadlines` | ZSET | 24h | Member = `{tenantId}:{runId}:{reportingDate}`, score = SLA deadline epoch ms |
 | `obs:sla:run_info` | Hash | 24h | Field = runKey, value = JSON `{runId, calcId, tenantId, reportingDate, startTime, slaTime}` |
@@ -1483,9 +1483,9 @@ All API endpoints track request counts via counters, but only `query.batch_statu
 
 ---
 
-### TD-10: Dev Profile Residual Config
+### TD-10: Profile Residual JPA/Hibernate Config
 
-`application-dev.yml` contains `org.hibernate.SQL: DEBUG` logging configuration. Hibernate / JPA is not used in this service. The config is harmless but misleading.
+`application-dev.yml` contains `org.hibernate.SQL: DEBUG` and `application-prod.yml` contains `spring.jpa.show-sql: false`. Hibernate / JPA is not used in this service. The config is harmless but misleading.
 
 ---
 
@@ -1505,7 +1505,7 @@ All API endpoints track request counts via counters, but only `query.batch_statu
 
 4. **Multi-tenant isolation enforcement:** `tenantId` is passed as a caller-supplied header. There is no authentication token that cryptographically binds a caller to a tenantId. A caller can supply any `tenantId` value. Is this acceptable for the current trust model?
 
-5. **`obs:running` Set population:** The `obs:running` Set (tracking currently-running calculator IDs) is read via `isRunning()` and `getRunningCalculators()`. It is not clear in the codebase where members are added to and removed from this set — `cacheRunOnWrite()` does not write to `obs:running`. This key may be partially or fully unpopulated.
+5. **~~`obs:running` Set population~~** — **RESOLVED.** `RedisCalculatorCache.cacheRunOnWrite()` writes to `obs:running`: adds `{calcId}:{tenantId}:{frequency}` when status=RUNNING (with 2h TTL), removes when status is anything else. The Set is fully populated during normal operation.
 
 6. **`calculator_sli_daily` vs `calculator_runs` for performance card:** The performance card endpoint queries `calculator_runs` directly (with a JOIN to `sla_breach_events`) rather than `calculator_sli_daily`. For `days=365`, this can return 365 raw run rows. Should this be pre-aggregated in `calculator_sli_daily` to avoid the raw-table query?
 

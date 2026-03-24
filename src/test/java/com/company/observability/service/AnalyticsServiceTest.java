@@ -134,8 +134,8 @@ class AnalyticsServiceTest {
 
         TrendAnalyticsResponse response = service.getTrends("calc-1", "tenant-1", 7);
 
-        assertEquals(1, response.getTrends().size());
-        assertEquals("AMBER", response.getTrends().get(0).getSlaStatus());
+        assertEquals(1, response.trends().size());
+        assertEquals("AMBER", response.trends().get(0).slaStatus());
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

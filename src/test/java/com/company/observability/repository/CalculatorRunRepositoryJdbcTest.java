@@ -95,9 +95,9 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         );
 
         assertEquals(1, result.size());
-        assertEquals("run-severity", result.get(0).getRunId());
-        assertEquals("HIGH", result.get(0).getSeverity());
-        assertNotNull(result.get(0).getReportingDate());
+        assertEquals("run-severity", result.get(0).runId());
+        assertEquals("HIGH", result.get(0).severity() != null ? result.get(0).severity().name() : null);
+        assertNotNull(result.get(0).reportingDate());
     }
 
     private void insertRun(String runId, String calculatorId, LocalDate reportingDate, Instant createdAt) {

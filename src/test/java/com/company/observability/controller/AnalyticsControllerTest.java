@@ -55,22 +55,10 @@ class AnalyticsControllerTest {
 
     @Test
     void getRuntimeAnalytics_returnsCacheableResponse_andParsesFrequency() throws Exception {
-        RuntimeAnalyticsResponse response = RuntimeAnalyticsResponse.builder()
-                .calculatorId("calc-1")
-                .periodDays(30)
-                .frequency("MONTHLY")
-                .avgDurationMs(1200)
-                .totalRuns(12)
-                .successRate(0.95)
-                .dataPoints(List.of(
-                        RuntimeAnalyticsResponse.DailyDataPoint.builder()
-                                .date(LocalDate.parse("2026-02-21"))
-                                .avgDurationMs(1200)
-                                .totalRuns(2)
-                                .successRuns(2)
-                                .build()
-                ))
-                .build();
+        RuntimeAnalyticsResponse response = new RuntimeAnalyticsResponse(
+                "calc-1", 30, "MONTHLY", 1200, null, 0, 0, 12, 0.95,
+                List.of(new RuntimeAnalyticsResponse.DailyDataPoint(
+                        LocalDate.parse("2026-02-21"), 1200, 2, 2)));
 
         when(analyticsService.getRuntimeAnalytics("calc-1", "tenant-a", 30, CalculatorFrequency.MONTHLY))
                 .thenReturn(response);
@@ -114,30 +102,17 @@ class AnalyticsControllerTest {
 
     @Test
     void getPerformanceCard_defaultsFrequencyToDaily() throws Exception {
-        PerformanceCardResponse response = PerformanceCardResponse.builder()
-                .calculatorId("calc-1")
-                .calculatorName("Calculator One")
-                .periodDays(30)
-                .meanDurationMs(180000L)
-                .schedule(PerformanceCardResponse.ScheduleInfo.builder()
-                        .estimatedStartTimeCet("06:00")
-                        .frequency("DAILY")
-                        .build())
-                .slaSummary(PerformanceCardResponse.SlaSummaryPct.builder()
-                        .totalRuns(1)
-                        .slaMetCount(1)
-                        .slaMetPct(100.0)
-                        .lateCount(0)
-                        .latePct(0.0)
-                        .veryLateCount(0)
-                        .veryLatePct(0.0)
-                        .build())
-                .referenceLines(PerformanceCardResponse.ReferenceLines.builder()
-                        .slaStartHourCet(BigDecimal.valueOf(6.00))
-                        .slaEndHourCet(BigDecimal.valueOf(6.15))
-                        .build())
-                .runs(List.of())
-                .build();
+        PerformanceCardResponse response = new PerformanceCardResponse(
+                "calc-1",
+                "Calculator One",
+                new PerformanceCardResponse.ScheduleInfo("06:00", "DAILY"),
+                30,
+                180000L,
+                null,
+                new PerformanceCardResponse.SlaSummaryPct(1, 1, 100.0, 0, 0.0, 0, 0.0),
+                List.of(),
+                new PerformanceCardResponse.ReferenceLines(
+                        BigDecimal.valueOf(6.00), BigDecimal.valueOf(6.15)));
 
         when(analyticsService.getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
                 .thenReturn(response);

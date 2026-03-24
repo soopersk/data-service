@@ -67,12 +67,8 @@ public class RunQueryService {
                 .map(this::mapToRunStatusInfo)
                 .collect(Collectors.toList());
 
-        CalculatorStatusResponse response = CalculatorStatusResponse.builder()
-                .calculatorName(currentRun.getCalculatorName())
-                .lastRefreshed(Instant.now())
-                .current(current)
-                .history(history)
-                .build();
+        CalculatorStatusResponse response = new CalculatorStatusResponse(
+                currentRun.getCalculatorName(), Instant.now(), current, history);
 
         // Cache (unless bypassed)
         if (!bypassCache) {
@@ -131,12 +127,8 @@ public class RunQueryService {
                         .map(this::mapToRunStatusInfo)
                         .collect(Collectors.toList());
 
-                CalculatorStatusResponse response = CalculatorStatusResponse.builder()
-                        .calculatorName(currentRun.getCalculatorName())
-                        .lastRefreshed(Instant.now())
-                        .current(current)
-                        .history(history)
-                        .build();
+                CalculatorStatusResponse response = new CalculatorStatusResponse(
+                        currentRun.getCalculatorName(), Instant.now(), current, history);
 
                 freshResponses.put(calcId, response);
             }
