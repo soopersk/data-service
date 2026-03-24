@@ -75,8 +75,8 @@ class AnalyticsServiceTest {
                 "calc-1", "tenant-1", 30, null, 0, 2, null
         );
 
-        assertEquals(2, response.getContent().size());
-        assertNotNull(response.getNextCursor());
+        assertEquals(2, response.content().size());
+        assertNotNull(response.nextCursor());
     }
 
     @Test
@@ -112,8 +112,8 @@ class AnalyticsServiceTest {
 
         SlaSummaryResponse response = service.getSlaSummary("calc-1", "tenant-1", 30);
 
-        assertEquals(2, response.getTotalBreaches());
-        assertEquals(1, response.getRedDays());
+        assertEquals(2, response.totalBreaches());
+        assertEquals(1, response.redDays());
     }
 
     @Test

@@ -1,24 +1,16 @@
 package com.company.observability.dto.response;
 
-import lombok.*;
-import java.io.Serializable;
 import java.time.Instant;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class SlaBreachDetailResponse implements Serializable {
-    private static final long serialVersionUID = 1L;
-
-    private long breachId;
-    private String runId;
-    private String calculatorId;
-    private String calculatorName;
-    private String breachType;
-    private String severity;
-    private String slaStatus; // AMBER or RED
-    private Long expectedValue;
-    private Long actualValue;
-    private Instant createdAt;
-}
+public record SlaBreachDetailResponse(
+        long breachId,
+        String runId,
+        String calculatorId,
+        String calculatorName,
+        String breachType,
+        String severity,
+        String slaStatus,
+        Long expectedValue,
+        Long actualValue,
+        Instant createdAt
+) {}

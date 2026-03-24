@@ -161,16 +161,10 @@ public class AnalyticsService {
             }
         }
 
-        return SlaSummaryResponse.builder()
-                .calculatorId(calculatorId)
-                .periodDays(days)
-                .totalBreaches(coreData.getTotalBreaches())
-                .greenDays(greenDays)
-                .amberDays(amberDays)
-                .redDays(redDays)
-                .breachesBySeverity(coreData.getBreachesBySeverity())
-                .breachesByType(coreData.getBreachesByType())
-                .build();
+        return new SlaSummaryResponse(
+                calculatorId, days, coreData.getTotalBreaches(),
+                greenDays, amberDays, redDays,
+                coreData.getBreachesBySeverity(), coreData.getBreachesByType());
     }
 
     // ================================================================
@@ -264,29 +258,16 @@ public class AnalyticsService {
             nextCursor = encodeCursor(tail.getCreatedAt(), tail.getBreachId());
         }
 
-        return PagedResponse.<SlaBreachDetailResponse>builder()
-                .content(content)
-                .page(page)
-                .size(size)
-                .totalElements(total)
-                .totalPages((int) Math.ceil((double) total / size))
-                .nextCursor(nextCursor)
-                .build();
+        return new PagedResponse<>(content, page, size, total,
+                (int) Math.ceil((double) total / size), nextCursor);
     }
 
     private SlaBreachDetailResponse toBreachDetail(SlaBreachEvent breach) {
-        return SlaBreachDetailResponse.builder()
-                .breachId(breach.getBreachId())
-                .runId(breach.getRunId())
-                .calculatorId(breach.getCalculatorId())
-                .calculatorName(breach.getCalculatorName())
-                .breachType(breach.getBreachType().name())
-                .severity(breach.getSeverity().name())
-                .slaStatus(mapSeverityToTrafficLight(breach.getSeverity().name()))
-                .expectedValue(breach.getExpectedValue())
-                .actualValue(breach.getActualValue())
-                .createdAt(breach.getCreatedAt())
-                .build();
+        return new SlaBreachDetailResponse(
+                breach.getBreachId(), breach.getRunId(), breach.getCalculatorId(),
+                breach.getCalculatorName(), breach.getBreachType().name(),
+                breach.getSeverity().name(), mapSeverityToTrafficLight(breach.getSeverity().name()),
+                breach.getExpectedValue(), breach.getActualValue(), breach.getCreatedAt());
     }
 
     // ================================================================

@@ -74,16 +74,9 @@ public class RunIngestionController {
     }
 
     private RunResponse toRunResponse(CalculatorRun run) {
-        return RunResponse.builder()
-                .runId(run.getRunId())
-                .calculatorId(run.getCalculatorId())
-                .calculatorName(run.getCalculatorName())
-                .status(run.getStatus().name())
-                .startTime(run.getStartTime())
-                .endTime(run.getEndTime())
-                .durationMs(run.getDurationMs())
-                .slaBreached(run.getSlaBreached())
-                .slaBreachReason(run.getSlaBreachReason())
-                .build();
+        return new RunResponse(
+                run.getRunId(), run.getCalculatorId(), run.getCalculatorName(),
+                run.getStatus().name(), run.getStartTime(), run.getEndTime(),
+                run.getDurationMs(), run.getSlaBreached(), run.getSlaBreachReason());
     }
 }

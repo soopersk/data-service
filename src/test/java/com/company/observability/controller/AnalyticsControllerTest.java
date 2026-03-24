@@ -90,20 +90,12 @@ class AnalyticsControllerTest {
 
     @Test
     void getSlaBreachDetails_returnsNoCacheHeader() throws Exception {
-        PagedResponse<SlaBreachDetailResponse> response = PagedResponse.<SlaBreachDetailResponse>builder()
-                .content(List.of(SlaBreachDetailResponse.builder()
-                        .breachId(101L)
-                        .runId("run-1")
-                        .calculatorId("calc-1")
-                        .severity("HIGH")
-                        .slaStatus("RED")
-                        .createdAt(Instant.parse("2026-02-22T06:20:00Z"))
-                        .build()))
-                .page(0)
-                .size(20)
-                .totalElements(1)
-                .totalPages(1)
-                .build();
+        PagedResponse<SlaBreachDetailResponse> response = new PagedResponse<>(
+                List.of(new SlaBreachDetailResponse(
+                        101L, "run-1", "calc-1", null,
+                        null, "HIGH", "RED",
+                        null, null, Instant.parse("2026-02-22T06:20:00Z"))),
+                0, 20, 1, 1, null);
 
         when(analyticsService.getSlaBreachDetails("calc-1", "tenant-a", 7, null, 0, 20, null))
                 .thenReturn(response);
@@ -163,14 +155,8 @@ class AnalyticsControllerTest {
     @Test
     void getSlaSummary_returnsCacheableResponse() throws Exception {
         when(analyticsService.getSlaSummary("calc-1", "tenant-a", 14))
-                .thenReturn(com.company.observability.dto.response.SlaSummaryResponse.builder()
-                        .calculatorId("calc-1")
-                        .periodDays(14)
-                        .totalBreaches(2)
-                        .greenDays(10)
-                        .amberDays(2)
-                        .redDays(2)
-                        .build());
+                .thenReturn(new com.company.observability.dto.response.SlaSummaryResponse(
+                        "calc-1", 14, 2, 10, 2, 2, null, null));
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/sla-summary")
                         .header(TENANT_HEADER, "tenant-a")
