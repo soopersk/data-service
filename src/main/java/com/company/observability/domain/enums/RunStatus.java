@@ -35,23 +35,4 @@ public enum RunStatus {
             return RUNNING;
         }
     }
-
-    public static RunStatus fromCompletionStatus(String status) {
-        if (status == null || status.isBlank()) {
-            return SUCCESS;
-        }
-
-        RunStatus parsed;
-        try {
-            parsed = RunStatus.valueOf(status.trim().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Unknown completion status: " + status);
-        }
-
-        if (parsed == RUNNING) {
-            throw new IllegalArgumentException("Completion status cannot be RUNNING");
-        }
-
-        return parsed;
-    }
 }
