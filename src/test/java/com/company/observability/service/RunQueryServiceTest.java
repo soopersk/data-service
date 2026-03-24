@@ -47,7 +47,7 @@ class RunQueryServiceTest {
         CalculatorStatusResponse cachedResponse = CalculatorStatusResponse.builder()
                 .calculatorName("Calculator 1")
                 .lastRefreshed(Instant.now())
-                .current(RunStatusInfo.builder().runId("run-1").status("RUNNING").build())
+                .current(new RunStatusInfo("run-1", "RUNNING", null, null, null, null, null, null, null, null, null))
                 .history(List.of())
                 .build();
 
