@@ -5,6 +5,7 @@ import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.dto.enums.SlaStatus;
 import com.company.observability.dto.response.*;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.repository.DailyAggregateRepository;
@@ -73,12 +74,10 @@ public class AnalyticsService {
             List<DailyAggregate> aggregates) {
 
         if (aggregates.isEmpty()) {
-            return RuntimeAnalyticsResponse.builder()
-                    .calculatorId(calculatorId)
-                    .periodDays(days)
-                    .frequency(frequency.name())
-                    .dataPoints(Collections.emptyList())
-                    .build();
+            return new RuntimeAnalyticsResponse(
+                    calculatorId, days, frequency.name(),
+                    0, null, 0, 0, 0, 0.0,
+                    Collections.emptyList());
         }
 
         // Weighted average: SUM(avg_duration * total_runs) / SUM(total_runs)
@@ -97,29 +96,21 @@ public class AnalyticsService {
             minDuration = Math.min(minDuration, agg.avgDurationMs());
             maxDuration = Math.max(maxDuration, agg.avgDurationMs());
 
-            dataPoints.add(RuntimeAnalyticsResponse.DailyDataPoint.builder()
-                    .date(agg.dayCet())
-                    .avgDurationMs(agg.avgDurationMs())
-                    .totalRuns(agg.totalRuns())
-                    .successRuns(agg.successRuns())
-                    .build());
+            dataPoints.add(new RuntimeAnalyticsResponse.DailyDataPoint(
+                    agg.dayCet(), agg.avgDurationMs(), agg.totalRuns(), agg.successRuns()));
         }
 
         long avgDuration = totalRuns > 0 ? weightedSum / totalRuns : 0;
         double successRate = totalRuns > 0 ? (double) totalSuccess / totalRuns : 0.0;
 
-        return RuntimeAnalyticsResponse.builder()
-                .calculatorId(calculatorId)
-                .periodDays(days)
-                .frequency(frequency.name())
-                .avgDurationMs(avgDuration)
-                .avgDurationFormatted(TimeUtils.formatDuration(avgDuration))
-                .minDurationMs(minDuration == Long.MAX_VALUE ? 0 : minDuration)
-                .maxDurationMs(maxDuration == Long.MIN_VALUE ? 0 : maxDuration)
-                .totalRuns(totalRuns)
-                .successRate(Math.round(successRate * 1000.0) / 1000.0)
-                .dataPoints(dataPoints)
-                .build();
+        return new RuntimeAnalyticsResponse(
+                calculatorId, days, frequency.name(),
+                avgDuration, TimeUtils.formatDuration(avgDuration),
+                minDuration == Long.MAX_VALUE ? 0 : minDuration,
+                maxDuration == Long.MIN_VALUE ? 0 : maxDuration,
+                totalRuns,
+                Math.round(successRate * 1000.0) / 1000.0,
+                dataPoints);
     }
 
     // ================================================================
@@ -196,24 +187,14 @@ public class AnalyticsService {
                     String worstSeverity = coreData.getWorstSeverityByDay().get(agg.dayCet());
                     String slaStatus = classifyDay(agg, worstSeverity);
 
-                    return TrendAnalyticsResponse.TrendDataPoint.builder()
-                            .date(agg.dayCet())
-                            .avgDurationMs(agg.avgDurationMs())
-                            .totalRuns(agg.totalRuns())
-                            .successRuns(agg.successRuns())
-                            .slaBreaches(agg.slaBreaches())
-                            .avgStartMinCet(agg.avgStartMinCet())
-                            .avgEndMinCet(agg.avgEndMinCet())
-                            .slaStatus(slaStatus)
-                            .build();
+                    return new TrendAnalyticsResponse.TrendDataPoint(
+                            agg.dayCet(), agg.avgDurationMs(), agg.totalRuns(),
+                            agg.successRuns(), agg.slaBreaches(),
+                            agg.avgStartMinCet(), agg.avgEndMinCet(), slaStatus);
                 })
                 .toList();
 
-        return TrendAnalyticsResponse.builder()
-                .calculatorId(calculatorId)
-                .periodDays(days)
-                .trends(trends)
-                .build();
+        return new TrendAnalyticsResponse(calculatorId, days, trends);
     }
 
     // ================================================================
@@ -298,13 +279,10 @@ public class AnalyticsService {
             List<RunWithSlaStatus> runs) {
 
         if (runs.isEmpty()) {
-            return PerformanceCardResponse.builder()
-                    .calculatorId(calculatorId)
-                    .periodDays(days)
-                    .slaSummary(PerformanceCardResponse.SlaSummaryPct.builder()
-                            .totalRuns(0).build())
-                    .runs(Collections.emptyList())
-                    .build();
+            return new PerformanceCardResponse(
+                    calculatorId, null, null, days, 0L, null,
+                    new PerformanceCardResponse.SlaSummaryPct(0, 0, 0.0, 0, 0.0, 0, 0.0),
+                    Collections.emptyList(), null);
         }
 
         // Extract schedule from most recent run (last in chronologically ordered list)
@@ -324,11 +302,9 @@ public class AnalyticsService {
             }
 
             String slaStatus = classifyRunSlaStatus(run);
-            switch (slaStatus) {
-                case "SLA_MET" -> slaMetCount++;
-                case "LATE" -> lateCount++;
-                case "VERY_LATE" -> veryLateCount++;
-            }
+            if (SlaStatus.SLA_MET.name().equals(slaStatus)) slaMetCount++;
+            else if (SlaStatus.LATE.name().equals(slaStatus)) lateCount++;
+            else if (SlaStatus.VERY_LATE.name().equals(slaStatus)) veryLateCount++;
 
             runBars.add(buildRunBar(run, slaStatus));
         }
@@ -338,15 +314,10 @@ public class AnalyticsService {
 
         // SLA percentages (must sum to 100%)
         PerformanceCardResponse.SlaSummaryPct slaSummary =
-                PerformanceCardResponse.SlaSummaryPct.builder()
-                        .totalRuns(totalRuns)
-                        .slaMetCount(slaMetCount)
-                        .slaMetPct(pct(slaMetCount, totalRuns))
-                        .lateCount(lateCount)
-                        .latePct(pct(lateCount, totalRuns))
-                        .veryLateCount(veryLateCount)
-                        .veryLatePct(pct(veryLateCount, totalRuns))
-                        .build();
+                new PerformanceCardResponse.SlaSummaryPct(
+                        totalRuns, slaMetCount, pct(slaMetCount, totalRuns),
+                        lateCount, pct(lateCount, totalRuns),
+                        veryLateCount, pct(veryLateCount, totalRuns));
 
         // Reference lines from latest run
         BigDecimal slaStartHour = TimeUtils.calculateCetHour(latestRun.estimatedStartTime());
@@ -356,23 +327,16 @@ public class AnalyticsService {
         String startTimeCet = slaStartHour != null
                 ? TimeUtils.formatCetHour(slaStartHour) : null;
 
-        return PerformanceCardResponse.builder()
-                .calculatorId(calculatorId)
-                .calculatorName(latestRun.calculatorName())
-                .schedule(PerformanceCardResponse.ScheduleInfo.builder()
-                        .estimatedStartTimeCet(startTimeCet)
-                        .frequency(frequency.name())
-                        .build())
-                .periodDays(days)
-                .meanDurationMs(meanDuration)
-                .meanDurationFormatted(TimeUtils.formatDuration(meanDuration))
-                .slaSummary(slaSummary)
-                .runs(runBars)
-                .referenceLines(PerformanceCardResponse.ReferenceLines.builder()
-                        .slaStartHourCet(slaStartHour)
-                        .slaEndHourCet(slaEndHour)
-                        .build())
-                .build();
+        return new PerformanceCardResponse(
+                calculatorId,
+                latestRun.calculatorName(),
+                new PerformanceCardResponse.ScheduleInfo(startTimeCet, frequency.name()),
+                days,
+                meanDuration,
+                TimeUtils.formatDuration(meanDuration),
+                slaSummary,
+                runBars,
+                new PerformanceCardResponse.ReferenceLines(slaStartHour, slaEndHour));
     }
 
     private PerformanceCardResponse.RunBar buildRunBar(RunWithSlaStatus run, String slaStatus) {
@@ -387,18 +351,17 @@ public class AnalyticsService {
         String endCet = endHour != null
                 ? TimeUtils.formatCetHour(endHour) + " CET" : null;
 
-        return PerformanceCardResponse.RunBar.builder()
-                .runId(run.runId())
-                .reportingDate(run.reportingDate())
-                .dateFormatted(dateFormatted)
-                .startHourCet(startHour)
-                .endHourCet(endHour)
-                .startTimeCet(startCet)
-                .endTimeCet(endCet)
-                .durationMs(run.durationMs() != null ? run.durationMs() : 0)
-                .durationFormatted(TimeUtils.formatDuration(run.durationMs()))
-                .slaStatus(slaStatus)
-                .build();
+        return new PerformanceCardResponse.RunBar(
+                run.runId(),
+                run.reportingDate(),
+                dateFormatted,
+                startHour,
+                endHour,
+                startCet,
+                endCet,
+                run.durationMs() != null ? run.durationMs() : 0,
+                TimeUtils.formatDuration(run.durationMs()),
+                slaStatus);
     }
 
     // ================================================================
@@ -410,14 +373,14 @@ public class AnalyticsService {
      */
     private String classifyRunSlaStatus(RunWithSlaStatus run) {
         if (!Boolean.TRUE.equals(run.slaBreached())) {
-            return "SLA_MET";
+            return SlaStatus.SLA_MET.name();
         }
         if (run.severity() == null) {
-            return "LATE"; // fallback for breach without severity record
+            return SlaStatus.LATE.name(); // fallback for breach without severity record
         }
         return switch (run.severity()) {
-            case HIGH, CRITICAL -> "VERY_LATE";
-            default -> "LATE";
+            case HIGH, CRITICAL -> SlaStatus.VERY_LATE.name();
+            default -> SlaStatus.LATE.name();
         };
     }
 
@@ -426,7 +389,7 @@ public class AnalyticsService {
      */
     private String classifyDay(DailyAggregate agg, String worstSeverity) {
         if (worstSeverity == null || agg.slaBreaches() == 0) {
-            return "GREEN";
+            return SlaStatus.GREEN.name();
         }
         return mapSeverityToTrafficLight(worstSeverity);
     }
@@ -465,10 +428,10 @@ public class AnalyticsService {
     }
 
     private String mapSeverityToTrafficLight(String severity) {
-        if (severity == null) return "AMBER";
+        if (severity == null) return SlaStatus.AMBER.name();
         return switch (severity) {
-            case "HIGH", "CRITICAL" -> "RED";
-            default -> "AMBER";
+            case "HIGH", "CRITICAL" -> SlaStatus.RED.name();
+            default -> SlaStatus.AMBER.name();
         };
     }
 
