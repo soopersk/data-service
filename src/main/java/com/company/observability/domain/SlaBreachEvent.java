@@ -1,29 +1,32 @@
 package com.company.observability.domain;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.company.observability.domain.enums.AlertStatus;
+import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.Severity;
+import lombok.*;
 
 import java.time.Instant;
 
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@EqualsAndHashCode(of = "breachId")
+@ToString
 public class SlaBreachEvent {
     private Long breachId;
     private String runId;
     private String calculatorId;
     private String calculatorName;
     private String tenantId;
-    private String breachType;
+    private BreachType breachType;
     private Long expectedValue;
     private Long actualValue;
-    private String severity;
+    private Severity severity;
     private Boolean alerted;
     private Instant alertedAt;
-    private String alertStatus;
+    private AlertStatus alertStatus;
     private Integer retryCount;
     private String lastError;
     private Instant createdAt;

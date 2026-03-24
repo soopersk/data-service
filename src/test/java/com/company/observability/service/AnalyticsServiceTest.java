@@ -3,6 +3,8 @@ package com.company.observability.service;
 import com.company.observability.cache.AnalyticsCacheService;
 import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.Severity;
 import com.company.observability.dto.response.PagedResponse;
 import com.company.observability.dto.response.SlaBreachDetailResponse;
 import com.company.observability.dto.response.SlaSummaryResponse;
@@ -159,8 +161,8 @@ class AnalyticsServiceTest {
                 .calculatorId("calc-1")
                 .calculatorName("Calculator 1")
                 .tenantId("tenant-1")
-                .breachType("TIME_EXCEEDED")
-                .severity("HIGH")
+                .breachType(BreachType.TIME_EXCEEDED)
+                .severity(Severity.HIGH)
                 .createdAt(createdAt)
                 .build();
     }

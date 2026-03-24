@@ -2,7 +2,9 @@ package com.company.observability.service;
 
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Severity;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.SlaBreachEventRepository;
 import com.company.observability.util.SlaEvaluationResult;
@@ -50,7 +52,7 @@ class AlertHandlerServiceTest {
                 .calculatorId(run.getCalculatorId())
                 .calculatorName(run.getCalculatorName())
                 .tenantId(run.getTenantId())
-                .severity("HIGH")
+                .severity(Severity.HIGH)
                 .alerted(false)
                 .retryCount(0)
                 .build();
@@ -66,7 +68,7 @@ class AlertHandlerServiceTest {
         SlaBreachEvent updated = updateCaptor.getValue();
 
         assertTrue(Boolean.TRUE.equals(updated.getAlerted()));
-        assertEquals("SENT", updated.getAlertStatus());
+        assertEquals(AlertStatus.SENT, updated.getAlertStatus());
         assertEquals(1.0, meterRegistry.get("sla.breaches.created").counter().count());
         assertEquals(1.0, meterRegistry.get("sla.alerts.sent").counter().count());
     }

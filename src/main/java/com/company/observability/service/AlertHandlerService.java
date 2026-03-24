@@ -2,6 +2,9 @@ package com.company.observability.service;
 
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.domain.enums.AlertStatus;
+import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.Severity;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.SlaBreachEventRepository;
 import com.company.observability.util.SlaEvaluationResult;
@@ -50,12 +53,12 @@ public class AlertHandlerService {
                 .calculatorId(run.getCalculatorId())
                 .calculatorName(run.getCalculatorName())
                 .tenantId(run.getTenantId())
-                .breachType(determineBreachType(result.getReason()))
+                .breachType(BreachType.fromString(determineBreachType(result.getReason())))
                 .expectedValue(calculateExpectedValue(run))
                 .actualValue(calculateActualValue(run))
-                .severity(result.getSeverity())
+                .severity(Severity.fromString(result.getSeverity()))
                 .alerted(false)
-                .alertStatus("PENDING")
+                .alertStatus(AlertStatus.PENDING)
                 .retryCount(0)
                 .createdAt(Instant.now())
                 .build();
@@ -100,13 +103,13 @@ public class AlertHandlerService {
 
             breach.setAlerted(true);
             breach.setAlertedAt(Instant.now());
-            breach.setAlertStatus("SENT");
+            breach.setAlertStatus(AlertStatus.SENT);
             breachRepository.update(breach);
 
             // FIXED: Reduced cardinality
             meterRegistry.counter("sla.alerts.sent",
                     Tags.of(
-                            Tag.of("severity", breach.getSeverity()),
+                            Tag.of("severity", breach.getSeverity().name()),
                             Tag.of("frequency", run.getFrequency().name())
                     )
             ).increment();
@@ -116,7 +119,7 @@ public class AlertHandlerService {
         } catch (Exception e) {
             log.error("Failed to send alert for breach {}", breach.getBreachId(), e);
 
-            breach.setAlertStatus("FAILED");
+            breach.setAlertStatus(AlertStatus.FAILED);
             breach.setRetryCount(breach.getRetryCount() + 1);
             breach.setLastError(e.getMessage());
             breachRepository.update(breach);
