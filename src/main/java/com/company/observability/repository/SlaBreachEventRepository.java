@@ -9,8 +9,9 @@ import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
@@ -27,7 +28,7 @@ import static com.company.observability.util.ObservabilityConstants.*;
 @Slf4j
 public class SlaBreachEventRepository {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final NamedParameterJdbcTemplate jdbcTemplate;
     private final MeterRegistry meterRegistry;
 
     private static final String SELECT_COLUMNS = """
@@ -38,8 +39,8 @@ public class SlaBreachEventRepository {
     private static final String SELECT_FROM = "SELECT " + SELECT_COLUMNS + "\nFROM sla_breach_events\n";
 
     private static final String BASE_WHERE = """
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'""";
+            WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
+            AND created_at >= NOW() - CAST(:days AS INTEGER) * INTERVAL '1 day'""";
 
     private static final String ORDER_DESC = "\nORDER BY created_at DESC, breach_id DESC";
 
@@ -59,30 +60,33 @@ public class SlaBreachEventRepository {
                 run_id, calculator_id, calculator_name, tenant_id,
                 breach_type, expected_value, actual_value, severity,
                 alerted, alerted_at, alert_status, retry_count, last_error, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (
+                :runId, :calculatorId, :calculatorName, :tenantId,
+                :breachType, :expectedValue, :actualValue, :severity,
+                :alerted, :alertedAt, :alertStatus, :retryCount, :lastError, :createdAt
+            )
             """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("runId", breach.getRunId())
+                .addValue("calculatorId", breach.getCalculatorId())
+                .addValue("calculatorName", breach.getCalculatorName())
+                .addValue("tenantId", breach.getTenantId())
+                .addValue("breachType", breach.getBreachType().name())
+                .addValue("expectedValue", breach.getExpectedValue())
+                .addValue("actualValue", breach.getActualValue())
+                .addValue("severity", breach.getSeverity().name())
+                .addValue("alerted", breach.getAlerted())
+                .addValue("alertedAt", breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null)
+                .addValue("alertStatus", breach.getAlertStatus().name())
+                .addValue("retryCount", breach.getRetryCount() != null ? breach.getRetryCount() : 0)
+                .addValue("lastError", breach.getLastError())
+                .addValue("createdAt", Timestamp.from(breach.getCreatedAt()));
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, breach.getRunId());
-            ps.setString(2, breach.getCalculatorId());
-            ps.setString(3, breach.getCalculatorName());
-            ps.setString(4, breach.getTenantId());
-            ps.setString(5, breach.getBreachType().name());
-            ps.setObject(6, breach.getExpectedValue());
-            ps.setObject(7, breach.getActualValue());
-            ps.setString(8, breach.getSeverity().name());
-            ps.setBoolean(9, breach.getAlerted());
-            ps.setTimestamp(10, breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null);
-            ps.setString(11, breach.getAlertStatus().name());
-            ps.setInt(12, breach.getRetryCount() != null ? breach.getRetryCount() : 0);
-            ps.setString(13, breach.getLastError());
-            ps.setTimestamp(14, Timestamp.from(breach.getCreatedAt()));
-            return ps;
-        }, keyHolder);
+        jdbcTemplate.update(sql, params, keyHolder);
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "save_breach").register(meterRegistry));
 
         breach.setBreachId(keyHolder.getKey().longValue());
@@ -97,9 +101,10 @@ public class SlaBreachEventRepository {
             WHERE alerted = false
             AND alert_status IN ('PENDING', 'FAILED')
             ORDER BY created_at ASC
-            LIMIT ?""";
+            LIMIT :limit""";
 
-        return jdbcTemplate.query(sql, ROW_MAPPER, limit);
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("limit", limit);
+        return jdbcTemplate.query(sql, params, ROW_MAPPER);
     }
 
     /**
@@ -108,22 +113,23 @@ public class SlaBreachEventRepository {
     public void update(SlaBreachEvent breach) {
         String sql = """
             UPDATE sla_breach_events
-            SET alerted = ?,
-                alerted_at = ?,
-                alert_status = ?,
-                retry_count = ?,
-                last_error = ?
-            WHERE breach_id = ?
+            SET alerted = :alerted,
+                alerted_at = :alertedAt,
+                alert_status = :alertStatus,
+                retry_count = :retryCount,
+                last_error = :lastError
+            WHERE breach_id = :breachId
             """;
 
-        jdbcTemplate.update(sql,
-                breach.getAlerted(),
-                breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null,
-                breach.getAlertStatus().name(),
-                breach.getRetryCount(),
-                breach.getLastError(),
-                breach.getBreachId()
-        );
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("alerted", breach.getAlerted())
+                .addValue("alertedAt", breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null)
+                .addValue("alertStatus", breach.getAlertStatus().name())
+                .addValue("retryCount", breach.getRetryCount())
+                .addValue("lastError", breach.getLastError())
+                .addValue("breachId", breach.getBreachId());
+
+        jdbcTemplate.update(sql, params);
     }
 
     /**
@@ -138,14 +144,21 @@ public class SlaBreachEventRepository {
 
             GROUP BY severity""";
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("days", days);
+
         Map<String, Integer> result = new HashMap<>();
         Timer.Sample sample = Timer.start(meterRegistry);
-        jdbcTemplate.query(sql, rs -> {
-            result.put(
-                    rs.getString("severity"),
-                    ((Number) rs.getObject("cnt")).intValue()
-            );
-        }, calculatorId, tenantId, days);
+        jdbcTemplate.query(sql, params, rs -> {
+            while (rs.next()) {
+                result.put(
+                        rs.getString("severity"),
+                        ((Number) rs.getObject("cnt")).intValue()
+                );
+            }
+        });
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "count_by_severity").register(meterRegistry));
         return result;
     }
@@ -162,13 +175,20 @@ public class SlaBreachEventRepository {
 
             GROUP BY COALESCE(breach_type, 'UNKNOWN')""";
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("days", days);
+
         Map<String, Integer> result = new HashMap<>();
-        jdbcTemplate.query(sql, rs -> {
-            result.put(
-                    rs.getString("breach_type"),
-                    ((Number) rs.getObject("cnt")).intValue()
-            );
-        }, calculatorId, tenantId, days);
+        jdbcTemplate.query(sql, params, rs -> {
+            while (rs.next()) {
+                result.put(
+                        rs.getString("breach_type"),
+                        ((Number) rs.getObject("cnt")).intValue()
+                );
+            }
+        });
         return result;
     }
 
@@ -193,12 +213,19 @@ public class SlaBreachEventRepository {
 
             GROUP BY (created_at AT TIME ZONE 'CET')::DATE""";
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("days", days);
+
         Map<LocalDate, String> result = new HashMap<>();
-        jdbcTemplate.query(sql, rs -> {
-            LocalDate day = rs.getObject("day_cet", LocalDate.class);
-            int rank = ((Number) rs.getObject("worst_rank")).intValue();
-            result.put(day, severityFromRank(rank));
-        }, calculatorId, tenantId, days);
+        jdbcTemplate.query(sql, params, rs -> {
+            while (rs.next()) {
+                LocalDate day = rs.getObject("day_cet", LocalDate.class);
+                int rank = ((Number) rs.getObject("worst_rank")).intValue();
+                result.put(day, severityFromRank(rank));
+            }
+        });
         return result;
     }
 
@@ -211,21 +238,25 @@ public class SlaBreachEventRepository {
 
         boolean hasSeverity = severity != null && !severity.isBlank();
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("days", days);
+
         StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
-        List<Object> params = new ArrayList<>(List.of(calculatorId, tenantId, days));
 
         if (hasSeverity) {
-            sql.append("\nAND severity = ?");
-            params.add(severity);
+            sql.append("\nAND severity = :severity");
+            params.addValue("severity", severity);
         }
 
         sql.append("\nORDER BY created_at DESC");
-        sql.append("\nLIMIT ? OFFSET ?");
-        params.add(limit);
-        params.add(offset);
+        sql.append("\nLIMIT :limit OFFSET :offset");
+        params.addValue("limit", limit);
+        params.addValue("offset", offset);
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<SlaBreachEvent> results = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        List<SlaBreachEvent> results = jdbcTemplate.query(sql.toString(), params, ROW_MAPPER);
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_breaches").register(meterRegistry));
         return results;
     }
@@ -240,26 +271,30 @@ public class SlaBreachEventRepository {
         boolean hasCursor = cursorCreatedAt != null && cursorBreachId != null;
         boolean hasSeverity = severity != null && !severity.isBlank();
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("days", days);
+
         StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
-        List<Object> params = new ArrayList<>(List.of(calculatorId, tenantId, days));
 
         if (hasSeverity) {
-            sql.append("\nAND severity = ?");
-            params.add(severity);
+            sql.append("\nAND severity = :severity");
+            params.addValue("severity", severity);
         }
 
         if (hasCursor) {
-            sql.append("\nAND (created_at, breach_id) < (?, ?)");
-            params.add(Timestamp.from(cursorCreatedAt));
-            params.add(cursorBreachId);
+            sql.append("\nAND (created_at, breach_id) < (:cursorCreatedAt, :cursorBreachId)");
+            params.addValue("cursorCreatedAt", Timestamp.from(cursorCreatedAt));
+            params.addValue("cursorBreachId", cursorBreachId);
         }
 
         sql.append(ORDER_DESC);
-        sql.append("\nLIMIT ?");
-        params.add(limit);
+        sql.append("\nLIMIT :limit");
+        params.addValue("limit", limit);
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<SlaBreachEvent> results = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        List<SlaBreachEvent> results = jdbcTemplate.query(sql.toString(), params, ROW_MAPPER);
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_breaches").register(meterRegistry));
         return results;
     }
@@ -272,16 +307,20 @@ public class SlaBreachEventRepository {
 
         boolean hasSeverity = severity != null && !severity.isBlank();
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("days", days);
+
         StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM sla_breach_events\n")
                 .append(BASE_WHERE);
-        List<Object> params = new ArrayList<>(List.of(calculatorId, tenantId, days));
 
         if (hasSeverity) {
-            sql.append("\nAND severity = ?");
-            params.add(severity);
+            sql.append("\nAND severity = :severity");
+            params.addValue("severity", severity);
         }
 
-        Long count = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
+        Long count = jdbcTemplate.queryForObject(sql.toString(), params, Long.class);
         return count != null ? count : 0;
     }
 

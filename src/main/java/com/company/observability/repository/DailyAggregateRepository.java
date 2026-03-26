@@ -5,8 +5,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.*;
@@ -23,7 +24,7 @@ import static com.company.observability.util.ObservabilityConstants.*;
 @Slf4j
 public class DailyAggregateRepository {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final NamedParameterJdbcTemplate jdbcTemplate;
     private final MeterRegistry meterRegistry;
 
     /**
@@ -37,7 +38,7 @@ public class DailyAggregateRepository {
                 calculator_id, tenant_id, day_cet,
                 total_runs, success_runs, sla_breaches,
                 avg_duration_ms, avg_start_min_cet, avg_end_min_cet, computed_at
-            ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, NOW())
+            ) VALUES (:calculatorId, :tenantId, :reportingDate, 1, :successIncr, :breachIncr, :durationMs, :startMinCet, :endMinCet, NOW())
             ON CONFLICT (calculator_id, tenant_id, day_cet)
             DO UPDATE SET
                 total_runs = calculator_sli_daily.total_runs + 1,
@@ -61,12 +62,19 @@ public class DailyAggregateRepository {
         int successIncr = "SUCCESS".equals(status) ? 1 : 0;
         int breachIncr = slaBreached ? 1 : 0;
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("reportingDate", reportingDate)
+                .addValue("successIncr", successIncr)
+                .addValue("breachIncr", breachIncr)
+                .addValue("durationMs", durationMs)
+                .addValue("startMinCet", startMinCet)
+                .addValue("endMinCet", endMinCet);
+
         try {
             Timer.Sample sample = Timer.start(meterRegistry);
-            jdbcTemplate.update(sql,
-                    calculatorId, tenantId, reportingDate,
-                    successIncr, breachIncr, durationMs, startMinCet, endMinCet
-            );
+            jdbcTemplate.update(sql, params);
             sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "upsert_daily").register(meterRegistry));
         } catch (Exception e) {
             log.error("event=upsert_daily_failed calculator_id={} reporting_date={}",
@@ -85,15 +93,19 @@ public class DailyAggregateRepository {
             SELECT calculator_id, tenant_id, day_cet, total_runs, success_runs,
                    sla_breaches, avg_duration_ms, avg_start_min_cet, avg_end_min_cet, computed_at
             FROM calculator_sli_daily
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND day_cet >= CURRENT_DATE - CAST(? AS INTEGER) * INTERVAL '1 day'
+            WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
+            AND day_cet >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             ORDER BY day_cet DESC
             """;
 
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("days", days);
+
         try {
             Timer.Sample sample = Timer.start(meterRegistry);
-            List<DailyAggregate> results = jdbcTemplate.query(sql, new DailyAggregateRowMapper(),
-                    calculatorId, tenantId, days);
+            List<DailyAggregate> results = jdbcTemplate.query(sql, params, new DailyAggregateRowMapper());
             sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_recent_agg").register(meterRegistry));
             return results;
         } catch (Exception e) {
@@ -103,7 +115,8 @@ public class DailyAggregateRepository {
     }
 
     /**
-     * Get aggregates for specific reporting dates (for MONTHLY calculators)
+     * Get aggregates for specific reporting dates (for MONTHLY calculators).
+     * NPJT expands :reportingDates list into the IN clause automatically.
      */
     public List<DailyAggregate> findByReportingDates(
             String calculatorId, String tenantId, List<LocalDate> reportingDates) {
@@ -112,26 +125,22 @@ public class DailyAggregateRepository {
             return Collections.emptyList();
         }
 
-        String placeholders = String.join(",", Collections.nCopies(reportingDates.size(), "?"));
-
-        String sql = String.format("""
+        String sql = """
             SELECT calculator_id, tenant_id, day_cet, total_runs, success_runs,
                    sla_breaches, avg_duration_ms, avg_start_min_cet, avg_end_min_cet, computed_at
             FROM calculator_sli_daily
-            WHERE calculator_id = ? AND tenant_id = ?
-            AND day_cet IN (%s)
+            WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
+            AND day_cet IN (:reportingDates)
             ORDER BY day_cet DESC
-            """, placeholders);
+            """;
 
-        Object[] params = new Object[2 + reportingDates.size()];
-        params[0] = calculatorId;
-        params[1] = tenantId;
-        for (int i = 0; i < reportingDates.size(); i++) {
-            params[2 + i] = reportingDates.get(i);
-        }
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorId", calculatorId)
+                .addValue("tenantId", tenantId)
+                .addValue("reportingDates", reportingDates);
 
         try {
-            return jdbcTemplate.query(sql, new DailyAggregateRowMapper(), params);
+            return jdbcTemplate.query(sql, params, new DailyAggregateRowMapper());
         } catch (Exception e) {
             log.error("event=find_by_reporting_dates_failed calculator_id={}", calculatorId, e);
             throw new RuntimeException("Failed to fetch aggregates by date", e);

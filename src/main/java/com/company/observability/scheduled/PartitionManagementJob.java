@@ -5,7 +5,8 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.EmptySqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -30,7 +31,7 @@ import static com.company.observability.util.ObservabilityConstants.*;
 )
 public class PartitionManagementJob {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final NamedParameterJdbcTemplate jdbcTemplate;
     private final MeterRegistry meterRegistry;
     private final Executor taskExecutor;
 
@@ -61,7 +62,7 @@ public class PartitionManagementJob {
             taskExecutor.execute(() -> {
                 Map<String, String> asyncSnapshot = MdcContextUtil.setJobContext("partition-create-async");
                 try {
-                    jdbcTemplate.execute("SELECT create_calculator_run_partitions()");
+                    jdbcTemplate.getJdbcOperations().execute("SELECT create_calculator_run_partitions()");
 
                     log.info("event=partition.create outcome=success days=60");
                     meterRegistry.counter(PARTITION_CREATE_SUCCESS).increment();
@@ -94,7 +95,7 @@ public class PartitionManagementJob {
             taskExecutor.execute(() -> {
                 Map<String, String> asyncSnapshot = MdcContextUtil.setJobContext("partition-drop-async");
                 try {
-                    jdbcTemplate.execute("SELECT drop_old_calculator_run_partitions()");
+                    jdbcTemplate.getJdbcOperations().execute("SELECT drop_old_calculator_run_partitions()");
 
                     log.info("event=partition.drop outcome=success");
                     meterRegistry.counter(PARTITION_DROP_SUCCESS).increment();
@@ -124,7 +125,8 @@ public class PartitionManagementJob {
             log.info("event=partition.monitor outcome=started");
 
             List<Map<String, Object>> stats = jdbcTemplate.queryForList(
-                    "SELECT * FROM get_partition_statistics() ORDER BY partition_date DESC LIMIT 30"
+                    "SELECT * FROM get_partition_statistics() ORDER BY partition_date DESC LIMIT 30",
+                    EmptySqlParameterSource.INSTANCE
             );
 
             long totalRows = 0;
@@ -163,7 +165,8 @@ public class PartitionManagementJob {
     private void logPartitionStatistics() {
         try {
             List<Map<String, Object>> recentStats = jdbcTemplate.queryForList(
-                    "SELECT * FROM get_partition_statistics() ORDER BY partition_date DESC LIMIT 7"
+                    "SELECT * FROM get_partition_statistics() ORDER BY partition_date DESC LIMIT 7",
+                    EmptySqlParameterSource.INSTANCE
             );
 
             for (Map<String, Object> stat : recentStats) {
