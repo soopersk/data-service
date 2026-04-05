@@ -2,10 +2,14 @@ package com.company.observability.service;
 
 import com.company.observability.cache.AnalyticsCacheService;
 import com.company.observability.domain.DailyAggregate;
+import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.dto.response.PagedResponse;
+import com.company.observability.dto.response.RunPerformanceData;
 import com.company.observability.dto.response.SlaBreachDetailResponse;
 import com.company.observability.dto.response.SlaSummaryResponse;
 import com.company.observability.dto.response.TrendAnalyticsResponse;
@@ -23,8 +27,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
@@ -136,6 +139,92 @@ class AnalyticsServiceTest {
 
         assertEquals(1, response.trends().size());
         assertEquals("AMBER", response.trends().get(0).slaStatus());
+    }
+
+    @Test
+    void getRunPerformanceData_includesRunningRows_butExcludesThemFromSlaCounts() {
+        LocalDate day = LocalDate.of(2026, 2, 21);
+        Instant start = Instant.parse("2026-02-21T04:00:00Z");
+        Instant end = Instant.parse("2026-02-21T04:03:00Z");
+        Instant slaTime = Instant.parse("2026-02-21T06:15:00Z");
+
+        RunWithSlaStatus slaMetRun = new RunWithSlaStatus(
+                "run-1", "calc-1", "Calculator One", day,
+                start, end, 180000L, null, null,
+                slaTime, start, CalculatorFrequency.DAILY,
+                RunStatus.SUCCESS, false, null, null);
+
+        RunWithSlaStatus breachedRun = new RunWithSlaStatus(
+                "run-2", "calc-1", "Calculator One", day.plusDays(1),
+                start, end, 180000L, null, null,
+                slaTime, start, CalculatorFrequency.DAILY,
+                RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH);
+
+        RunWithSlaStatus runningRun = new RunWithSlaStatus(
+                "run-3", "calc-1", "Calculator One", day.plusDays(2),
+                start, null, null, null, null,
+                slaTime, start, CalculatorFrequency.DAILY,
+                RunStatus.RUNNING, false, null, null);
+
+        when(calculatorRunRepository.findRunsWithSlaStatus(
+                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30))
+                .thenReturn(List.of(slaMetRun, breachedRun, runningRun));
+
+        RunPerformanceData result = service.getRunPerformanceData(
+                "calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
+
+        assertEquals("calc-1", result.calculatorId());
+        assertEquals("Calculator One", result.calculatorName());
+        assertEquals("DAILY", result.frequency());
+        assertEquals(30, result.periodDays());
+        assertEquals(180000L, result.meanDurationMs());
+        assertEquals(2, result.totalRuns());
+        assertEquals(1, result.runningRuns());
+        assertEquals(1, result.slaMetCount());
+        assertEquals(0, result.lateCount());
+        assertEquals(1, result.veryLateCount());
+
+        assertEquals(3, result.runs().size());
+        RunPerformanceData.RunDataPoint point1 = result.runs().get(0);
+        assertEquals("run-1", point1.runId());
+        assertEquals(start, point1.startTime());
+        assertEquals(end, point1.endTime());
+        assertEquals("SUCCESS", point1.status());
+        assertEquals("SLA_MET", point1.slaStatus());
+        assertEquals(false, point1.slaBreached());
+
+        RunPerformanceData.RunDataPoint point2 = result.runs().get(1);
+        assertEquals("SUCCESS", point2.status());
+        assertEquals("VERY_LATE", point2.slaStatus());
+        assertEquals(true, point2.slaBreached());
+
+        RunPerformanceData.RunDataPoint point3 = result.runs().get(2);
+        assertEquals("RUNNING", point3.status());
+        assertEquals("RUNNING", point3.slaStatus());
+        assertNull(point3.endTime());
+        assertNull(point3.durationMs());
+
+        assertEquals(start, result.estimatedStartTime());
+        assertEquals(slaTime, result.slaTime());
+    }
+
+    @Test
+    void getRunPerformanceData_emptyRuns_returnsZeroedResponse() {
+        when(calculatorRunRepository.findRunsWithSlaStatus(
+                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 7))
+                .thenReturn(List.of());
+
+        RunPerformanceData result = service.getRunPerformanceData(
+                "calc-1", "tenant-1", 7, CalculatorFrequency.DAILY);
+
+        assertEquals("calc-1", result.calculatorId());
+        assertNull(result.calculatorName());
+        assertEquals(0, result.totalRuns());
+        assertEquals(0, result.runningRuns());
+        assertEquals(0L, result.meanDurationMs());
+        assertTrue(result.runs().isEmpty());
+        assertNull(result.estimatedStartTime());
+        assertNull(result.slaTime());
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

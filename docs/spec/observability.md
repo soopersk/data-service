@@ -36,11 +36,12 @@ Applied automatically to all Micrometer metrics:
 | `api.runs.complete.requests` | — | `RunIngestionController` |
 | `api.calculators.status.requests` | `frequency`, `bypass_cache` | `RunQueryController` |
 | `api.calculators.batch.requests` | `frequency`, `allow_stale` | `RunQueryController` |
-| `api.analytics.runtime.requests` | — | `AnalyticsController` |
-| `api.analytics.sla-summary.requests` | — | `AnalyticsController` |
-| `api.analytics.trends.requests` | — | `AnalyticsController` |
-| `api.analytics.sla-breaches.requests` | — | `AnalyticsController` |
-| `api.analytics.performance-card.requests` | — | `AnalyticsController` |
+| api.analytics.runtime.requests | - | AnalyticsController |
+| api.analytics.sla-summary.requests | - | AnalyticsController |
+| api.analytics.trends.requests | - | AnalyticsController |
+| api.analytics.sla-breaches.requests | - | AnalyticsController |
+| api.analytics.run-performance.requests | - | AnalyticsController |
+| api.analytics.projection.performance-card.requests | - | ProjectionController |
 
 ### Business Event Counters
 
@@ -157,3 +158,5 @@ scrape_configs:
 ```
 
 All metrics carry the global `application` and `environment` tags for easy filtering in Grafana.
+
+

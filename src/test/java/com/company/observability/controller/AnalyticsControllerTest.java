@@ -1,10 +1,7 @@
 package com.company.observability.controller;
 
 import com.company.observability.domain.enums.CalculatorFrequency;
-import com.company.observability.dto.response.PagedResponse;
-import com.company.observability.dto.response.PerformanceCardResponse;
-import com.company.observability.dto.response.RuntimeAnalyticsResponse;
-import com.company.observability.dto.response.SlaBreachDetailResponse;
+import com.company.observability.dto.response.*;
 import com.company.observability.service.AnalyticsService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -19,7 +16,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -56,7 +52,7 @@ class AnalyticsControllerTest {
     @Test
     void getRuntimeAnalytics_returnsCacheableResponse_andParsesFrequency() throws Exception {
         RuntimeAnalyticsResponse response = new RuntimeAnalyticsResponse(
-                "calc-1", 30, "MONTHLY", 1200, null, 0, 0, 12, 0.95,
+                "calc-1", 30, "MONTHLY", 1200, 0, 0, 12, 0.95,
                 List.of(new RuntimeAnalyticsResponse.DailyDataPoint(
                         LocalDate.parse("2026-02-21"), 1200, 2, 2)));
 
@@ -101,30 +97,41 @@ class AnalyticsControllerTest {
     }
 
     @Test
-    void getPerformanceCard_defaultsFrequencyToDaily() throws Exception {
-        PerformanceCardResponse response = new PerformanceCardResponse(
-                "calc-1",
-                "Calculator One",
-                new PerformanceCardResponse.ScheduleInfo("06:00", "DAILY"),
-                30,
-                180000L,
-                null,
-                new PerformanceCardResponse.SlaSummaryPct(1, 1, 100.0, 0, 0.0, 0, 0.0),
-                List.of(),
-                new PerformanceCardResponse.ReferenceLines(
-                        BigDecimal.valueOf(6.00), BigDecimal.valueOf(6.15)));
+    void getRunPerformanceData_returnsCacheableResponse() throws Exception {
+        RunPerformanceData response = new RunPerformanceData(
+                "calc-1", "Calculator One", "DAILY", 30, 180000L,
+                1, 1, 1, 0, 0,
+                List.of(
+                        new RunPerformanceData.RunDataPoint(
+                        "run-1", LocalDate.parse("2026-02-21"),
+                        Instant.parse("2026-02-21T04:00:00Z"),
+                        Instant.parse("2026-02-21T04:03:00Z"),
+                        180000L, "SUCCESS", false, "SLA_MET"),
+                        new RunPerformanceData.RunDataPoint(
+                                "run-2", LocalDate.parse("2026-02-22"),
+                                Instant.parse("2026-02-22T04:00:00Z"),
+                                null,
+                                null, "RUNNING", false, "RUNNING")
+                ),
+                Instant.parse("2026-02-21T04:00:00Z"),
+                Instant.parse("2026-02-21T06:15:00Z"));
 
-        when(analyticsService.getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunPerformanceData("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
                 .thenReturn(response);
 
-        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/performance-card")
+        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/run-performance")
                         .header(TENANT_HEADER, "tenant-a")
                         .param("days", "30"))
                 .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=60")))
                 .andExpect(jsonPath("$.calculatorId").value("calc-1"))
-                .andExpect(jsonPath("$.schedule.frequency").value("DAILY"));
+                .andExpect(jsonPath("$.runningRuns").value(1))
+                .andExpect(jsonPath("$.runs[0].slaStatus").value("SLA_MET"))
+                .andExpect(jsonPath("$.runs[1].slaStatus").value("RUNNING"))
+                .andExpect(jsonPath("$.runs[1].status").value("RUNNING"))
+                .andExpect(jsonPath("$.runs[0].startTime").exists());
 
-        verify(analyticsService).getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
+        verify(analyticsService).getRunPerformanceData("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
     }
 
     @Test

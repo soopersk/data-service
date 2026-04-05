@@ -6,5 +6,5 @@ package com.company.observability.dto.enums;
  */
 public enum SlaStatus {
     GREEN, AMBER, RED,      // day-level classification (TrendDataPoint, SlaSummary)
-    SLA_MET, LATE, VERY_LATE // run-level classification (PerformanceCard RunBar)
+    SLA_MET, LATE, VERY_LATE, RUNNING // run-level classification (PerformanceCard RunBar)
 }

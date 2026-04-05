@@ -39,7 +39,7 @@ The Observability Service is an enterprise-grade backend that tracks the lifecyc
 - Store all run data in a partitioned PostgreSQL table with daily granularity
 - Cache status data in Redis to reduce DB read pressure
 - Expose OLTP-class query endpoints for current status and batch queries
-- Expose analytics endpoints for runtime trends, SLA summaries, breach detail, and performance cards
+- Expose analytics endpoints for runtime trends, SLA summaries, breach detail, raw run-performance data, and projection views
 - Emit Spring application events for downstream alerting
 
 ### Architectural Style
@@ -158,7 +158,7 @@ All events are synchronous Spring `ApplicationEvent`s published via `Application
 
 | Event | Published by | Listeners |
 |-------|-------------|-----------|
-| `RunStartedEvent` | `RunIngestionService.startRun()` | `CacheWarmingService.onRunStarted()` |
+| `RunStartedEvent` | `RunIngestionService.startRun()` | `CacheWarmingService.onRunStarted()`, `AnalyticsCacheService.onRunStarted()` |
 | `RunCompletedEvent` | `RunIngestionService.completeRun()` (non-breach) | `CacheWarmingService.onRunCompleted()`, `AnalyticsCacheService.onRunCompleted()`, `CacheEvictionService.onRunCompleted()` (disabled) |
 | `SlaBreachedEvent` | `RunIngestionService.startRun()` (start-time breach), `RunIngestionService.completeRun()` (completion breach), `LiveSlaBreachDetectionJob` | `AlertHandlerService.handleSlaBreachEvent()`, `CacheWarmingService.onSlaBreached()`, `AnalyticsCacheService.onSlaBreached()`, `CacheEvictionService.onSlaBreached()` (disabled) |
 
@@ -670,7 +670,6 @@ All analytics endpoints require the same auth headers. All return `Cache-Control
   "periodDays": 30,
   "frequency": "DAILY",
   "avgDurationMs": 8100000,
-  "avgDurationFormatted": "2hrs 15mins",
   "minDurationMs": 6000000,
   "maxDurationMs": 12000000,
   "totalRuns": 28,
@@ -822,9 +821,9 @@ ORDER BY created_at DESC
 
 ---
 
-#### `GET /api/v1/analytics/calculators/{calculatorId}/performance-card`
+#### `GET /api/v1/analytics/calculators/{calculatorId}/run-performance`
 
-**Purpose:** Composite dashboard payload — schedule info, SLA percentages, mean duration, per-run bars for chart rendering, and reference lines.
+**Purpose:** Raw run-level performance payload for any consumer. No presentation formatting.
 
 **Query parameters:**
 
@@ -847,31 +846,48 @@ ORDER BY cr.reporting_date ASC, cr.created_at ASC
 ```
 
 **Per-run SLA classification:**
+- `RUNNING`: run status is `RUNNING` (not SLA-evaluated yet)
 - `SLA_MET`: not breached
 - `LATE`: breached, severity LOW or MEDIUM
 - `VERY_LATE`: breached, severity HIGH or CRITICAL
 
-**SLA percentage invariant:** `slaMetPct + latePct + veryLatePct = 100.0`
+**Counter semantics:**
+- `totalRuns` = terminal/evaluated runs only
+- `runningRuns` = currently running rows
+- RUNNING rows are included in `runs` but excluded from SLA counters and percentage denominator
 
 **Response (abbreviated):**
 ```json
 {
   "calculatorId": "calc-1",
   "calculatorName": "My Calculator",
-  "schedule": { "estimatedStartTimeCet": "10:00", "frequency": "DAILY" },
+  "frequency": "DAILY",
   "periodDays": 30,
   "meanDurationMs": 8100000,
-  "meanDurationFormatted": "2hrs 15mins",
-  "slaSummary": { "totalRuns": 28, "slaMetCount": 24, "slaMetPct": 85.7, "lateCount": 3, "latePct": 10.7, "veryLateCount": 1, "veryLatePct": 3.6 },
+  "totalRuns": 28,
+  "runningRuns": 1,
+  "slaMetCount": 24,
+  "lateCount": 3,
+  "veryLateCount": 1,
   "runs": [
-    { "runId": "...", "reportingDate": "2026-01-24", "startHourCet": 10.12, "endHourCet": 12.25, "slaStatus": "SLA_MET", ... }
-  ],
-  "referenceLines": { "slaStartHourCet": 10.0, "slaEndHourCet": 12.0 }
+    { "runId": "...", "status": "SUCCESS", "slaStatus": "SLA_MET", ... },
+    { "runId": "...", "status": "RUNNING", "slaStatus": "RUNNING", ... }
+  ]
 }
 ```
 
-**Cache:** `obs:analytics:performance-card:{calcId}:{tenantId}:{freq}:{days}` — 5-minute TTL.
-**Classification:** OLTP-safe for `days <= 90`. Borderline for `days=365` — returns up to 365 rows, each with a LEFT JOIN to `sla_breach_events`. The JOIN is on `run_id` (unique on `sla_breach_events`) — effectively O(n) with n = run count.
+**Cache:** `obs:analytics:run-perf:{calcId}:{tenantId}:{freq}:{days}` — 5-minute TTL.
+- `RunStartedEvent` evicts only run-perf keys for calculator+tenant.
+- `RunCompletedEvent` and `SlaBreachedEvent` evict all analytics keys for calculator+tenant.
+**Classification:** OLTP-safe for `days <= 90`. Borderline for large `days` windows due to raw-row JOIN query cost.
+
+---
+
+#### `GET /api/v1/analytics/projections/calculators/{calculatorId}/performance-card`
+
+**Purpose:** Formatted projection payload (CET labels, chart coordinates, formatted durations).
+
+**Composition:** `ProjectionService` composes from `AnalyticsService.getRunPerformanceData()` only. No additional repository queries.
 
 ---
 
@@ -885,7 +901,8 @@ Security scheme: HTTP Basic
 All endpoints annotated with `@Tag` groupings:
 - `Run Ingestion` — ingestion endpoints
 - `Calculator Status` — query endpoints
-- `Analytics` — analytics endpoints
+- `Analytics` — raw analytics endpoints
+- `Analytics Projections` — formatted projection endpoints
 - `Health` — health check
 
 ---
@@ -1240,7 +1257,7 @@ Other endpoints (`env`, `configprops`, `beans`, etc.) are **not exposed**.
 | `api.analytics.sla-summary.requests` | — | SLA summary requests |
 | `api.analytics.trends.requests` | — | Trend analytics requests |
 | `api.analytics.sla-breaches.requests` | — | Breach detail requests |
-| `api.analytics.performance-card.requests` | — | Performance card requests |
+| `api.analytics.run-performance.requests` | — | Run-performance requests |
 | `calculator.runs.started` | `frequency` | Runs started (service level) |
 | `calculator.runs.completed` | `frequency`, `status`, `sla_breached` | Runs completed |
 | `calculator.runs.start.duplicate` | — | Idempotency duplicates (start) |
@@ -1334,7 +1351,7 @@ If `PartitionManagementJob.createPartitions()` fails (e.g., DB connection failur
 
 ### Analytics Under Heavy Load
 
-All analytics endpoints have a 5-minute Redis cache. Under heavy load, cache misses will cause parallel queries to `calculator_sli_daily` and `sla_breach_events`. These tables are unpartitioned and modest in size (one row per calculator per day). Risk is low. The exception is `performance-card` with `days=365` and `allowStale=false`, which triggers a JOIN query across a full year of `calculator_runs` partitions.
+All analytics endpoints have a 5-minute Redis cache. Under heavy load, cache misses will cause parallel queries to `calculator_sli_daily` and `sla_breach_events`. These tables are unpartitioned and modest in size (one row per calculator per day). Risk is low. The exception is `run-performance` with large `days` values, which triggers a JOIN query across `calculator_runs` partitions. The projection `performance-card` endpoint composes from `run-performance` data and does not add repository queries.
 
 ---
 
@@ -1345,7 +1362,7 @@ All analytics endpoints have a 5-minute Redis cache. Under heavy load, cache mis
 1. Add method to `AnalyticsService` — follow existing pattern: check `AnalyticsCacheService`, query repository, build response, cache.
 2. Define a new response DTO (implements `Serializable`).
 3. Add cache key prefix constant in `AnalyticsCacheService`.
-4. Add endpoint to `AnalyticsController` — extract `tenantId`, validate params, call service, set `Cache-Control`.
+4. Add endpoint to `AnalyticsController` (raw domain) or `ProjectionController` (formatted projection) — extract `tenantId`, validate params, call service, set `Cache-Control`.
 5. Add Micrometer counter in the controller.
 6. Verify all `calculator_runs` queries include `reporting_date` in the WHERE clause (see §3.2 rules below).
 
@@ -1507,7 +1524,7 @@ All API endpoints track request counts via counters, but only `query.batch_statu
 
 5. **~~`obs:running` Set population~~** — **RESOLVED.** `RedisCalculatorCache.cacheRunOnWrite()` writes to `obs:running`: adds `{calcId}:{tenantId}:{frequency}` when status=RUNNING (with 2h TTL), removes when status is anything else. The Set is fully populated during normal operation.
 
-6. **`calculator_sli_daily` vs `calculator_runs` for performance card:** The performance card endpoint queries `calculator_runs` directly (with a JOIN to `sla_breach_events`) rather than `calculator_sli_daily`. For `days=365`, this can return 365 raw run rows. Should this be pre-aggregated in `calculator_sli_daily` to avoid the raw-table query?
+6. **`calculator_sli_daily` vs `calculator_runs` for run-performance:** The `run-performance` endpoint queries `calculator_runs` directly (with a JOIN to `sla_breach_events`) rather than `calculator_sli_daily`. For large `days` windows, this returns many raw run rows. Should some views be pre-aggregated to reduce raw-table pressure?
 
 7. **`V10` views usage:** The three helper views (`recent_daily_runs`, `recent_monthly_runs`, `active_calculator_runs`) are defined but no Java repository code was found that queries them. Are these views used externally (e.g., read replicas, reporting tools, data platform)?
 

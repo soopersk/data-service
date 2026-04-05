@@ -12,8 +12,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -34,7 +35,7 @@ import static org.mockito.Mockito.when;
 class CalculatorRunRepositoryTest {
 
     @Mock
-    private JdbcTemplate jdbcTemplate;
+    private NamedParameterJdbcTemplate jdbcTemplate;
     @Mock
     private RedisCalculatorCache redisCache;
     @Mock
@@ -50,7 +51,7 @@ class CalculatorRunRepositoryTest {
     @Test
     void findBatchRecentRunsDbOnly_skipsRedisReadChecks_andCachesDbResults() {
         CalculatorRun dbRun = run("calc-2", "run-2");
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+        when(jdbcTemplate.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of(dbRun));
 
         Map<String, List<CalculatorRun>> result = repository.findBatchRecentRunsDbOnly(
@@ -73,7 +74,7 @@ class CalculatorRunRepositoryTest {
         when(redisCache.getRecentRuns("calc-2", "tenant-1", CalculatorFrequency.DAILY, 3))
                 .thenReturn(Optional.empty());
 
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+        when(jdbcTemplate.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of(dbRun));
 
         Map<String, List<CalculatorRun>> result = repository.findBatchRecentRuns(
@@ -85,11 +86,11 @@ class CalculatorRunRepositoryTest {
         assertEquals(1, result.get("calc-2").size());
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class), any(Object[].class));
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(SqlParameterSource.class), any(RowMapper.class));
         String sql = sqlCaptor.getValue();
         assertTrue(sql.contains("ROW_NUMBER() OVER"));
         assertTrue(sql.contains("PARTITION BY calculator_id"));
-        assertTrue(sql.contains("rn <= ?"));
+        assertTrue(sql.contains("rn <= :limit"));
         verify(redisCache).cacheRunOnWrite(dbRun);
     }
 

@@ -5,12 +5,12 @@ import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.enums.SlaStatus;
 import com.company.observability.dto.response.*;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.repository.DailyAggregateRepository;
 import com.company.observability.repository.SlaBreachEventRepository;
-import com.company.observability.util.TimeUtils;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,9 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.Serializable;
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.Base64;
@@ -41,10 +39,7 @@ public class AnalyticsService {
     private static final String CACHE_SLA_CORE = "sla-core";
     private static final String CACHE_SLA_SUMMARY = "sla-summary";
     private static final String CACHE_TRENDS = "trends";
-    private static final String CACHE_PERF_CARD = "perf-card";
-
-    private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("EEE dd MMM yyyy", Locale.ENGLISH);
+    private static final String CACHE_RUN_PERF = "run-perf";
 
     // ================================================================
     // Runtime Analytics
@@ -76,7 +71,7 @@ public class AnalyticsService {
         if (aggregates.isEmpty()) {
             return new RuntimeAnalyticsResponse(
                     calculatorId, days, frequency.name(),
-                    0, null, 0, 0, 0, 0.0,
+                    0, 0, 0, 0, 0.0,
                     Collections.emptyList());
         }
 
@@ -105,7 +100,7 @@ public class AnalyticsService {
 
         return new RuntimeAnalyticsResponse(
                 calculatorId, days, frequency.name(),
-                avgDuration, TimeUtils.formatDuration(avgDuration),
+                avgDuration,
                 minDuration == Long.MAX_VALUE ? 0 : minDuration,
                 maxDuration == Long.MIN_VALUE ? 0 : maxDuration,
                 totalRuns,
@@ -252,116 +247,97 @@ public class AnalyticsService {
     }
 
     // ================================================================
-    // Performance Card
+    // Run Performance Data (raw domain, no formatting)
     // ================================================================
 
-    public PerformanceCardResponse getPerformanceCard(
+    public RunPerformanceData getRunPerformanceData(
             String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
 
-        PerformanceCardResponse cached = cacheService.getFromCache(
-                CACHE_PERF_CARD, calculatorId, tenantId, frequency.name(), days,
-                PerformanceCardResponse.class);
+        RunPerformanceData cached = cacheService.getFromCache(
+                CACHE_RUN_PERF, calculatorId, tenantId, frequency.name(), days,
+                RunPerformanceData.class);
         if (cached != null) return cached;
 
         List<RunWithSlaStatus> runs = calculatorRunRepository
                 .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days);
 
-        PerformanceCardResponse response = buildPerformanceCardResponse(
+        RunPerformanceData response = buildRunPerformanceData(
                 calculatorId, days, frequency, runs);
 
-        cacheService.putInCache(CACHE_PERF_CARD, calculatorId, tenantId,
+        cacheService.putInCache(CACHE_RUN_PERF, calculatorId, tenantId,
                 frequency.name(), days, response);
         return response;
     }
 
-    private PerformanceCardResponse buildPerformanceCardResponse(
+    private RunPerformanceData buildRunPerformanceData(
             String calculatorId, int days, CalculatorFrequency frequency,
             List<RunWithSlaStatus> runs) {
 
         if (runs.isEmpty()) {
-            return new PerformanceCardResponse(
-                    calculatorId, null, null, days, 0L, null,
-                    new PerformanceCardResponse.SlaSummaryPct(0, 0, 0.0, 0, 0.0, 0, 0.0),
-                    Collections.emptyList(), null);
+            return new RunPerformanceData(
+                    calculatorId, null, frequency.name(), days, 0L,
+                    0, 0, 0, 0, 0,
+                    Collections.emptyList(), null, null);
         }
 
-        // Extract schedule from most recent run (last in chronologically ordered list)
         RunWithSlaStatus latestRun = runs.get(runs.size() - 1);
 
-        // Compute mean duration (weighted by completed runs only)
         long totalDuration = 0;
         int completedCount = 0;
+        int terminalRuns = 0;
+        int runningRuns = 0;
         int slaMetCount = 0, lateCount = 0, veryLateCount = 0;
 
-        List<PerformanceCardResponse.RunBar> runBars = new ArrayList<>();
+        List<RunPerformanceData.RunDataPoint> dataPoints = new ArrayList<>();
 
         for (RunWithSlaStatus run : runs) {
-            if (run.durationMs() != null && run.durationMs() > 0) {
+            if (run.status() == RunStatus.RUNNING) {
+                runningRuns++;
+            } else {
+                terminalRuns++;
+            }
+
+            if (run.status() != RunStatus.RUNNING
+                    && run.durationMs() != null
+                    && run.durationMs() > 0) {
                 totalDuration += run.durationMs();
                 completedCount++;
             }
 
             String slaStatus = classifyRunSlaStatus(run);
-            if (SlaStatus.SLA_MET.name().equals(slaStatus)) slaMetCount++;
-            else if (SlaStatus.LATE.name().equals(slaStatus)) lateCount++;
-            else if (SlaStatus.VERY_LATE.name().equals(slaStatus)) veryLateCount++;
+            if (run.status() != RunStatus.RUNNING) {
+                if (SlaStatus.SLA_MET.name().equals(slaStatus)) slaMetCount++;
+                else if (SlaStatus.LATE.name().equals(slaStatus)) lateCount++;
+                else if (SlaStatus.VERY_LATE.name().equals(slaStatus)) veryLateCount++;
+            }
 
-            runBars.add(buildRunBar(run, slaStatus));
+            dataPoints.add(new RunPerformanceData.RunDataPoint(
+                    run.runId(),
+                    run.reportingDate(),
+                    run.startTime(),
+                    run.endTime(),
+                    run.durationMs(),
+                    run.status().name(),
+                    run.slaBreached(),
+                    slaStatus));
         }
 
         long meanDuration = completedCount > 0 ? totalDuration / completedCount : 0;
-        int totalRuns = runs.size();
 
-        // SLA percentages (must sum to 100%)
-        PerformanceCardResponse.SlaSummaryPct slaSummary =
-                new PerformanceCardResponse.SlaSummaryPct(
-                        totalRuns, slaMetCount, pct(slaMetCount, totalRuns),
-                        lateCount, pct(lateCount, totalRuns),
-                        veryLateCount, pct(veryLateCount, totalRuns));
-
-        // Reference lines from latest run
-        BigDecimal slaStartHour = TimeUtils.calculateCetHour(latestRun.estimatedStartTime());
-        BigDecimal slaEndHour = TimeUtils.calculateCetHour(latestRun.slaTime());
-
-        // Schedule info
-        String startTimeCet = slaStartHour != null
-                ? TimeUtils.formatCetHour(slaStartHour) : null;
-
-        return new PerformanceCardResponse(
+        return new RunPerformanceData(
                 calculatorId,
                 latestRun.calculatorName(),
-                new PerformanceCardResponse.ScheduleInfo(startTimeCet, frequency.name()),
+                frequency.name(),
                 days,
                 meanDuration,
-                TimeUtils.formatDuration(meanDuration),
-                slaSummary,
-                runBars,
-                new PerformanceCardResponse.ReferenceLines(slaStartHour, slaEndHour));
-    }
-
-    private PerformanceCardResponse.RunBar buildRunBar(RunWithSlaStatus run, String slaStatus) {
-        String dateFormatted = run.reportingDate() != null
-                ? run.reportingDate().format(DATE_FORMATTER) : null;
-
-        BigDecimal startHour = TimeUtils.calculateCetHour(run.startTime());
-        BigDecimal endHour = TimeUtils.calculateCetHour(run.endTime());
-
-        String startCet = startHour != null
-                ? TimeUtils.formatCetHour(startHour) + " CET" : null;
-        String endCet = endHour != null
-                ? TimeUtils.formatCetHour(endHour) + " CET" : null;
-
-        return new PerformanceCardResponse.RunBar(
-                run.runId(),
-                run.reportingDate(),
-                dateFormatted,
-                startHour,
-                endHour,
-                startCet,
-                endCet,
-                run.durationMs() != null ? run.durationMs() : 0,
-                TimeUtils.formatDuration(run.durationMs()),
-                slaStatus);
+                terminalRuns,
+                runningRuns,
+                slaMetCount,
+                lateCount,
+                veryLateCount,
+                dataPoints,
+                latestRun.estimatedStartTime(),
+                latestRun.slaTime());
     }
 
     // ================================================================
@@ -372,6 +348,9 @@ public class AnalyticsService {
      * Per-run classification for performance card (SLA_MET / LATE / VERY_LATE)
      */
     private String classifyRunSlaStatus(RunWithSlaStatus run) {
+        if (run.status() == RunStatus.RUNNING) {
+            return SlaStatus.RUNNING.name();
+        }
         if (!Boolean.TRUE.equals(run.slaBreached())) {
             return SlaStatus.SLA_MET.name();
         }
@@ -433,11 +412,6 @@ public class AnalyticsService {
             case "HIGH", "CRITICAL" -> SlaStatus.RED.name();
             default -> SlaStatus.AMBER.name();
         };
-    }
-
-    private double pct(int count, int total) {
-        if (total == 0) return 0.0;
-        return Math.round((double) count / total * 1000.0) / 10.0;
     }
 
     private String encodeCursor(java.time.Instant createdAt, long breachId) {

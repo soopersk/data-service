@@ -115,8 +115,8 @@ All analytics endpoints have a 5-minute Redis cache. Cache miss behaviour:
 | Endpoint | Miss Behaviour | Risk |
 |----------|---------------|------|
 | `/runtime`, `/sla-summary`, `/trends` | Query `calculator_sli_daily` (unpartitioned, small) | Low |
-| `/performance-card` (days ≤ 90) | Query `calculator_runs` (partitioned, bounded) | Low |
-| `/performance-card` (days = 365, concurrent) | Multiple parallel queries to 365 partitions + JOIN | Medium |
+| `/run-performance` (days ≤ 90) | Query `calculator_runs` (partitioned, bounded) | Low |
+| `/run-performance` (days = 365, concurrent) | Multiple parallel queries to 365 partitions + JOIN | Medium |
 | `/sla-breaches` (no cache) | Always hits DB; cursor pagination is O(1) | Low with cursor, high with large offsets |
 
 ---
@@ -131,3 +131,4 @@ All analytics endpoints have a 5-minute Redis cache. Cache miss behaviour:
 | Partition management job | Runs at 01:00 only — no startup action |
 
 If Flyway migration fails on startup, the application does not start. All pending migrations must succeed before HTTP traffic is accepted.
+

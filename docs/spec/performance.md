@@ -54,7 +54,7 @@ HikariCP is the fastest available JDBC connection pool. The 20-connection ceilin
 | `GET .../runtime` (uncached, 365 days) | **~0.5ms** | **30–100ms** | 365 rows from `calculator_sli_daily` |
 | `GET .../sla-breaches` (cursor, size=20) | N/A (no cache) | **5–15ms** | Keyset index scan |
 | `GET .../sla-breaches` (offset page=100) | N/A | **100–500ms+** | Full index scan to offset position |
-| `GET .../performance-card` (cached) | **~0.5ms** | **50–300ms** | `calculator_runs` LEFT JOIN `sla_breach_events` |
+| `GET .../run-performance` (cached) | **~0.5ms** | **50–300ms** | `calculator_runs` LEFT JOIN `sla_breach_events` |
 
 ---
 
@@ -81,7 +81,7 @@ HikariCP is the fastest available JDBC connection pool. The 20-connection ceilin
 | MONTHLY status (last 13 months) | ~395 | +50–200ms vs DAILY |
 | `findById(String)` — no date | ~455 | +200–500ms (cold), potentially seconds |
 | Analytics (N days window) | 0 — reads `calculator_sli_daily` | None (not partitioned) |
-| `performance-card` (N days) | ≤ N | Scales linearly with `days` |
+| `run-performance` (N days) | ≤ N | Scales linearly with `days` |
 
 ---
 
@@ -97,14 +97,14 @@ HikariCP is the fastest available JDBC connection pool. The 20-connection ceilin
 
 ---
 
-## Performance Card — Special Case
+## Run Performance - Special Case
 
-The `performance-card` endpoint reads from `calculator_runs` directly (not the pre-aggregated table), with a LEFT JOIN to `sla_breach_events`:
+The `run-performance` endpoint reads from `calculator_runs` directly (not the pre-aggregated table), with a LEFT JOIN to `sla_breach_events`:
 
 ```sql
 SELECT cr.*, sbe.severity
 FROM calculator_runs cr
-LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id
+LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id AND sbe.tenant_id = cr.tenant_id
 WHERE cr.calculator_id = ? AND cr.tenant_id = ? AND cr.frequency = ?
 AND cr.reporting_date >= CURRENT_DATE - CAST(? AS INTEGER) * INTERVAL '1 day'
 AND cr.reporting_date <= CURRENT_DATE
@@ -127,3 +127,4 @@ ORDER BY cr.reporting_date ASC, cr.created_at ASC
 | Monitoring alert check (≤50 calcs) | `allowStale=true`. Acceptable. |
 | Bulk reconciliation (100 calcs, DAILY) | `allowStale=false` if freshness is critical. One DB query with window function. |
 | Bulk reconciliation (100 calcs, MONTHLY) | Avoid `allowStale=false`. 100 MONTHLY cache misses = 100 DB queries × ~395 partition scans each. Use `allowStale=true` and accept up to 60s staleness. |
+

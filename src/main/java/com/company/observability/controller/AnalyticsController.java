@@ -143,14 +143,14 @@ public class AnalyticsController {
         }
     }
 
-    @GetMapping("/calculators/{calculatorId}/performance-card")
+    @GetMapping("/calculators/{calculatorId}/run-performance")
     @Operation(
-            summary = "Calculator performance card data",
-            description = "Returns all data needed for the dashboard performance card: " +
-                    "schedule, mean runtime, SLA summary percentages, individual run bars " +
-                    "for chart rendering, and reference lines."
+            summary = "Run-level performance data",
+            description = "Returns raw run-level performance data with SLA status classification. " +
+                    "All timestamps are UTC Instants. For pre-formatted CET times and chart " +
+                    "coordinates, use GET /api/v1/analytics/projections/calculators/{calculatorId}/performance-card."
     )
-    public ResponseEntity<PerformanceCardResponse> getPerformanceCard(
+    public ResponseEntity<RunPerformanceData> getRunPerformanceData(
             @PathVariable String calculatorId,
             @RequestHeader("X-Tenant-Id") String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
@@ -162,15 +162,16 @@ public class AnalyticsController {
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
-            PerformanceCardResponse response = analyticsService
-                    .getPerformanceCard(calculatorId, tenantId, days, freq);
+            RunPerformanceData response = analyticsService
+                    .getRunPerformanceData(calculatorId, tenantId, days, freq);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
                     .body(response);
         } finally {
             sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
-                    "endpoint", "/performance-card"));
+                    "endpoint", "/run-performance"));
         }
     }
+
 }

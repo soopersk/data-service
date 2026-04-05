@@ -2,6 +2,7 @@ package com.company.observability.cache;
 
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.event.RunCompletedEvent;
+import com.company.observability.event.RunStartedEvent;
 import com.company.observability.event.SlaBreachedEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -31,6 +32,7 @@ public class AnalyticsCacheService {
 
     private static final String ANALYTICS_PREFIX = "obs:analytics:";
     private static final String ANALYTICS_INDEX_PREFIX = "obs:analytics:index:";
+    private static final String RUN_PERF_CACHE_PREFIX = ANALYTICS_PREFIX + "run-perf:";
     private static final Duration DEFAULT_TTL = Duration.ofMinutes(5);
     private static final Duration INDEX_TTL = Duration.ofHours(1);
 
@@ -102,6 +104,12 @@ public class AnalyticsCacheService {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
+    public void onRunStarted(RunStartedEvent event) {
+        evictForCalculatorByPrefix(event.getRun(), RUN_PERF_CACHE_PREFIX);
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Async
     public void onRunCompleted(RunCompletedEvent event) {
         evictForCalculator(event.getRun());
     }
@@ -128,6 +136,32 @@ public class AnalyticsCacheService {
             }
         } catch (Exception e) {
             log.warn("event=cache.evict outcome=failure calculatorId={} error={}",
+                    run.getCalculatorId(), e.getMessage());
+        }
+    }
+
+    private void evictForCalculatorByPrefix(CalculatorRun run, String fullKeyPrefix) {
+        String indexKey = buildIndexKey(run.getCalculatorId(), run.getTenantId());
+        try {
+            Set<Object> indexedKeys = redisTemplate.opsForSet().members(indexKey);
+            if (indexedKeys == null || indexedKeys.isEmpty()) {
+                return;
+            }
+
+            List<String> keysToDelete = indexedKeys.stream()
+                    .map(Object::toString)
+                    .filter(key -> key.startsWith(fullKeyPrefix))
+                    .collect(Collectors.toList());
+
+            if (!keysToDelete.isEmpty()) {
+                redisTemplate.delete(keysToDelete);
+                redisTemplate.opsForSet().remove(indexKey, keysToDelete.toArray());
+                meterRegistry.counter(CACHE_ANALYTICS_EVICTION).increment();
+                log.debug("event=cache.evict outcome=success calculatorId={} keysEvicted={} mode=prefix",
+                        run.getCalculatorId(), keysToDelete.size());
+            }
+        } catch (Exception e) {
+            log.warn("event=cache.evict outcome=failure calculatorId={} mode=prefix error={}",
                     run.getCalculatorId(), e.getMessage());
         }
     }

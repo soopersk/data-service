@@ -126,7 +126,8 @@ Both keys have a 24-hour TTL.
 **Purpose:** Avoids repeated aggregation queries for frequently-accessed analytics.
 
 - TTL: **5 minutes** on all analytics keys
-- Invalidated automatically on `RunCompletedEvent` and `SlaBreachedEvent` via `AnalyticsCacheService`
+- `run-performance` keys are invalidated on `RunStartedEvent`
+- All analytics keys are invalidated on `RunCompletedEvent` and `SlaBreachedEvent`
 - `obs:analytics:index:{calcId}:{tenantId}` tracks all analytics keys for bulk invalidation (1h TTL)
 
 **Key prefixes by endpoint:**
@@ -136,7 +137,7 @@ Both keys have a 24-hour TTL.
 | `/runtime` | `obs:analytics:runtime:` |
 | `/sla-summary` | `obs:analytics:sla-summary:` |
 | `/trends` | `obs:analytics:trends:` |
-| `/performance-card` | `obs:analytics:performance-card:` |
+| `/run-performance` | `obs:analytics:run-perf:` |
 
 ---
 

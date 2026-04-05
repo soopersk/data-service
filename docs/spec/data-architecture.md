@@ -90,7 +90,7 @@ CREATE TABLE calculator_sli_daily (
 - Not partitioned. One row per `(calculatorId, tenantId, day_cet)`.
 - `day_cet` is the CET calendar day (not UTC). A run finishing just after midnight CET is counted in the **new** day.
 - All analytics endpoints (`/runtime`, `/sla-summary`, `/trends`) read from this table.
-- The `performance-card` endpoint is the exception — it reads raw `calculator_runs` directly.
+- The `run-performance` endpoint is the exception — it reads raw `calculator_runs` directly.
 
 ---
 
@@ -260,3 +260,4 @@ ON CONFLICT (calculator_id, tenant_id, day_cet) DO UPDATE SET
 
 !!! warning "Concurrency limitation (TD-3)"
     Under concurrent completions for the same `(calculatorId, tenantId, day_cet)`, the running-average denominator can be stale. This is non-critical (analytics data) but introduces slight inaccuracy under high parallelism. See [TD-3](tech-debt.md#td-3-daily-aggregate-running-average-concurrency-unsafe).
+

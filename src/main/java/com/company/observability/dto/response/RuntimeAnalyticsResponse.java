@@ -8,7 +8,6 @@ public record RuntimeAnalyticsResponse(
         int periodDays,
         String frequency,
         long avgDurationMs,
-        String avgDurationFormatted,
         long minDurationMs,
         long maxDurationMs,
         int totalRuns,

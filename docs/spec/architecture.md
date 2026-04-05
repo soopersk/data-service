@@ -30,7 +30,7 @@ Repository
 |------------|-------------|---------|
 | `RunIngestionController` | `/api/v1/runs` | Airflow-facing; records run start and completion |
 | `RunQueryController` | `/api/v1/calculators` | Status queries, single and batch |
-| `AnalyticsController` | `/api/v1/analytics` | Trend analysis, SLA summaries, performance cards |
+| `AnalyticsController` | `/api/v1/analytics` | Trend analysis, SLA summaries, and run-performance domain data |
 | `HealthController` | `/api/v1/health` | Unauthenticated health check |
 
 ### Services
@@ -39,7 +39,8 @@ Repository
 |---------|---------------|
 | `RunIngestionService` | Idempotency check, SLA deadline calculation, DB upsert, SLA registration, event publication |
 | `RunQueryService` | Cache-first status retrieval, batch status with pipelining |
-| `AnalyticsService` | Aggregate analytics queries, cache orchestration |
+| `AnalyticsService` | Aggregate analytics queries and cache orchestration |
+| `ProjectionService` | Builds formatted projection payloads from raw analytics data |
 | `SlaEvaluationService` | Synchronous SLA breach evaluation logic |
 | `AlertHandlerService` | Persists breach events, sends alerts (currently log-only) |
 | `CacheWarmingService` | Evicts and re-warms Redis cache after run state changes |
@@ -178,3 +179,4 @@ com.company.observability
 ├── security/            # RequestLoggingFilter
 └── util/                # TimeUtils, ObservabilityConstants, etc.
 ```
+

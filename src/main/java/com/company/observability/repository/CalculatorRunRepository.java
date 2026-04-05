@@ -448,7 +448,7 @@ public class CalculatorRunRepository {
                    cr.sla_breached, cr.sla_breach_reason,
                    sbe.severity
             FROM calculator_runs cr
-            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id
+            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id AND sbe.tenant_id = cr.tenant_id
             WHERE cr.calculator_id = :calculatorId AND cr.tenant_id = :tenantId AND cr.frequency = :frequency
             AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             AND cr.reporting_date <= CURRENT_DATE

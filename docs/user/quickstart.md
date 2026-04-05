@@ -138,7 +138,6 @@ curl -u admin:admin \
   "periodDays": 30,
   "frequency": "DAILY",
   "avgDurationMs": 4200000,
-  "avgDurationFormatted": "1hr 10mins",
   "minDurationMs": 4200000,
   "maxDurationMs": 4200000,
   "totalRuns": 1,

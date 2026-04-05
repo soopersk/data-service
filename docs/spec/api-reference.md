@@ -199,12 +199,13 @@ All analytics endpoints:
 - Require `Authorization` + `X-Tenant-Id`
 - Return `Cache-Control: max-age=60, private` (except SLA breaches: `no-cache`)
 - Are backed by a 5-minute Redis analytics cache
+- `run-performance` keys are evicted on run start; all analytics keys are evicted on run completion/breach
 
 ### `GET /api/v1/analytics/calculators/{calculatorId}/runtime`
 
 Average runtime statistics over a lookback window.
 
-**Query Parameters:** `days` (required, 1–365), `frequency` (default `DAILY`)
+**Query Parameters:** `days` (required, 1-365), `frequency` (default `DAILY`)
 
 **Data source:** `calculator_sli_daily`
 
@@ -215,7 +216,6 @@ Average runtime statistics over a lookback window.
   "periodDays": 30,
   "frequency": "DAILY",
   "avgDurationMs": 8100000,
-  "avgDurationFormatted": "2hrs 15mins",
   "minDurationMs": 6000000,
   "maxDurationMs": 12000000,
   "totalRuns": 28,
@@ -232,53 +232,11 @@ Average runtime statistics over a lookback window.
 
 SLA breach count with GREEN/AMBER/RED day classification.
 
-**Query Parameters:** `days` (required, 1–365)
-
-**Data sources:** `calculator_sli_daily` + `sla_breach_events`
-
-**Response:**
-```json
-{
-  "calculatorId": "calc-1",
-  "periodDays": 30,
-  "totalBreaches": 5,
-  "greenDays": 25,
-  "amberDays": 4,
-  "redDays": 1,
-  "breachesBySeverity": { "LOW": 2, "MEDIUM": 1, "HIGH": 1, "CRITICAL": 1 },
-  "breachesByType": { "END_TIME_EXCEEDED": 3, "DURATION_EXCEEDED": 1, "RUN_FAILED": 1 }
-}
-```
-
 ---
 
 ### `GET /api/v1/analytics/calculators/{calculatorId}/trends`
 
-Per-day trend data with run counts, durations, SLA status.
-
-**Query Parameters:** `days` (required, 1–365)
-
-**Data source:** `calculator_sli_daily`
-
-**Response:**
-```json
-{
-  "calculatorId": "calc-1",
-  "periodDays": 30,
-  "trends": [
-    {
-      "date": "2026-03-24",
-      "avgDurationMs": 8100000,
-      "totalRuns": 1,
-      "successRuns": 1,
-      "slaBreaches": 0,
-      "avgStartMinCet": 300,
-      "avgEndMinCet": 435,
-      "slaStatus": "GREEN"
-    }
-  ]
-}
-```
+Per-day trend data with run counts, durations, and SLA status.
 
 ---
 
@@ -286,48 +244,13 @@ Per-day trend data with run counts, durations, SLA status.
 
 Paginated detailed breach event log. Always returns fresh data (`no-cache`).
 
-**Query Parameters:**
-
-| Name | Type | Default | Constraints |
-|------|------|---------|-------------|
-| `days` | int | Required | 1–365 |
-| `severity` | String | Optional | `LOW`/`MEDIUM`/`HIGH`/`CRITICAL` |
-| `page` | int | `0` | Min 0 |
-| `cursor` | String | Optional | Opaque Base64 for keyset pagination |
-| `size` | int | `20` | 1–100 |
-
-**Response:**
-```json
-{
-  "content": [
-    {
-      "breachId": 42,
-      "runId": "run-abc-123",
-      "calculatorId": "calc-1",
-      "calculatorName": "My Calculator",
-      "breachType": "END_TIME_EXCEEDED",
-      "severity": "HIGH",
-      "slaStatus": "RED",
-      "expectedValue": 1706220000000,
-      "actualValue": 1706224200000,
-      "createdAt": "2026-01-25T14:15:00Z"
-    }
-  ],
-  "page": 0,
-  "size": 20,
-  "totalElements": 42,
-  "totalPages": 3,
-  "nextCursor": "MjAyNi0wMS0yNVQxNDoxNTowMFo6NDI="
-}
-```
-
 ---
 
-### `GET /api/v1/analytics/calculators/{calculatorId}/performance-card`
+### `GET /api/v1/analytics/calculators/{calculatorId}/run-performance`
 
-Composite dashboard payload: schedule info, SLA percentages, per-run bars, reference lines.
+Raw run-level performance data.
 
-**Query Parameters:** `days` (default `30`, 1–365), `frequency` (default `DAILY`)
+**Query Parameters:** `days` (default `30`, 1-365), `frequency` (default `DAILY`)
 
 **Data source:** `calculator_runs` LEFT JOIN `sla_breach_events`
 
@@ -336,41 +259,50 @@ Composite dashboard payload: schedule info, SLA percentages, per-run bars, refer
 {
   "calculatorId": "calc-1",
   "calculatorName": "My Calculator",
-  "schedule": {
-    "estimatedStartTimeCet": "10:00",
-    "frequency": "DAILY"
-  },
+  "frequency": "DAILY",
   "periodDays": 30,
   "meanDurationMs": 8100000,
-  "meanDurationFormatted": "2hrs 15mins",
-  "slaSummary": {
-    "totalRuns": 28,
-    "slaMetCount": 24,
-    "slaMetPct": 85.7,
-    "lateCount": 3,
-    "latePct": 10.7,
-    "veryLateCount": 1,
-    "veryLatePct": 3.6
-  },
+  "totalRuns": 28,
+  "runningRuns": 1,
+  "slaMetCount": 24,
+  "lateCount": 3,
+  "veryLateCount": 1,
   "runs": [
     {
       "runId": "run-abc-123",
       "reportingDate": "2026-01-24",
-      "startHourCet": 10.12,
-      "endHourCet": 12.25,
-      "slaStatus": "SLA_MET",
+      "startTime": "2026-01-24T09:00:00Z",
+      "endTime": "2026-01-24T11:15:00Z",
       "durationMs": 7980000,
-      "status": "SUCCESS"
+      "status": "SUCCESS",
+      "slaStatus": "SLA_MET",
+      "slaBreached": false
+    },
+    {
+      "runId": "run-abc-124",
+      "reportingDate": "2026-01-25",
+      "startTime": "2026-01-25T09:00:00Z",
+      "endTime": null,
+      "durationMs": null,
+      "status": "RUNNING",
+      "slaStatus": "RUNNING",
+      "slaBreached": false
     }
   ],
-  "referenceLines": {
-    "slaStartHourCet": 10.0,
-    "slaEndHourCet": 12.0
-  }
+  "estimatedStartTime": "2026-01-24T09:00:00Z",
+  "slaTime": "2026-01-24T11:00:00Z"
 }
 ```
 
-**SLA status per run:** `SLA_MET` (not breached), `LATE` (severity LOW/MEDIUM), `VERY_LATE` (severity HIGH/CRITICAL).
+Run-level SLA status values: `SLA_MET`, `LATE`, `VERY_LATE`, `RUNNING`.
+
+Counters: `totalRuns` is terminal/evaluated only; `runningRuns` is tracked separately.
+
+---
+
+### `GET /api/v1/analytics/projections/calculators/{calculatorId}/performance-card`
+
+Pre-formatted projection payload for dashboard consumers (CET labels, chart coordinates, percentages).
 
 ---
 
@@ -381,4 +313,8 @@ Composite dashboard payload: schedule info, SLA percentages, per-run bars, refer
 | `Run Ingestion` | `/api/v1/runs/start`, `/api/v1/runs/{runId}/complete` |
 | `Calculator Status` | `/api/v1/calculators/{calculatorId}/status`, `/api/v1/calculators/batch/status` |
 | `Analytics` | All `/api/v1/analytics/**` endpoints |
+| `Analytics Projections` | `/api/v1/analytics/projections/**` endpoints |
 | `Health` | `/api/v1/health` |
+
+
+
