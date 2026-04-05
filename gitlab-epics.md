@@ -21,7 +21,9 @@
 | [EPIC-9](#epic-9-observability--metrics) | Observability & Metrics | 5 |
 | [EPIC-10](#epic-10-security-hardening) | Security Hardening | 4 |
 | [EPIC-11](#epic-11-testing--quality) | Testing & Quality | 6 |
-| [EPIC-12](#epic-12-production-readiness) | Production Readiness | 5 |
+| [EPIC-12](#epic-12-production-readiness) | Production Readiness | 6 |
+| [EPIC-13](#epic-13-airflow-observability-operators) | Airflow Observability Operators | 7 |
+| [EPIC-14](#epic-14-tech-debt-resolution) | Tech Debt Resolution | 8 |
 
 ---
 
@@ -1125,7 +1127,7 @@ Implement `getPerformanceCard()` — the composite endpoint reading raw run data
 **Labels:** `analytics`, `backend`, `priority::high`
 
 **Description:**
-Implement the five analytics HTTP endpoints.
+Implement the four analytics HTTP endpoints under `AnalyticsController`. Note: `/performance-card` lives in `ProjectionController` (Issue 7.7). `/run-performance` is a raw-data endpoint covered in Issue 7.8.
 
 **Technical Scope:**
 - All under `/api/v1/analytics/calculators/{calculatorId}`, `@Tag(name = "Analytics")`
@@ -1133,15 +1135,85 @@ Implement the five analytics HTTP endpoints.
 - `/sla-summary`: `days @Min(1) @Max(365)`. `Cache-Control: max-age=60, private`. Counter: `api.analytics.sla-summary.requests`.
 - `/trends`: `days @Min(1) @Max(365)`. `Cache-Control: max-age=60, private`. Counter: `api.analytics.trends.requests`.
 - `/sla-breaches`: `days @Min(1) @Max(365)`, `severity optional`, `page @Min(0) default 0`, `size @Min(1) @Max(100) default 20`, `cursor optional`. `Cache-Control: no-cache`. Counter: `api.analytics.sla-breaches.requests`.
-- `/performance-card`: `days @Min(1) @Max(365) default 30`, `frequency default DAILY`. `Cache-Control: max-age=60, private`. Counter: `api.analytics.performance-card.requests`.
 
-**Dependencies:** Issue 1.5, Issue 7.2, Issue 7.3, Issue 7.4
+**Dependencies:** Issue 1.5, Issue 7.2, Issue 7.3
 
 **Acceptance Criteria:**
 - [ ] `days=0` returns 400; `days=366` returns 400; `days=365` returns 200
 - [ ] `/sla-breaches` always returns `Cache-Control: no-cache`
-- [ ] All 5 analytics counters increment on each call (verified via `/actuator/prometheus`)
+- [ ] All 4 analytics counters increment on each call (verified via `/actuator/prometheus`)
 - [ ] Missing `X-Tenant-Id` on any analytics endpoint returns 400
+
+---
+
+### Issue 7.7 — `ProjectionController` & `/performance-card` Endpoint
+
+**Labels:** `analytics`, `backend`, `priority::high`
+
+**Description:**
+Implement the `ProjectionController` that exposes the formatted performance-card projection at a distinct path from the raw analytics endpoints. This controller is architecturally separate from `AnalyticsController` — it owns the dashboard-consumer-facing projection layer.
+
+**Technical Scope:**
+- `ProjectionController` at `/api/v1/analytics/projections/calculators/{calculatorId}`, `@Tag(name = "Projections")`
+- `GET /performance-card`: `days @Min(1) @Max(365) default 30`, `frequency default DAILY`. Delegates to `AnalyticsService.getPerformanceCard()`.
+  - `Cache-Control: max-age=60, private`
+  - Counter: `api.analytics.projections.performance-card.requests`
+  - Timer: `api.analytics.projections.performance-card.duration`
+- Same auth/tenant requirements as `AnalyticsController`: `@RequestHeader("X-Tenant-Id")` + HTTP Basic
+
+**Implementation Notes:**
+- `ProjectionController` must remain separate from `AnalyticsController`. The projection path (`/projections/...`) allows the response format to evolve independently of the raw analytics schema.
+- Swagger grouping: `@Tag(name = "Projections")` — distinct from `"Analytics"` tag.
+
+**Dependencies:** Issue 1.5, Issue 7.4
+
+**Acceptance Criteria:**
+- [ ] `GET /api/v1/analytics/projections/calculators/{id}/performance-card` returns 200 with `PerformanceCardResponse`
+- [ ] `GET /api/v1/analytics/calculators/{id}/performance-card` returns 404 (endpoint does not exist on `AnalyticsController`)
+- [ ] Swagger UI shows `Projections` as a distinct tag group from `Analytics`
+- [ ] `api.analytics.projections.performance-card.requests` counter increments on each call
+- [ ] Missing `X-Tenant-Id` returns 400; unauthenticated returns 401
+
+---
+
+### Issue 7.8 — `AnalyticsService`: Run Performance Endpoint
+
+**Labels:** `analytics`, `backend`, `priority::medium`
+
+**Description:**
+Implement the `/run-performance` endpoint that exposes raw calculator run data joined with SLA breach event status. Unlike all other analytics endpoints this reads from `calculator_runs` directly (not from `calculator_sli_daily`), providing per-run granularity rather than daily aggregates.
+
+**Technical Scope:**
+- `AnalyticsService.getRunPerformance(calcId, tenantId, frequency, days)`:
+  - **No analytics cache** — reads raw data; cache would be stale on every run
+  - `calculatorRunRepository.findRunsWithSlaStatus(calcId, tenantId, frequency, days)` → `List<RunWithSlaStatus>`
+  - Maps each `RunWithSlaStatus` to a `RunPerformanceResponse` record containing:
+    - `runId`, `calculatorId`, `frequency`, `reportingDate`, `status`
+    - `startTime`, `endTime`, `durationMs`, `durationFormatted`
+    - `startHourCet`, `endHourCet` (from pre-computed DECIMAL columns)
+    - `slaBreached`, `slaBreachReason`, `severity` (from LEFT JOIN `sla_breach_events`)
+  - Return `List<RunPerformanceResponse>` ordered by `reportingDate DESC`
+- New DTO `RunPerformanceResponse` (`Serializable`, Lombok `@Data @Builder`)
+- `GET /api/v1/analytics/calculators/{calculatorId}/run-performance` on `AnalyticsController`:
+  - `days @Min(1) @Max(365) default 30`, `frequency default DAILY`
+  - `Cache-Control: no-cache` (raw run data)
+  - Counter: `api.analytics.run-performance.requests`
+  - Timer: `api.analytics.run-performance.duration`
+
+**Implementation Notes:**
+- `findRunsWithSlaStatus()` uses `calculator_runs cr LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id` — existing method in `CalculatorRunRepository`.
+- `severity` field will be `null` for non-breached runs (LEFT JOIN miss) — DTO must handle `null` cleanly.
+- This is intentionally not cached: it's the raw-data endpoint for debugging, not the dashboard endpoint.
+
+**Dependencies:** Issue 2.2, Issue 7.1
+
+**Acceptance Criteria:**
+- [ ] `GET /run-performance` returns one entry per calculator run within the requested window
+- [ ] `severity` is populated for breached runs and `null` for non-breached runs
+- [ ] `Cache-Control: no-cache` is set on the response
+- [ ] `days=366` returns 400; `days=1` returns 200
+- [ ] Empty result (no runs in window) returns empty array with 200 (not 404)
+- [ ] `api.analytics.run-performance.requests` counter increments on each call
 
 ---
 
@@ -1819,6 +1891,558 @@ Create a pre-deployment and post-deployment verification checklist for productio
 
 ---
 
+### Issue 12.6 — Airflow Operator Deployment Guide
+
+**Labels:** `operations`, `documentation`, `airflow`, `priority::high`
+
+**Description:**
+Document how to deploy and configure the Observability Airflow operators for teams integrating their calculator DAGs with the Observability service. This covers Airflow plugin installation, connection setup, and DAG wiring patterns.
+
+**Technical Scope (doc content):**
+- Plugin installation: copy `airflow/plugins/observability/` into the Airflow `plugins/` directory (or mount as a volume in Kubernetes)
+- Airflow Connection configuration (Admin → Connections):
+
+  | Field | Value |
+  |---|---|
+  | Conn ID | `obs_ingestion_default` |
+  | Conn Type | HTTP |
+  | Host | `<observability-service-host>:<port>` |
+  | Schema | `http` / `https` |
+  | Login | `<obs-username>` |
+  | Password | `<obs-password>` |
+  | Extra | `{"tenant_id": "<default-tenant>"}` |
+
+- Python dependency: `aiohttp` must be installed in the Airflow triggerer environment
+- Required DAG wiring pattern (task order, `trigger_rule=ALL_DONE` on complete operator, XCom field names)
+- `ObsRunStartOperator` parameter reference (all fields, which are templatable)
+- `ObsRunCompleteOperator` parameter reference (field mapping, `status_on_upstream_failure`)
+- Event microservice URL convention: how the `event_service_url` should be set per environment
+- Troubleshooting: how to check XCom values, how to verify connection via Airflow UI, common failure modes
+
+**Dependencies:** Issue 12.5, EPIC-13
+
+**Acceptance Criteria:**
+- [ ] Guide is in `docs/airflow-integration.md`
+- [ ] Includes a complete minimal DAG example (copy-pasteable)
+- [ ] Documents all operator parameters with types and defaults
+- [ ] Includes environment-specific configuration guidance (local, dev, prod)
+- [ ] Reviewed by at least one Airflow DAG author from the calculator team
+
+---
+
+---
+
+## EPIC-13: Airflow Observability Operators
+
+**Goal:** Provide a production-ready Airflow plugin — hook, trigger, and two operators — that any calculator DAG can use to record run lifecycle events in the Observability service. `runId` = `databricks_run_id` extracted from the EDF START event, ensuring accurate start times and no phantom records for failed launches.
+
+**Labels:** `epic`, `airflow`, `integration`
+
+**Delivery sprint:** Sprint 4 (alongside EPIC-7), or independently when first calculator DAG onboards.
+
+---
+
+### Issue 13.1 — `ObsHook`: HTTP Hook for Observability Ingestion API
+
+**Labels:** `airflow`, `integration`, `priority::high`
+
+**Description:**
+Implement `ObsHook` — a thin `HttpHook` subclass that centralises Basic-auth header construction and exposes typed `start_run()` / `complete_run()` methods. All operators use this hook; it is the single point of change if auth or base URL conventions change.
+
+**Technical Scope:**
+- File: `airflow/plugins/observability/hooks/obs_hook.py`
+- Extends `airflow.providers.http.hooks.http.HttpHook`
+- `conn_name_attr = "obs_conn_id"`, `default_conn_name = "obs_ingestion_default"`
+- `_get_headers(tenant_id: str) → dict`: reads `conn.login` / `conn.get_password()`, builds `Authorization: Basic <base64>`, adds `X-Tenant-Id` and `Content-Type: application/json`
+- `start_run(payload: dict, tenant_id: str) → dict`: POST `/api/v1/runs/start` — raises `AirflowException` on non-2xx
+- `complete_run(run_id: str, payload: dict, tenant_id: str) → dict`: POST `/api/v1/runs/{run_id}/complete` — raises `AirflowException` on non-2xx
+
+Airflow Connection (`obs_ingestion_default`, type HTTP):
+
+| Field | Value |
+|---|---|
+| Host | `observability-service:8080` |
+| Schema | `http` / `https` |
+| Login | username |
+| Password | password |
+| Extra | `{"tenant_id": "acme-corp"}` (default, overridable per-call) |
+
+**Dependencies:** None (pure Python / Airflow providers)
+
+**Acceptance Criteria:**
+- [ ] `_get_headers("tenant-a")` produces correct Base64-encoded `Authorization` header
+- [ ] `start_run()` POSTs to `/api/v1/runs/start` with correct headers and JSON body
+- [ ] `complete_run("db-123", ...)` POSTs to `/api/v1/runs/db-123/complete`
+- [ ] Non-2xx response raises `AirflowException` (not a silent failure)
+- [ ] Unit tests mock `HttpHook.run()` — no real HTTP calls in tests
+
+---
+
+### Issue 13.2 — `ObsStartEventTrigger`: Async EDF Event Poller
+
+**Labels:** `airflow`, `integration`, `priority::critical`
+
+**Description:**
+Implement `ObsStartEventTrigger` — an async `BaseTrigger` that runs in the Airflow triggerer process and polls the EDF event microservice until the Databricks START event (containing `databricks_run_id` and `start_time`) is received. This is the deferrable heart of the integration — it releases the Airflow worker slot during the wait.
+
+**Technical Scope:**
+- File: `airflow/plugins/observability/triggers/obs_start_event_trigger.py`
+- Extends `airflow.triggers.base.BaseTrigger`
+- Constructor params: `event_service_url: str`, `correlation_id: str`, `auth_headers: dict`, `poll_interval: float = 10.0`, `timeout: float = 1800.0`
+- `serialize()`: returns fully-qualified class path + constructor kwargs (required for triggerer process serialisation)
+- `async run()`:
+  - Opens `aiohttp.ClientSession` with `auth_headers`
+  - Polls `{event_service_url}?correlationId={correlation_id}` until `databricks_run_id` is present in 200 response
+  - On success: `yield TriggerEvent(event_body_dict)`
+  - On timeout: `yield TriggerEvent({"error": "timeout", "correlation_id": correlation_id})`
+  - Handles transient `aiohttp.ClientError` with WARN log + retry (does not fail)
+  - HTTP 404/204 = event not yet available — sleep `poll_interval` and retry
+
+**Implementation Notes:**
+- `aiohttp` is required in the triggerer environment — document in deployment guide (Issue 12.6).
+- Auth headers are pre-serialised by the operator's `execute()` method and passed to the trigger as a plain dict — the trigger does not access the Airflow Connection store (it runs in a separate process).
+- The microservice is expected to return HTTP 200 + JSON body with `databricks_run_id` and `start_time` when the event exists.
+
+**Dependencies:** Issue 13.1
+
+**Acceptance Criteria:**
+- [ ] `serialize()` / `deserialize()` round-trip preserves all constructor params
+- [ ] `run()` yields success `TriggerEvent` when mock microservice returns 200 + body with `databricks_run_id`
+- [ ] `run()` yields timeout `TriggerEvent` after `timeout` seconds with no successful response
+- [ ] Transient network error (connection refused) is logged as WARN and retried, not raised
+- [ ] `aiohttp.ClientSession` is properly closed on both success and timeout (no resource leak)
+
+---
+
+### Issue 13.3 — `ObsRunStartOperator`: Deferrable Start Operator
+
+**Labels:** `airflow`, `integration`, `priority::critical`
+
+**Description:**
+Implement `ObsRunStartOperator` — a deferrable `BaseOperator` that defers to `ObsStartEventTrigger` until the Databricks START EDF event arrives, then calls `POST /api/v1/runs/start` with the accurate `databricks_run_id` and `start_time` extracted from the event.
+
+**Technical Scope:**
+- File: `airflow/plugins/observability/operators/obs_run_start_operator.py`
+- Extends `airflow.models.BaseOperator` (deferrable)
+- `template_fields`: `correlation_id`, `calculator_id`, `calculator_name`, `frequency`, `reporting_date`, `run_parameters`, `additional_attributes`
+- Constructor params: `conn_id`, `tenant_id`, `correlation_id`, `event_service_url`, `calculator_id`, `calculator_name`, `frequency`, `reporting_date`, `sla_time_cet`, `expected_duration_ms`, `run_parameters`, `additional_attributes`, `poll_interval`, `deferral_timeout`
+- `execute(context)`:
+  - Builds event microservice auth headers from Airflow Connection via `ObsHook`
+  - Calls `self.defer(trigger=ObsStartEventTrigger(...), method_name="execute_complete")`
+- `execute_complete(context, event)`:
+  - Raises `AirflowException` if `event["error"] == "timeout"`
+  - Extracts `databricks_run_id` and `start_time` from event dict
+  - Builds `StartRunRequest` payload (static fields from operator params + event-sourced fields)
+  - Calls `ObsHook(conn_id).start_run(payload, tenant_id)`
+  - Pushes `databricks_run_id` → `XCom(key="databricks_run_id")` and `run_response` → `XCom(key="run_response")`
+  - Returns `databricks_run_id` (Airflow auto-pushes return value as `return_value` XCom)
+
+StartRunRequest payload:
+```python
+{
+    "runId":              databricks_run_id,    # from START EDF event
+    "calculatorId":       self.calculator_id,
+    "calculatorName":     self.calculator_name,
+    "frequency":          self.frequency,
+    "reportingDate":      self.reporting_date,
+    "startTime":          start_time,           # from START EDF event (accurate)
+    "slaTimeCet":         self.sla_time_cet,
+    # optional — omitted if None:
+    "expectedDurationMs": self.expected_duration_ms,
+    "runParameters":      self.run_parameters,
+    "additionalAttributes": self.additional_attributes,
+}
+```
+
+**Dependencies:** Issue 13.1, Issue 13.2
+
+**Acceptance Criteria:**
+- [ ] `execute()` defers immediately — no blocking work on the worker thread
+- [ ] Timeout event raises `AirflowException` with message referencing `correlation_id` and timeout duration
+- [ ] `execute_complete()` calls `ObsHook.start_run()` with correct payload (all fields present, optional fields omitted when None)
+- [ ] `XCom(key="databricks_run_id")` is pushed and equals the `databricks_run_id` from the event
+- [ ] `template_fields` enables Jinja2 templating for `correlation_id` and `reporting_date`
+- [ ] Unit tests mock `ObsHook` and `self.defer` — no real Airflow context or HTTP calls required
+
+---
+
+### Issue 13.4 — `ObsRunCompleteOperator`: Standard Completion Operator
+
+**Labels:** `airflow`, `integration`, `priority::critical`
+
+**Description:**
+Implement `ObsRunCompleteOperator` — a standard (non-deferrable) `BaseOperator` that pulls the completion event from XCom (pushed by the upstream `CheckStatusOperator`), extracts `endTime` and `status`, and calls `POST /api/v1/runs/{run_id}/complete`. Must be wired with `trigger_rule=ALL_DONE` to close the RUNNING record even when upstream fails or times out.
+
+**Technical Scope:**
+- File: `airflow/plugins/observability/operators/obs_run_complete_operator.py`
+- Extends `airflow.models.BaseOperator` (standard — not deferrable)
+- `template_fields`: `run_id`
+- Constructor params: `conn_id`, `tenant_id`, `run_id`, `source_task_id`, `end_time_field="endTime"`, `status_field="status"`, `xcom_key="return_value"`, `status_on_upstream_failure="FAILED"`
+- `execute(context)`:
+  - `xcom_pull(task_ids=source_task_id, key=xcom_key)` → raw event
+  - If `None` (upstream failed/timed out): uses `status_on_upstream_failure` and `endTime=datetime.now(utc)` — closes the RUNNING record cleanly
+  - If `status_on_upstream_failure=None` and XCom is None: raises `AirflowException`
+  - Otherwise: delegates to `_parse_event(raw)` → extracts `endTime` and `status`
+  - Builds payload `{"endTime": end_time, "status": status}`
+  - Calls `ObsHook(conn_id).complete_run(run_id, payload, tenant_id)`
+  - Pushes `run_response` → `XCom(key="run_response")`
+  - Returns `run_response`
+- `_parse_event(raw)` module-level helper: handles three XCom shapes — plain dict, JSON string, list-of-message-dicts (forward-compatible with Kafka consumer operators)
+
+**DAG wiring requirement:** Must always be configured with `trigger_rule=TriggerRule.ALL_DONE`.
+
+**Dependencies:** Issue 13.1
+
+**Acceptance Criteria:**
+- [ ] Happy path: completion event dict with `endTime` and `status` → correct `/complete` call
+- [ ] Upstream failure path (XCom = None): calls `/complete` with `status=FAILED` and `endTime=now()`
+- [ ] `status_on_upstream_failure=None` + XCom None → raises `AirflowException` (not silent)
+- [ ] `_parse_event()` correctly handles: plain dict, JSON string, list-with-`value`-key, empty list (raises)
+- [ ] `run_response` is pushed to XCom on every success path
+- [ ] Unit tests verify all XCom shapes and both the happy and upstream-failure paths
+
+---
+
+### Issue 13.5 — Example DAG & Integration Documentation
+
+**Labels:** `airflow`, `integration`, `documentation`, `priority::high`
+
+**Description:**
+Provide a complete, copy-pasteable example DAG showing full wiring of the Observability operators into an existing calculator DAG, with inline documentation for all configuration choices.
+
+**Technical Scope:**
+- File: `airflow/example_dags/example_calculator_dag.py`
+- Shows the four-task dependency chain:
+  ```
+  edf_trigger >> obs_run_start >> check_calculator_status >> obs_run_complete
+  ```
+- Includes placeholder `EdfTriggerOperator` and `CheckStatusOperator` with comments on what XCom keys each must produce
+- `ObsRunStartOperator` configured with all required params, Jinja2 templates for `correlation_id` and `reporting_date`
+- `ObsRunCompleteOperator` configured with `trigger_rule=TriggerRule.ALL_DONE`, `run_id` from XCom
+- `default_args` with `retries=3, retry_delay=timedelta(minutes=2)`
+- Comment block explaining the `ALL_DONE` trigger rule rationale (prevents orphaned RUNNING records)
+- Comment block explaining why `databricks_run_id` is used as `runId` (portability, accuracy)
+
+**Dependencies:** Issue 13.3, Issue 13.4
+
+**Acceptance Criteria:**
+- [ ] Example DAG imports cleanly: `python -c "from example_dags.example_calculator_dag import dag"` produces no error
+- [ ] All XCom key names in the example match the actual operator implementations
+- [ ] `trigger_rule=TriggerRule.ALL_DONE` is present on `obs_run_complete` with an explanatory comment
+- [ ] Example is reviewed by a DAG author from the calculator team to confirm it matches the real EDF integration pattern
+
+---
+
+### Issue 13.6 — Unit Tests: Airflow Operators & Hook
+
+**Labels:** `airflow`, `testing`, `priority::high`
+
+**Description:**
+Comprehensive unit tests for all three Airflow components (hook, start operator, complete operator). No real HTTP calls, no Airflow database, no DAG context required.
+
+**Technical Scope:**
+- `tests/test_obs_hook.py`:
+  - `_get_headers()`: correct Base64 auth, `X-Tenant-Id`, `Content-Type`
+  - `start_run()`: correct endpoint, payload serialised as JSON, parsed response returned
+  - `complete_run("run-id", ...)`: correct path interpolation (`/runs/run-id/complete`)
+- `tests/test_obs_run_start_operator.py`:
+  - `execute()`: calls `self.defer()` immediately; `ObsStartEventTrigger` receives correct params
+  - `execute_complete()` happy path: correct payload built, XComs pushed (`databricks_run_id`, `run_response`), `databricks_run_id` returned
+  - `execute_complete()` timeout event: `AirflowException` raised
+  - Optional fields (`expected_duration_ms`, `run_parameters`) omitted from payload when `None`
+- `tests/test_obs_run_complete_operator.py`:
+  - Happy path: dict XCom, JSON string XCom, list-with-value XCom
+  - Upstream failure (None XCom): sends `FAILED` + now()
+  - `status_on_upstream_failure=None` + None XCom: raises
+  - `_parse_event()`: all shapes, empty list raises, unsupported type raises
+  - Custom `end_time_field` / `status_field` params respected
+  - Missing `status` field in event defaults to `"SUCCESS"`
+
+**Dependencies:** Issue 13.1, Issue 13.3, Issue 13.4
+
+**Acceptance Criteria:**
+- [ ] All tests run with `pytest airflow/tests/` — no Airflow database, no Docker required
+- [ ] All tests use `unittest.mock` — no real HTTP or Airflow connections
+- [ ] Branch coverage ≥ 80% for all three operator files
+- [ ] `_parse_event()` edge cases are exhaustively tested (empty list, non-dict/str/list input)
+
+---
+
+### Issue 13.7 — Airflow Plugin Structure & requirements.txt
+
+**Labels:** `airflow`, `integration`, `priority::medium`
+
+**Description:**
+Ensure the plugin is correctly discoverable by Airflow's plugin manager, and that Python dependencies are declared so Airflow environments can install them.
+
+**Technical Scope:**
+- Verify all `__init__.py` files are present under `airflow/plugins/observability/` and all sub-packages
+- Create `airflow/requirements.txt` declaring the Python dependencies needed beyond Airflow core:
+  ```
+  aiohttp>=3.9.0   # required by ObsStartEventTrigger in the triggerer process
+  ```
+- Verify that `airflow/plugins/` is the correct symlink/mount target for the Airflow plugin directory (document both Docker Compose and Kubernetes `mountPath` options)
+- Add a smoke-test script `airflow/scripts/verify_plugin.py` that imports all operators and triggers to confirm no import errors
+
+**Dependencies:** Issue 13.1, Issue 13.2, Issue 13.3, Issue 13.4
+
+**Acceptance Criteria:**
+- [ ] `python airflow/scripts/verify_plugin.py` exits 0 with all imports successful
+- [ ] `airflow/requirements.txt` exists with pinned `aiohttp` minimum version
+- [ ] `__init__.py` exists in every package directory under `airflow/plugins/observability/`
+- [ ] Deployment guide (Issue 12.6) references this file for environment setup
+
+---
+
+---
+
+## EPIC-14: Tech Debt Resolution
+
+**Goal:** Address the 11 documented tech debt items (TD-1 through TD-11) from the tech spec and codebase review. Items are ordered by risk; high-risk items should be scheduled before the first production release.
+
+**Labels:** `epic`, `tech-debt`, `backend`
+
+---
+
+### Issue 14.1 — TD-1: `findById(String)` Full Partition Scan
+
+**Labels:** `tech-debt`, `database`, `performance`, `priority::critical`
+
+**Description:**
+`CalculatorRunRepository.findById(String)` — the no-date overload — performs a sequential scan across all ~455 partitions because it lacks a `reporting_date` predicate. Called in the `completeRun` fallback path when the client does not send `reportingDate`. This is the highest-priority tech debt item due to its production performance impact.
+
+**Technical Scope:**
+- Option A (preferred): Require callers to always supply `reportingDate`. Modify `completeRun` to accept `reportingDate` in `CompleteRunRequest` (add optional field, default to recent-window lookup if absent).
+- Option B (acceptable short-term): Add a bounded scan: try last 7 days first (`reportingDate >= CURRENT_DATE - 7`), fall back to last 30 days, then full scan. Log WARN on each fallback level.
+- Option C (future): Store `reportingDate` in a lightweight lookup table (`run_id → reporting_date`) updated on every INSERT — O(1) lookup with no partition scan.
+
+Current fallback in `completeRun` already tries a 7-day window first — validate that this covers >99% of cases and document the remaining exposure.
+
+**Implementation Notes:**
+- The 7-day fallback in `completeRun` (`findRecentRun()`) covers runs that complete within 7 days of start. For MONTHLY runs (run for the end-of-month date ~30 days ago), the fallback will miss and fall through to the full scan. Option A or C is needed for MONTHLY frequency correctness.
+
+**Dependencies:** Issue 2.2
+
+**Acceptance Criteria:**
+- [ ] `EXPLAIN ANALYZE` on `completeRun`'s lookup query shows ≤7 partition scans for DAILY runs
+- [ ] MONTHLY run completion does not trigger full 455-partition scan
+- [ ] Javadoc on `findById(String)` clearly documents the remaining scan risk and when it can be called
+- [ ] A unit test asserts that `completeRun` uses the partition-safe path for DAILY frequency
+
+---
+
+### Issue 14.2 — TD-2: Orphaned `cleanup_expired_idempotency_keys()` Function
+
+**Labels:** `tech-debt`, `database`, `priority::high`
+
+**Description:**
+`V9__maintenance_functions.sql` references `cleanup_expired_idempotency_keys()` which references the `idempotency_keys` table — a table that does not exist and was never created. If this function is ever called (e.g., by a scheduler or migration), it will throw a runtime error.
+
+**Technical Scope:**
+- Verify the function does NOT exist in the current schema (confirm Issue 8.2 excluded it correctly)
+- If it exists: create `V13__drop_orphaned_idempotency_function.sql` to `DROP FUNCTION IF EXISTS cleanup_expired_idempotency_keys()`
+- Grep the entire codebase for any call sites referencing `cleanup_expired_idempotency_keys` — remove if found
+- Document in `V9` or in a comment that this function was intentionally excluded
+
+**Dependencies:** Issue 8.2
+
+**Acceptance Criteria:**
+- [ ] `SELECT proname FROM pg_proc WHERE proname = 'cleanup_expired_idempotency_keys'` returns 0 rows
+- [ ] Codebase grep for `cleanup_expired_idempotency_keys` returns 0 results
+- [ ] No Flyway migration references this function name
+
+---
+
+### Issue 14.3 — TD-3: `upsertDaily()` Running Average Not Concurrency-Safe
+
+**Labels:** `tech-debt`, `database`, `analytics`, `priority::medium`
+
+**Description:**
+`DailyAggregateRepository.upsertDaily()` computes the running average inline in SQL (`(avg * total + new_value) / (total + 1)`). Under concurrent inserts for the same `(calculatorId, tenantId, day)` — e.g., if two runs complete at the same millisecond — the average can be computed from a stale `total_runs` value, producing inaccurate analytics.
+
+**Technical Scope:**
+- Option A (recommended): Wrap the upsert in `SELECT ... FOR UPDATE` within a transaction, or use a PostgreSQL advisory lock per `(calculatorId, tenantId, day)`.
+- Option B (acceptable for current load): Accept the inaccuracy; add a periodic reconciliation job that recomputes `avg_duration_ms` from `calculator_runs` for the last N days. Run nightly.
+- Option C: Store raw duration values and compute averages at query time (schema change — not backward-compatible).
+
+Document the chosen approach and the accepted inaccuracy window.
+
+**Dependencies:** Issue 2.5
+
+**Acceptance Criteria:**
+- [ ] Concurrent test: 10 simultaneous `upsertDaily()` calls for the same row → final `total_runs = 10` (not 1–9)
+- [ ] Final `avg_duration_ms` is within ±5% of true average after concurrent inserts
+- [ ] Chosen approach is documented with trade-off rationale in code comments
+
+---
+
+### Issue 14.4 — TD-4: `RETRYING` Status Excluded from Retry Query
+
+**Labels:** `tech-debt`, `alerting`, `priority::high`
+
+**Description:**
+`SlaBreachEventRepository.findUnalertedBreaches()` originally excluded `RETRYING` from its `alert_status IN (...)` clause. This causes alert records stuck in `RETRYING` state to be silently dropped — they are never retried, never sent, never failed permanently. The fix is documented in Issue 2.6 but may not have been implemented.
+
+**Technical Scope:**
+- Verify `findUnalertedBreaches()` SQL includes `'RETRYING'` in the `IN` clause
+- If missing: add it and add a regression test that seeds a `RETRYING` breach and asserts it is returned by `findUnalertedBreaches()`
+- Verify `AlertHandlerService` (Issue 6.3) sets `alert_status = 'RETRYING'` when retrying — and that the retry job (Issue 6.5) correctly transitions it back to `PENDING` before calling `alertSender.send()`
+
+**Dependencies:** Issue 2.6, Issue 6.5
+
+**Acceptance Criteria:**
+- [ ] `findUnalertedBreaches()` SQL contains `alert_status IN ('PENDING','FAILED','RETRYING')`
+- [ ] Integration test: breach inserted with `alert_status='RETRYING'` is returned by `findUnalertedBreaches()`
+- [ ] No breach in `RETRYING` state older than `maxRetries * retry-interval` remains stuck (test with accelerated timing)
+
+---
+
+### Issue 14.5 — TD-5: Untyped String Fields on `SlaBreachEvent`
+
+**Labels:** `tech-debt`, `backend`, `priority::medium`
+
+**Description:**
+`SlaBreachEvent.breachType`, `.severity`, and `.alertStatus` are stored as raw `String` fields with no Java type safety. Callers must use string literals (e.g., `"CRITICAL"`, `"SENT"`) which are error-prone and untestable. The DB has CHECK constraints, but the Java layer has no compile-time protection.
+
+**Technical Scope:**
+- Option A (recommended): Replace `String` fields with the corresponding enums (`BreachType`, `Severity`, `AlertStatus`) in `SlaBreachEvent`. Add `@JsonValue` / `@JsonCreator` to each enum for Jackson serialisation. Update `SlaBreachEventRowMapper` to use `Enum.valueOf()`.
+- Option B: Keep `String` but add factory methods with validation: `SlaBreachEvent.withSeverity(Severity s)` — at least prevents raw literal construction.
+- Callers to update: `AlertHandlerService`, `AlertRetryJob`, `SlaBreachEventRepository` (RowMapper).
+
+**Dependencies:** Issue 2.1, Issue 2.6, Issue 6.3
+
+**Acceptance Criteria:**
+- [ ] `SlaBreachEvent.severity` is typed as `Severity` enum (or equivalent safe wrapper)
+- [ ] Passing `"CRITICAL_PLUS"` (invalid string) fails at compile time or construction time (not at DB write)
+- [ ] Existing tests continue to pass with the new typed fields
+- [ ] `SlaBreachEventRowMapper` correctly deserialises enum values from DB string columns
+
+---
+
+### Issue 14.6 — TD-6: `CalculatorFrequency.lookbackDays` Dead Code
+
+**Labels:** `tech-debt`, `backend`, `priority::low`
+
+**Description:**
+`CalculatorFrequency` has a `lookbackDays` field (`DAILY(2)`, `MONTHLY(10)`) that is never referenced by any query or service. If it were ever used, it would produce incorrect windows (DAILY queries use 3 days, MONTHLY uses 13 months — not 2 or 10 days). This is a latent bug.
+
+**Technical Scope:**
+- Remove `lookbackDays` field and constructor parameter from `CalculatorFrequency`
+- Update `DAILY` and `MONTHLY` enum constants to remove the numeric argument
+- Confirm no callers reference `frequency.lookbackDays` anywhere in the codebase (grep)
+
+**Dependencies:** Issue 2.1
+
+**Acceptance Criteria:**
+- [ ] `CalculatorFrequency` has no `lookbackDays` field
+- [ ] `grep -r "lookbackDays"` returns zero results in the Java source
+- [ ] All enum-related tests still pass
+
+---
+
+### Issue 14.7 — TD-7: Basic Auth Password in Plaintext (`{noop}`)
+
+**Labels:** `tech-debt`, `security`, `priority::high`
+
+**Description:**
+`BasicSecurityConfig` uses `{noop}` prefix for passwords, storing and comparing them in plaintext. This is flagged as a security risk. Superseded by Issue 10.1 (BCrypt encoding) — this issue tracks the tech debt acknowledgement and ensures the fix is backlog-linked.
+
+**Technical Scope:**
+- Implement BCrypt encoding per Issue 10.1 spec.
+- Confirm `{noop}` is completely removed from all non-local profile configurations.
+- Confirm `application-dev.yml` and `application-prod.yml` do not contain hardcoded password values.
+
+**Dependencies:** Issue 10.1
+
+**Acceptance Criteria:**
+- [ ] `grep -r "{noop}"` in `src/main/resources/` returns zero results for non-local profiles
+- [ ] All criteria from Issue 10.1 are met
+
+---
+
+### Issue 14.8 — TD-8: MONTHLY Query Full Partition Scan
+
+**Labels:** `tech-debt`, `database`, `performance`, `priority::medium`
+
+**Description:**
+MONTHLY queries use `reporting_date = (end-of-month date)` as a row-level filter, not a range predicate. PostgreSQL cannot use this expression for partition pruning, resulting in scans across all ~395 non-expired partitions. Current query includes a `reporting_date >= CURRENT_DATE - 13 months` lower bound — only the lower bound enables pruning; the upper bound and equality checks do not.
+
+**Technical Scope:**
+- Option A: Add a `reporting_date <= CURRENT_DATE` upper-bound range predicate to limit scans to the 395-day window (already done via the 13-month lower bound — verify `EXPLAIN` confirms this).
+- Option B: Create a dedicated `calculator_runs_monthly` partitioned table with `reporting_date = end-of-month` as a partition key expression, storing only MONTHLY runs. Higher operational complexity.
+- Option C: Accept the scan as a known limitation; document it and set a query timeout to prevent runaway scans.
+- Short-term: add a Prometheus alert if MONTHLY query latency p99 exceeds 500ms.
+
+**Dependencies:** Issue 2.2
+
+**Acceptance Criteria:**
+- [ ] `EXPLAIN (ANALYZE, BUFFERS)` for MONTHLY query shows partition count ≤ 395 (lower-bound pruning active)
+- [ ] MONTHLY query p99 < 500ms under 100 RPS on the staging environment with 1M rows
+- [ ] A latency alert rule is defined and documented in `docs/`
+
+---
+
+### Issue 14.9 — TD-9: No Per-Endpoint Latency Tracking for Non-Batch Endpoints
+
+**Labels:** `tech-debt`, `observability`, `priority::medium`
+
+**Description:**
+Only the batch status endpoint has a `Timer` metric. All other endpoints (ingestion, single status, analytics) are missing per-endpoint latency timers, preventing SLO tracking and latency regression detection. Superseded by Issue 9.1 — this issue tracks the tech debt and links to the resolution.
+
+**Technical Scope:**
+- Implement per-endpoint `Timer` metrics per Issue 9.1 spec.
+- Confirm all 10 endpoints appear in `/actuator/prometheus` with correct histogram buckets.
+
+**Dependencies:** Issue 9.1
+
+**Acceptance Criteria:**
+- [ ] All 10 endpoints have a `Timer` with p50/p95/p99 percentiles exposed
+- [ ] All criteria from Issue 9.1 are met
+
+---
+
+### Issue 14.10 — TD-10: Stale JPA/Hibernate Config in Dev/Prod Profiles
+
+**Labels:** `tech-debt`, `configuration`, `priority::low`
+
+**Description:**
+`application-dev.yml` and `application-prod.yml` contain `spring.jpa.*` and `spring.hibernate.*` configuration blocks. The service uses `NamedParameterJdbcTemplate` — JPA/Hibernate is not on the classpath. These stale configs are misleading to developers and may cause startup warnings.
+
+**Technical Scope:**
+- Remove all `spring.jpa.*` and `spring.hibernate.*` keys from `application-dev.yml` and `application-prod.yml`
+- Confirm `org.hibernate.SQL` logger entry is also removed (covered by Issue 9.4)
+- Run `./mvnw spring-boot:run` with dev profile and verify no Hibernate or JPA-related warnings in startup log
+
+**Dependencies:** Issue 1.1
+
+**Acceptance Criteria:**
+- [ ] `grep -r "spring.jpa\|spring.hibernate\|org.hibernate" src/main/resources/application-dev.yml application-prod.yml` returns zero results
+- [ ] Application starts on `dev` profile with no `HibernateJpaDialect` or JPA-related warnings
+- [ ] `application-local.yml` is unaffected (only dev and prod profiles cleaned)
+
+---
+
+### Issue 14.11 — TD-11: Alert Delivery is Log-Only (No External Notification)
+
+**Labels:** `tech-debt`, `alerting`, `priority::medium`
+
+**Description:**
+`AlertHandlerService` currently uses `LoggingAlertSender` as the only implementation — SLA breaches produce log lines but no external notification (no Slack, no email, no PagerDuty). Operations teams must poll logs to discover breaches. This is a feature gap for production use. Superseded by Issue 6.6 (Slack sender) — this issue tracks the gap and acceptance criteria.
+
+**Technical Scope:**
+- Implement at least one real notification channel per Issue 6.6 (Slack webhook).
+- Confirm `observability.alerts.channel` property switches correctly between `logging` (default) and `slack`.
+- Document configuration in `docs/airflow-integration.md` or a new `docs/alerts-configuration.md`.
+
+**Dependencies:** Issue 6.6
+
+**Acceptance Criteria:**
+- [ ] With `observability.alerts.channel=slack`, a test SLA breach results in a Slack message in the configured channel
+- [ ] With `observability.alerts.channel=logging` (default), behaviour is unchanged (no Slack calls)
+- [ ] Alert configuration is documented for production operators
+
+---
+
 ---
 
 ## Suggested Epic Delivery Order
@@ -1827,12 +2451,19 @@ Create a pre-deployment and post-deployment verification checklist for productio
 Sprint 1:  EPIC-1 (Foundation) + EPIC-2 (Data Model)
 Sprint 2:  EPIC-3 (Ingestion) + EPIC-4 (Redis)
 Sprint 3:  EPIC-5 (Query API) + EPIC-6 (SLA Detection)
-Sprint 4:  EPIC-7 (Analytics) + EPIC-8 (Partition Management)
-Sprint 5:  EPIC-9 (Observability) + EPIC-10 (Security)
-Sprint 6:  EPIC-11 (Testing) + EPIC-12 (Production Readiness)
+Sprint 4:  EPIC-7 (Analytics) + EPIC-8 (Partition Management) + EPIC-13 (Airflow Operators)
+Sprint 5:  EPIC-9 (Observability) + EPIC-10 (Security) + EPIC-14 (Tech Debt — high priority items)
+Sprint 6:  EPIC-11 (Testing) + EPIC-12 (Production Readiness) + EPIC-14 (Tech Debt — medium/low items)
 ```
 
 Dependencies must be respected within each sprint. EPIC-4 (Redis) can be parallelised with EPIC-3 (Ingestion) since the cache layer is plugged in via events, not inline dependencies.
+
+EPIC-13 (Airflow Operators) can be developed independently once EPIC-3 (Ingestion API) is stable — it has no Java-side dependencies. It can be started in Sprint 3 in parallel if a Python developer is available.
+
+EPIC-14 (Tech Debt) items should be prioritised as follows:
+- **Before Sprint 5 / production release:** TD-1, TD-2, TD-4, TD-7 (data integrity and security risks)
+- **Sprint 5:** TD-3, TD-5, TD-8, TD-9, TD-11 (accuracy and observability gaps)
+- **Sprint 6 or post-launch:** TD-6, TD-10 (low-risk cleanup)
 
 ---
 
