@@ -51,10 +51,10 @@ public class CacheEvictionService {
                     )
             ).increment();
 
-            log.debug("event=cache_evict_complete calculator_id={} frequency={}", run.getCalculatorId(), run.getFrequency().name());
+            log.debug("event=cache.evict outcome=success trigger=completed calculator_id={} frequency={}", run.getCalculatorId(), run.getFrequency().name());
 
         } catch (Exception e) {
-            log.error("event=cache_evict_failure trigger=completed calculator_id={}", run.getCalculatorId(), e);
+            log.error("event=cache.evict outcome=failure trigger=completed calculator_id={}", run.getCalculatorId(), e);
         }
     }
 
@@ -74,7 +74,7 @@ public class CacheEvictionService {
             ).increment();
 
         } catch (Exception e) {
-            log.error("event=cache_evict_failure trigger=started calculator_id={}", run.getCalculatorId(), e);
+            log.error("event=cache.evict outcome=failure trigger=started calculator_id={}", run.getCalculatorId(), e);
         }
     }
 
@@ -100,10 +100,10 @@ public class CacheEvictionService {
                     )
             ).increment();
 
-            log.debug("event=cache_evict_sla_breach calculator_id={} frequency={}", run.getCalculatorId(), run.getFrequency().name());
+            log.debug("event=cache.evict outcome=success trigger=sla_breached calculator_id={} frequency={}", run.getCalculatorId(), run.getFrequency().name());
 
         } catch (Exception e) {
-            log.error("event=cache_evict_failure trigger=sla_breached calculator_id={}", run.getCalculatorId(), e);
+            log.error("event=cache.evict outcome=failure trigger=sla_breached calculator_id={}", run.getCalculatorId(), e);
         }
     }
 }

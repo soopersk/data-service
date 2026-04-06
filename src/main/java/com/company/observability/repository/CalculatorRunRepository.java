@@ -73,7 +73,7 @@ public class CalculatorRunRepository {
 
         // Check bloom filter
         if (!redisCache.mightExist(calculatorId)) {
-            log.debug("event=bloom_filter_miss calculator_id={}", calculatorId);
+            log.debug("event=cache.bloom_check outcome=miss calculator_id={}", calculatorId);
             return queryAndCacheRecentRuns(calculatorId, tenantId, frequency, limit);
         }
 
@@ -82,12 +82,12 @@ public class CalculatorRunRepository {
                 calculatorId, tenantId, frequency, limit);
 
         if (cached.isPresent()) {
-            log.debug("event=redis_hit calculator_id={}", calculatorId);
+            log.debug("event=cache.read outcome=hit calculator_id={}", calculatorId);
             return cached.get();
         }
 
         // Cache miss - query database
-        log.debug("event=redis_miss calculator_id={}", calculatorId);
+        log.debug("event=cache.read outcome=miss calculator_id={}", calculatorId);
         return queryAndCacheRecentRuns(calculatorId, tenantId, frequency, limit);
     }
 
@@ -111,7 +111,7 @@ public class CalculatorRunRepository {
         // Populate Redis cache
         if (!runs.isEmpty()) {
             runs.forEach(redisCache::cacheRunOnWrite);
-            log.debug("event=cache_populated calculator_id={} count={}", calculatorId, runs.size());
+            log.debug("event=cache.populate outcome=success calculator_id={} count={}", calculatorId, runs.size());
         }
 
         return runs;
@@ -166,7 +166,7 @@ public class CalculatorRunRepository {
             }
         }
 
-        log.debug("event=batch_cache_check hits={} misses={}", result.size(), cacheMisses.size());
+        log.debug("event=cache.batch_check outcome=success hits={} misses={}", result.size(), cacheMisses.size());
 
         // Query database for cache misses
         if (!cacheMisses.isEmpty()) {
@@ -347,15 +347,15 @@ public class CalculatorRunRepository {
             try {
                 redisCache.cacheRunOnWrite(savedRun);
             } catch (Exception cacheEx) {
-                log.warn("event=cache_write_failed run_id={} error={}", savedRun.getRunId(), cacheEx.getMessage(), cacheEx);
+                log.warn("event=cache.write outcome=failure run_id={} error={}", savedRun.getRunId(), cacheEx.getMessage(), cacheEx);
             }
 
-            log.debug("event=upsert_complete run_id={}", savedRun.getRunId());
+            log.debug("event=run.upsert outcome=success run_id={}", savedRun.getRunId());
 
             return savedRun;
 
         } catch (Exception e) {
-            log.error("event=upsert_failed run_id={}", run.getRunId(), e);
+            log.error("event=run.upsert outcome=failure run_id={}", run.getRunId(), e);
             throw new RuntimeException("Failed to save calculator run", e);
         }
     }

@@ -2443,6 +2443,82 @@ Only the batch status endpoint has a `Timer` metric. All other endpoints (ingest
 
 ---
 
+## EPIC-15: Logging & Micrometer metrics standardization
+
+**Description:**
+Implement the approved 5-phase observability plan across the service. Covers MDC context propagation to async threads, structured event-based logging, unified metric naming via ObservabilityConstants, idiomatic Micrometer patterns, and test coverage. The goal is a fully observable, debuggable service where log correlation, alerting, and support diagnosis are reliable across thread boundaries.
+
+---
+
+### Issue 15.1 — MDC Foundation & Async Wiring
+
+**Description:**
+All MDC context is silently dropped when work crosses to @Async threads.
+
+**Tasks:**
+
+Implement MdcTaskDecorator (implements TaskDecorator):
+
+On the submitting thread: snapshot the full MDC map via MDC.getCopyOfContextMap().
+On the worker thread: restore the snapshot before the task runs; clear MDC in a finally block after it completes.
+Every set call must capture prior state; restoration is the only undo mechanism — no raw MDC.clear() mid-task.
+
+Register the decorator on the ThreadPoolTaskExecutor bean via setTaskDecorator(mdcTaskDecorator).
+Replace all CompletableFuture.runAsync(...) usages with the Spring-managed executor (inject @Qualifier("asyncExecutor") Executor).
+Define MDC key constants (one class or enum): requestId, tenant, calculatorId, runId.
+
+Configure logback-spring.xml pattern:
+%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [reqId=%X{requestId:-} tenant=%X{tenant:-} calc=%X{calculatorId:-} run=%X{runId:-}] - %msg%n
+
+
+**Acceptance Criteria:**
+- [ ] MdcTaskDecorator implemented 
+- [ ] Decorator registered on the async executor bean.
+- [ ] MDC key constants defined and referenced everywhere (no manual strings).
+- [ ] Log output includes all MDC fields on both the calling and worker threads
+- [ ] Unit test: verify MDC keys are present and correct on the worker thread
+- [ ] Unit test: verify MDC is cleared after task completes even when the task throws.
+
+---
+
+### Issue 15.2 — Structured Event Logging
+
+**Description:**
+Log messages should have a consistent structured log convention across all key lifecycle points
+
+**Tasks:**
+- Identify all significant lifecycle events: run accepted, run dispatched async, run started, run completed, run errored, event listener fired.
+- At each event emit exactly one log line using the convention:
+  - event=<noun>.<verb> e.g. event=run.accepted, event=run.complete, event=run.error
+  - outcome=success | failure | rejected
+  - Log level: INFO for happy path, WARN for rejected/expected failures, ERROR for unexpected failures.
+
+- Log statements should not include tenantId, runId, calculatorId, or requestId directly into the message string — these values live in MDC only, appearing via the log pattern.
+- Enforce tag cardinality: tags must never include tenant, runId, calculatorId, or requestId. Only low-cardinality tags permitted (e.g. status, type etc.).
+
+**Acceptance Criteria:**
+- [ ] ObservabilityConstants exists and is the sole source of all metric name and tag key strings.
+- [ ] No metric carries a tenant, runId, calculatorId, or requestId tag.
+
+---
+
+### Issue 15.3 — Standardized Metric Naming
+
+**Description:**
+Define and implement a consistent Metric Naming pattern
+
+**Tasks:**
+- Create ObservabilityConstants class with all metric name and tag key string constants.
+- Adopt naming convention obs.<layer>.<entity>.<metric>:
+  - Examples: obs.service.run.accepted, obs.service.run.duration, obs.repo.calc.fetch.duration
+  - Migrate all existing Counter, Timer, and Gauge registrations to names from ObservabilityConstants.
+ 
+- Replace all System.currentTimeMillis() duration measurements with Timer.Sample
+
+**Acceptance Criteria:**
+- [ ] MDC key not directly defined in log statements
+- [ ] Log output includes all MDC fields on both the calling and worker threads
+
 ---
 
 ## Suggested Epic Delivery Order

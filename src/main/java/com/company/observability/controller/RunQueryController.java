@@ -95,7 +95,7 @@ public class RunQueryController {
         // Parse frequency using enum
         CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
 
-        log.debug("Batch status query for {} calculators (frequency={}, allowStale={})",
+        log.debug("event=query.batch outcome=accepted count={} frequency={} allowStale={}",
                 calculatorIds.size(), freq, allowStale);
 
         Timer.Sample sample = Timer.start(meterRegistry);

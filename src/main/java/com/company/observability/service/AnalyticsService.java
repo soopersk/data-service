@@ -205,7 +205,7 @@ public class AnalyticsService {
 
         if (legacyPageMode) {
             int offset = page * size;
-            log.debug("Using legacy offset pagination for SLA breaches (page={}, size={})", page, size);
+            log.debug("event=sla_breach.query outcome=success mode=legacy_offset page={} size={}", page, size);
             pageRows = slaBreachEventRepository.findByCalculatorIdPaginated(
                     calculatorId, tenantId, days, severity, offset, size + 1);
         } else {
@@ -440,7 +440,7 @@ public class AnalyticsService {
             long breachId = Long.parseLong(parts[1]);
             return new KeysetCursor(java.time.Instant.ofEpochMilli(epochMillis), breachId);
         } catch (Exception e) {
-            log.warn("Invalid SLA breach cursor provided: {}", cursor);
+            log.warn("event=sla_breach.cursor_decode outcome=failure cursor={}", cursor);
             return null;
         }
     }

@@ -57,12 +57,12 @@ public class RunIngestionService {
                 request.getRunId(), request.getReportingDate());
 
         if (existing.isPresent()) {
-            log.warn("event=run.start.accepted outcome=duplicate");
+            log.warn("event=run.start outcome=rejected reason=duplicate");
             meterRegistry.counter(INGESTION_RUN_DUPLICATE, "phase", "start").increment();
             return existing.get();
         }
 
-        log.info("event=run.start.accepted outcome=success freq={} reportingDate={}",
+        log.info("event=run.start outcome=success freq={} reportingDate={}",
                 request.getFrequency(), request.getReportingDate());
 
         // Validate reporting_date matches frequency expectations
@@ -88,7 +88,7 @@ public class RunIngestionService {
                     slaDeadline,
                     request.getReportingDate()
             );
-            log.warn("event=run.start.sla_breached outcome=failure reason=start_after_deadline");
+            log.warn("event=run.start.sla_check outcome=failure reason=start_after_deadline");
         }
 
         Instant estimatedEndTime = null;
@@ -142,7 +142,7 @@ public class RunIngestionService {
                 "frequency", run.getFrequency().name()
         ).increment();
 
-        log.info("event=run.start.completed outcome=success slaDeadline={} liveTracking={}",
+        log.info("event=run.start.persist outcome=success slaDeadline={} liveTracking={}",
                 slaDeadline, liveTrackingEnabled);
 
         return run;
@@ -173,7 +173,7 @@ public class RunIngestionService {
         }
 
         if (run.getStatus() != RunStatus.RUNNING) {
-            log.warn("event=run.complete.accepted outcome=duplicate");
+            log.warn("event=run.complete outcome=rejected reason=duplicate");
             meterRegistry.counter(INGESTION_RUN_DUPLICATE, "phase", "complete").increment();
             return run;
         }
@@ -221,7 +221,7 @@ public class RunIngestionService {
             eventPublisher.publishEvent(new RunCompletedEvent(run));
         }
 
-        log.info("event=run.complete.accepted outcome=success reportingDate={}",
+        log.info("event=run.complete outcome=success reportingDate={}",
                 run.getReportingDate());
 
         return run;
@@ -255,7 +255,7 @@ public class RunIngestionService {
             LocalDate nextDay = reportingDate.plusDays(1);
 
             if (nextDay.getMonth() == reportingDate.getMonth()) {
-                log.warn("event=run.validate.reporting_date outcome=skipped reason=non_eom_monthly reportingDate={}",
+                log.warn("event=run.validate.reporting_date outcome=rejected reason=non_eom_monthly reportingDate={}",
                         reportingDate);
             }
         }

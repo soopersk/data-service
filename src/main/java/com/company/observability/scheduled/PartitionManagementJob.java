@@ -57,7 +57,7 @@ public class PartitionManagementJob {
         Map<String, String> snapshot = MdcContextUtil.setJobContext("partition-create");
 
         try {
-            log.info("event=partition.create outcome=started");
+            log.info("event=partition.create outcome=success phase=initiated");
 
             taskExecutor.execute(() -> {
                 Map<String, String> asyncSnapshot = MdcContextUtil.setJobContext("partition-create-async");
@@ -90,7 +90,7 @@ public class PartitionManagementJob {
         Map<String, String> snapshot = MdcContextUtil.setJobContext("partition-drop");
 
         try {
-            log.info("event=partition.drop outcome=started");
+            log.info("event=partition.drop outcome=success phase=initiated");
 
             taskExecutor.execute(() -> {
                 Map<String, String> asyncSnapshot = MdcContextUtil.setJobContext("partition-drop-async");
@@ -122,7 +122,7 @@ public class PartitionManagementJob {
         Map<String, String> snapshot = MdcContextUtil.setJobContext("partition-monitor");
 
         try {
-            log.info("event=partition.monitor outcome=started");
+            log.info("event=partition.monitor outcome=success phase=initiated");
 
             List<Map<String, Object>> stats = jdbcTemplate.queryForList(
                     "SELECT * FROM get_partition_statistics() ORDER BY partition_date DESC LIMIT 30",
@@ -170,7 +170,7 @@ public class PartitionManagementJob {
             );
 
             for (Map<String, Object> stat : recentStats) {
-                log.info("event=partition.stats partition={} rows={} size={}",
+                log.info("event=partition.stats outcome=success partition={} rows={} size={}",
                         stat.get("partition_name"), stat.get("row_count"), stat.get("total_size"));
             }
         } catch (Exception e) {

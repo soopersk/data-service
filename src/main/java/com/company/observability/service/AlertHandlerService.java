@@ -48,7 +48,7 @@ public class AlertHandlerService {
     }
 
     private void doHandleSlaBreachEvent(CalculatorRun run, SlaEvaluationResult result) {
-        log.info("event=sla.breach.processing outcome=success reason={}", result.getReason());
+        log.info("event=sla.breach.process outcome=success reason={}", result.getReason());
 
         SlaBreachEvent breach = SlaBreachEvent.builder()
                 .runId(run.getRunId())
@@ -76,7 +76,7 @@ public class AlertHandlerService {
             ).increment();
 
         } catch (DuplicateKeyException e) {
-            log.warn("event=sla.breach.duplicate outcome=duplicate");
+            log.warn("event=sla.breach.persist outcome=rejected reason=duplicate");
 
             meterRegistry.counter(SLA_BREACH_DUPLICATE,
                     "frequency", run.getFrequency().name()
@@ -91,7 +91,7 @@ public class AlertHandlerService {
 
     private void sendSimpleAlert(SlaBreachEvent breach, CalculatorRun run) {
         try {
-            log.warn("event=sla.alert.send outcome=success severity={} reason={}",
+            log.info("event=sla.alert.send outcome=success severity={} reason={}",
                     breach.getSeverity(), run.getSlaBreachReason());
 
             breach.setAlerted(true);

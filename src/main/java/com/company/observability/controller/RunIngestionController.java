@@ -43,7 +43,7 @@ public class RunIngestionController {
 
         String userId = principal != null ? principal.getName() : "unknown";
 
-        log.info("Start run request from user={} calculator={} tenant={}",
+        log.info("event=run.start outcome=accepted user={} calculator={} tenant={}",
                 userId, request.getCalculatorId(), tenantId);
 
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -69,7 +69,7 @@ public class RunIngestionController {
 
         String userId = principal != null ? principal.getName() : "unknown";
 
-        log.info("Complete run request from user={} runId={} tenant={}",
+        log.info("event=run.complete outcome=accepted user={} runId={} tenant={}",
                 userId, runId, tenantId);
 
         Timer.Sample sample = Timer.start(meterRegistry);

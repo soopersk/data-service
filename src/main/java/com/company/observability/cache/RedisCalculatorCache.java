@@ -352,7 +352,7 @@ public class RedisCalculatorCache {
                     .tag("tier", "hash")
                     .register(meterRegistry));
 
-            log.debug("event=cache.read outcome=batch_complete hit={} total={} frequency={} historyLimit={}",
+            log.debug("event=cache.read outcome=success operation=batch hit={} total={} frequency={} historyLimit={}",
                     results.size(), calculatorIds.size(), frequency, historyLimit);
 
         } catch (Exception e) {
@@ -413,7 +413,7 @@ public class RedisCalculatorCache {
                     .tag("tier", "hash")
                     .register(meterRegistry));
 
-            log.debug("event=cache.write outcome=batch_complete count={}", responses.size());
+            log.debug("event=cache.write outcome=success operation=batch count={}", responses.size());
 
         } catch (Exception e) {
             sample.stop(Timer.builder(CACHE_REDIS_DURATION)

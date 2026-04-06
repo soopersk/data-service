@@ -46,17 +46,17 @@ public class SlaMonitoringCache {
      */
     public void registerForSlaMonitoring(CalculatorRun run) {
         if (!liveTrackingEnabled) {
-            log.debug("event=sla.monitor.register outcome=skipped reason=tracking_disabled runId={}", run.getRunId());
+            log.debug("event=sla.monitor.register outcome=rejected reason=tracking_disabled runId={}", run.getRunId());
             return;
         }
 
         if (run.getSlaTime() == null) {
-            log.debug("event=sla.monitor.register outcome=skipped reason=no_sla_time runId={}", run.getRunId());
+            log.debug("event=sla.monitor.register outcome=rejected reason=no_sla_time runId={}", run.getRunId());
             return;
         }
 
         if (run.getStatus() != RunStatus.RUNNING) {
-            log.debug("event=sla.monitor.register outcome=skipped reason=not_running runId={}", run.getRunId());
+            log.debug("event=sla.monitor.register outcome=rejected reason=not_running runId={}", run.getRunId());
             return;
         }
 

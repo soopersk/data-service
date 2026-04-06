@@ -77,7 +77,7 @@ public class DailyAggregateRepository {
             jdbcTemplate.update(sql, params);
             sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "upsert_daily").register(meterRegistry));
         } catch (Exception e) {
-            log.error("event=upsert_daily_failed calculator_id={} reporting_date={}",
+            log.error("event=daily_aggregate.upsert outcome=failure calculator_id={} reporting_date={}",
                     calculatorId, reportingDate, e);
             throw new RuntimeException("Failed to update daily aggregate", e);
         }
@@ -109,7 +109,7 @@ public class DailyAggregateRepository {
             sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_recent_agg").register(meterRegistry));
             return results;
         } catch (Exception e) {
-            log.error("event=find_recent_agg_failed calculator_id={}", calculatorId, e);
+            log.error("event=daily_aggregate.find_recent outcome=failure calculator_id={}", calculatorId, e);
             throw new RuntimeException("Failed to fetch daily aggregates", e);
         }
     }
@@ -142,7 +142,7 @@ public class DailyAggregateRepository {
         try {
             return jdbcTemplate.query(sql, params, new DailyAggregateRowMapper());
         } catch (Exception e) {
-            log.error("event=find_by_reporting_dates_failed calculator_id={}", calculatorId, e);
+            log.error("event=daily_aggregate.find_by_dates outcome=failure calculator_id={}", calculatorId, e);
             throw new RuntimeException("Failed to fetch aggregates by date", e);
         }
     }
