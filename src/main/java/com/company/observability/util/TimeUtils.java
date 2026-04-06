@@ -1,13 +1,18 @@
 package com.company.observability.util;
 
+import com.company.observability.domain.enums.CalculatorFrequency;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.*;
+import java.time.temporal.TemporalAdjusters;
 
 public class TimeUtils {
 
-    private static final ZoneId CET_ZONE = ZoneId.of("CET");
+    // "Europe/Amsterdam" correctly handles CET (UTC+1) and CEST (UTC+2, DST).
+    // "CET" is a fixed offset (+01:00) and does NOT observe DST — never use it.
+    private static final ZoneId CET_ZONE = ZoneId.of("Europe/Amsterdam");
 
     /**
      * Calculate absolute SLA deadline time from reporting date and SLA time of day (CET)
@@ -32,44 +37,41 @@ public class TimeUtils {
     }
 
     /**
-     * Calculate next expected start time for a calculator
+     * Calculate next expected start time for a calculator.
      *
-     * @param lastRunStart Last run start time
+     * @param reportingDate The current reporting date (CET calendar date of the run being started)
+     * @param estimatedStartTimeCet Estimated start time of day in CET (e.g., 04:15:00)
      * @param frequency DAILY or MONTHLY
-     * @param estimatedStartTimeCet Estimated start time in CET (e.g., 04:15:00)
-     * @return Next estimated start time
+     * @return Next estimated start time as a UTC Instant
      */
     public static Instant calculateNextEstimatedStart(
-            Instant lastRunStart, String frequency, LocalTime estimatedStartTimeCet) {
+            LocalDate reportingDate, LocalTime estimatedStartTimeCet, CalculatorFrequency frequency) {
 
-        if (lastRunStart == null || estimatedStartTimeCet == null) return null;
+        if (reportingDate == null || estimatedStartTimeCet == null) return null;
 
-        ZonedDateTime lastStartCet = lastRunStart.atZone(CET_ZONE);
         LocalDate nextDate;
-
-        if ("MONTHLY".equals(frequency)) {
-            nextDate = lastStartCet.toLocalDate().plusMonths(1);
+        if (frequency == CalculatorFrequency.MONTHLY) {
+            // Next month's end-of-month date
+            nextDate = reportingDate.plusMonths(1).with(TemporalAdjusters.lastDayOfMonth());
         } else {
-            nextDate = lastStartCet.toLocalDate().plusDays(1);
+            // Next calendar day
+            nextDate = reportingDate.plusDays(1);
         }
 
-        ZonedDateTime nextStart = ZonedDateTime.of(nextDate, estimatedStartTimeCet, CET_ZONE);
-        return nextStart.toInstant();
+        return ZonedDateTime.of(nextDate, estimatedStartTimeCet, CET_ZONE).toInstant();
     }
 
     public static BigDecimal calculateCetHour(Instant instant) {
         if (instant == null) return null;
 
-        ZonedDateTime cetTime = instant.atZone(CET_ZONE);
-        double hour = cetTime.getHour() + (cetTime.getMinute() / 60.0);
-        return BigDecimal.valueOf(hour).setScale(2, RoundingMode.HALF_UP);
+        int secondsOfDay = instant.atZone(CET_ZONE).toLocalTime().toSecondOfDay();
+        return BigDecimal.valueOf(secondsOfDay).divide(BigDecimal.valueOf(3600), 2, RoundingMode.HALF_UP);
     }
 
     public static Integer calculateCetMinute(Instant instant) {
         if (instant == null) return null;
 
-        ZonedDateTime cetTime = instant.atZone(CET_ZONE);
-        return cetTime.getHour() * 60 + cetTime.getMinute();
+        return instant.atZone(CET_ZONE).toLocalTime().toSecondOfDay() / 60;
     }
 
     public static LocalDate getCetDate(Instant instant) {
@@ -80,14 +82,14 @@ public class TimeUtils {
     public static String formatDuration(Long durationMs) {
         if (durationMs == null) return null;
 
-        long hours = durationMs / 3600000;
-        long minutes = (durationMs % 3600000) / 60000;
-        long seconds = (durationMs % 60000) / 1000;
+        long hours = durationMs / 3_600_000;
+        long minutes = (durationMs % 3_600_000) / 60_000;
+        long seconds = (durationMs % 60_000) / 1_000;
 
         if (hours > 0) {
-            return String.format("%dh %dm", hours, minutes);
+            return String.format("%dhrs %dmins", hours, minutes);
         } else if (minutes > 0) {
-            return String.format("%dm %ds", minutes, seconds);
+            return String.format("%dmins %ds", minutes, seconds);
         } else {
             return String.format("%ds", seconds);
         }
@@ -96,10 +98,13 @@ public class TimeUtils {
     public static String formatCetHour(BigDecimal hourCet) {
         if (hourCet == null) return null;
 
-        int hour = hourCet.intValue();
-        int minute = hourCet.subtract(BigDecimal.valueOf(hour))
-                .multiply(BigDecimal.valueOf(60))
+        // Convert fractional hours back to total seconds to avoid floating-point rounding
+        // e.g. 6.25 → 22500s → hour=6, minute=15
+        int totalSeconds = hourCet.multiply(BigDecimal.valueOf(3600))
+                .setScale(0, RoundingMode.HALF_UP)
                 .intValue();
+        int hour = totalSeconds / 3600;
+        int minute = (totalSeconds % 3600) / 60;
 
         return String.format("%02d:%02d", hour, minute);
     }
