@@ -108,6 +108,43 @@ Applied automatically to all Micrometer metrics:
 
 ---
 
+## Structured Logging
+
+All log statements at INFO and above use structured key-value fields for machine-parseable output.
+
+### Event naming convention
+
+Every log statement includes `event=<noun>.<verb>` and `outcome=success|failure|rejected`.
+
+| Pattern | When to use |
+|---------|-------------|
+| `outcome=success` | Operation completed normally |
+| `outcome=failure` | Operation failed (error/exception) |
+| `outcome=rejected` | Operation intentionally skipped — add `reason=` field (e.g., `reason=duplicate`, `reason=already_completed`) |
+
+Additional context goes into extra fields (`reason=`, `count=`, `severity=`, etc.), never into the `outcome` value itself.
+
+**Examples:**
+
+```
+event=run.start outcome=success freq=DAILY reportingDate=2026-04-06
+event=run.complete outcome=rejected reason=duplicate
+event=cache.read outcome=hit calculatorId=calc-1 frequency=DAILY
+event=sla.live_detection.run_check outcome=rejected reason=already_breached runId=abc-123
+event=daily_aggregate.upsert outcome=failure reportingDate=2026-04-06
+```
+
+### Log level policy
+
+| Level | Usage |
+|-------|-------|
+| **ERROR** | `outcome=failure` with an exception — something broke |
+| **WARN** | `outcome=rejected`, `outcome=failure` without exception, or operationally notable events (e.g., SLA breaches detected) |
+| **INFO** | `outcome=success` at key lifecycle points (run start/complete, job execution, alert sent) |
+| **DEBUG** | Cache hits/misses, batch details, internal state transitions |
+
+---
+
 ## Request Correlation
 
 `RequestLoggingFilter` intercepts every inbound request:
@@ -116,16 +153,30 @@ Applied automatically to all Micrometer metrics:
 2. Stores as `requestId` in the SLF4J MDC
 3. Echoes back in the response `X-Request-ID` header
 
-All log statements automatically include `[reqId=<uuid>]` via the logging pattern. MDC is propagated to the async thread pool via `MdcTaskDecorator`.
+All log statements automatically include MDC context via the logging pattern. MDC is propagated to the async thread pool via `MdcTaskDecorator`.
 
-### Additional MDC Keys
+### MDC Keys
 
-| Key | Source | Content |
-|-----|--------|---------|
-| `requestId` | `RequestLoggingFilter` | UUID from header or generated |
-| `tenant` | Application code | `X-Tenant-Id` header value |
-| `calculatorId` | Application code | Calculator ID from request/run |
-| `runId` | Application code | Run ID from request/run |
+| Key | Set by | Scope | Example |
+|-----|--------|-------|---------|
+| `requestId` | `RequestLoggingFilter` | HTTP request lifecycle | UUID from `X-Request-ID` header, or generated |
+| `tenant` | `RequestLoggingFilter` | HTTP request lifecycle | Value from `X-Tenant-Id` header |
+| `calculatorId` | `MdcContextUtil.setCalculatorContext()` | Service method scope | `calc-1` |
+| `runId` | `MdcContextUtil.setCalculatorContext()` | Service method scope | `run-xyz-123` |
+
+For **scheduled jobs** (no HTTP request), `MdcContextUtil.setJobContext(jobName)` sets:
+- `requestId` = `job-<8-char-uuid>` (synthetic correlation ID)
+- `tenant` = `system`
+
+### MDC Propagation
+
+| Thread context | Mechanism |
+|----------------|-----------|
+| HTTP request threads | `RequestLoggingFilter` sets/clears `requestId` + `tenant` around the filter chain |
+| `@Async` threads | `MdcTaskDecorator` copies the calling thread's MDC map to the async thread, clears on completion |
+| Scheduled job threads | Each job calls `MdcContextUtil.setJobContext()` at entry, `restoreContext()` in `finally` |
+
+All set/restore follows snapshot semantics — `setCalculatorContext()` and `setJobContext()` return the prior MDC state as a `Map<String, String>`, which must be restored in a `finally` block via `restoreContext(snapshot)`.
 
 ---
 

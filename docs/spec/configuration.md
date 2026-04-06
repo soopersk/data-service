@@ -162,6 +162,10 @@ Liveness and readiness probes are enabled (`management.endpoint.health.probes.en
 
 Every log line includes MDC context: request ID, tenant, calculator ID, and run ID when available.
 
+### Structured Log Format
+
+All log statements at INFO and above use `event=<noun>.<verb> outcome=success|failure|rejected` fields. Additional context is added as extra key-value pairs (`reason=`, `count=`, etc.). See [observability.md](observability.md#structured-logging) for the full convention, level policy, and MDC key inventory.
+
 ### Log Levels
 
 | Logger | `local` | `dev` | `prod` |

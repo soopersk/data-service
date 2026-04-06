@@ -1292,6 +1292,66 @@ Other endpoints (`env`, `configprops`, `beans`, etc.) are **not exposed**.
 
 `RequestLoggingFilter` reads `X-Request-ID` header (or generates UUID v4 if missing), stores in MDC as `requestId`, and echoes back in the response `X-Request-ID` header. All log statements include `[%X{requestId}]` automatically.
 
+### Structured Logging
+
+All log statements at INFO and above use structured key-value fields for machine-parseable output.
+
+#### Event naming convention
+
+Every log statement includes `event=<noun>.<verb>` and `outcome=success|failure|rejected`.
+
+| Pattern | When to use |
+|---------|-------------|
+| `outcome=success` | Operation completed normally |
+| `outcome=failure` | Operation failed (error/exception) |
+| `outcome=rejected` | Operation intentionally skipped — add `reason=` field (e.g., `reason=duplicate`, `reason=already_completed`) |
+
+Additional context goes into extra fields (`reason=`, `count=`, `severity=`, etc.), never into the `outcome` value itself.
+
+**Examples:**
+
+```
+event=run.start outcome=success freq=DAILY reportingDate=2026-04-06
+event=run.complete outcome=rejected reason=duplicate
+event=cache.read outcome=hit calculatorId=calc-1 frequency=DAILY
+event=sla.live_detection.run_check outcome=rejected reason=already_breached runId=abc-123
+event=daily_aggregate.upsert outcome=failure reportingDate=2026-04-06
+```
+
+#### Log level policy
+
+| Level | Usage |
+|-------|-------|
+| **ERROR** | `outcome=failure` with an exception — something broke |
+| **WARN** | `outcome=rejected`, `outcome=failure` without exception, or operationally notable events (e.g., SLA breaches detected) |
+| **INFO** | `outcome=success` at key lifecycle points (run start/complete, job execution, alert sent) |
+| **DEBUG** | Cache hits/misses, batch details, internal state transitions |
+
+#### MDC keys
+
+All MDC keys appear automatically in the log pattern. The following keys are set by infrastructure and are available to every log call within their scope:
+
+| Key | Set by | Scope | Example |
+|-----|--------|-------|---------|
+| `requestId` | `RequestLoggingFilter` | HTTP request lifecycle | `a1b2c3d4-...` (from `X-Request-ID` header, or generated UUID) |
+| `tenant` | `RequestLoggingFilter` | HTTP request lifecycle | `tenant-abc` (from `X-Tenant-Id` header) |
+| `calculatorId` | `MdcContextUtil.setCalculatorContext()` | Service method scope | `calc-1` |
+| `runId` | `MdcContextUtil.setCalculatorContext()` | Service method scope | `run-xyz-123` |
+
+For **scheduled jobs** (no HTTP request), `MdcContextUtil.setJobContext(jobName)` sets:
+- `requestId` = `job-<8-char-uuid>` (synthetic correlation ID)
+- `tenant` = `system`
+
+#### MDC propagation
+
+| Thread context | Mechanism |
+|----------------|-----------|
+| HTTP request threads | `RequestLoggingFilter` sets/clears `requestId` + `tenant` around `FilterChain` |
+| `@Async` threads | `MdcTaskDecorator` copies the calling thread's MDC map to the async thread, clears on completion |
+| Scheduled job threads | Each job calls `MdcContextUtil.setJobContext()` at entry, `restoreContext()` in `finally` |
+
+All MDC set/restore follows snapshot semantics — `setCalculatorContext()` and `setJobContext()` return the prior MDC state, which must be restored in a `finally` block via `restoreContext(snapshot)`.
+
 ### Missing Metrics
 
 - No per-endpoint latency histograms (only `query.batch_status.duration` has a timer; all other endpoints lack timing)
