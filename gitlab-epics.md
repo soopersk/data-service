@@ -1094,25 +1094,24 @@ Implement `getSlaSummary()` and `getSlaBreachDetails()` — including the keyset
 
 ---
 
-### Issue 7.4 — `AnalyticsService`: Performance Card
+### Issue 7.4 — `ProjectionService`: Performance Card Formatting
 
 **Labels:** `analytics`, `backend`, `priority::high`
 
 **Description:**
-Implement `getPerformanceCard()` — the composite endpoint reading raw run data with JOIN.
+Implement `ProjectionService.getPerformanceCard()` — the presentation-layer service that transforms raw `RunPerformanceData` from `AnalyticsService` into a dashboard-ready `PerformanceCardResponse`. This service owns all formatting logic (CET times, duration strings, SLA percentages, chart coordinates) and has no direct repository or cache dependencies.
 
 **Technical Scope:**
-- `getPerformanceCard(calcId, tenantId, days, frequency)`:
-  - Cache check
-  - `calculatorRunRepository.findRunsWithSlaStatus(calcId, tenantId, frequency, days)` → `List<RunWithSlaStatus>`
+- `ProjectionService.getPerformanceCard(calcId, tenantId, days, frequency)`:
+  - Delegates to `AnalyticsService.getRunPerformanceData()` for raw data
   - Per-run classification: `SLA_MET` (not breached), `LATE` (breached, severity LOW/MEDIUM), `VERY_LATE` (severity HIGH/CRITICAL)
   - Mean duration: `Σ(durationMs) / count` for completed runs (durationMs > 0)
   - SLA percentages: `slaMetPct`, `latePct`, `veryLatePct` rounded to 1 decimal, sum = 100%
   - Reference lines: from the latest run's `estimatedStartTime` and `slaTime` fields
   - Runs sorted chronologically ascending for chart rendering
-  - Build and cache `PerformanceCardResponse`
+  - Build `PerformanceCardResponse` with formatted `RunBar` entries (CET times, duration strings)
 
-**Dependencies:** Issue 2.2, Issue 4.4, Issue 7.1
+**Dependencies:** Issue 2.2, Issue 7.1, Issue 7.8
 
 **Acceptance Criteria:**
 - [ ] `slaMetPct + latePct + veryLatePct = 100.0` (verified with rounding edge cases)
@@ -1154,24 +1153,24 @@ Implement the four analytics HTTP endpoints under `AnalyticsController`. Note: `
 Implement the `ProjectionController` that exposes the formatted performance-card projection at a distinct path from the raw analytics endpoints. This controller is architecturally separate from `AnalyticsController` — it owns the dashboard-consumer-facing projection layer.
 
 **Technical Scope:**
-- `ProjectionController` at `/api/v1/analytics/projections/calculators/{calculatorId}`, `@Tag(name = "Projections")`
-- `GET /performance-card`: `days @Min(1) @Max(365) default 30`, `frequency default DAILY`. Delegates to `AnalyticsService.getPerformanceCard()`.
+- `ProjectionController` at `/api/v1/analytics/projections/calculators/{calculatorId}`, `@Tag(name = "Analytics Projections")`
+- `GET /performance-card`: `days @Min(1) @Max(365) default 30`, `frequency default DAILY`. Delegates to `ProjectionService.getPerformanceCard()`.
   - `Cache-Control: max-age=60, private`
-  - Counter: `api.analytics.projections.performance-card.requests`
-  - Timer: `api.analytics.projections.performance-card.duration`
+  - Timer: `obs.api.analytics.duration` (tagged `endpoint=/projections/performance-card`)
 - Same auth/tenant requirements as `AnalyticsController`: `@RequestHeader("X-Tenant-Id")` + HTTP Basic
 
 **Implementation Notes:**
 - `ProjectionController` must remain separate from `AnalyticsController`. The projection path (`/projections/...`) allows the response format to evolve independently of the raw analytics schema.
-- Swagger grouping: `@Tag(name = "Projections")` — distinct from `"Analytics"` tag.
+- `ProjectionService` is a pure presentation-layer service — it delegates to `AnalyticsService.getRunPerformanceData()` for raw data, then formats it into `PerformanceCardResponse`. No repository or cache dependencies.
+- Swagger grouping: `@Tag(name = "Analytics Projections")` — distinct from `"Analytics"` tag.
 
 **Dependencies:** Issue 1.5, Issue 7.4
 
 **Acceptance Criteria:**
 - [ ] `GET /api/v1/analytics/projections/calculators/{id}/performance-card` returns 200 with `PerformanceCardResponse`
 - [ ] `GET /api/v1/analytics/calculators/{id}/performance-card` returns 404 (endpoint does not exist on `AnalyticsController`)
-- [ ] Swagger UI shows `Projections` as a distinct tag group from `Analytics`
-- [ ] `api.analytics.projections.performance-card.requests` counter increments on each call
+- [ ] Swagger UI shows `Analytics Projections` as a distinct tag group from `Analytics`
+- [ ] `obs.api.analytics.duration` timer records with tag `endpoint=/projections/performance-card`
 - [ ] Missing `X-Tenant-Id` returns 400; unauthenticated returns 401
 
 ---
@@ -1359,16 +1358,10 @@ Add `Timer` metrics to all 10 API endpoints so latency percentiles are available
 
 **Technical Scope:**
 - Add `Timer.Sample` start + `Timer.record()` in every controller method (or use `@Timed` annotation with AOP if available)
-- Timer names:
-  - `api.runs.start.duration`
-  - `api.runs.complete.duration`
-  - `api.calculators.status.duration` (tagged: `frequency`, `bypass_cache`, `cache_hit`)
-  - `api.calculators.batch.duration` (tagged: `frequency`, `allow_stale`, `batch_size` histogram)
-  - `api.analytics.runtime.duration`
-  - `api.analytics.sla-summary.duration`
-  - `api.analytics.trends.duration`
-  - `api.analytics.sla-breaches.duration`
-  - `api.analytics.performance-card.duration`
+- Timer names (all tagged with `endpoint` to distinguish per-endpoint latency):
+  - `obs.api.ingestion.duration` (tagged: `endpoint=/api/v1/runs/start`, `endpoint=/api/v1/runs/{runId}/complete`)
+  - `obs.api.query.duration` (tagged: `endpoint=/api/v1/calculators/{calculatorId}/status`, `endpoint=/api/v1/calculators/batch/status`)
+  - `obs.api.analytics.duration` (tagged: `endpoint=/runtime`, `/sla-summary`, `/trends`, `/sla-breaches`, `/run-performance`, `/projections/performance-card`)
 - Record as Micrometer `Timer` (not `DistributionSummary`) with percentile publishing enabled: p50, p95, p99
 
 **Dependencies:** Issue 3.5, Issue 5.3, Issue 7.5
