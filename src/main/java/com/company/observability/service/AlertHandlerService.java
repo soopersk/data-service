@@ -1,5 +1,7 @@
 package com.company.observability.service;
 
+import com.company.observability.alert.AlertDeliveryException;
+import com.company.observability.alert.AlertSender;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
@@ -31,6 +33,7 @@ public class AlertHandlerService {
 
     private final SlaBreachEventRepository breachRepository;
     private final MeterRegistry meterRegistry;
+    private final AlertSender alertSender;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
@@ -57,7 +60,11 @@ public class AlertHandlerService {
                 .tenantId(run.getTenantId())
                 .breachType(BreachType.fromString(determineBreachType(result.getReason())))
                 .expectedValue(calculateExpectedValue(run))
+                .expectedUnit(run.getSlaTime() != null ? "epoch_seconds"
+                        : run.getExpectedDurationMs() != null ? "duration_ms" : null)
                 .actualValue(calculateActualValue(run))
+                .actualUnit(run.getEndTime() != null && run.getSlaTime() != null ? "epoch_seconds"
+                        : run.getDurationMs() != null ? "duration_ms" : null)
                 .severity(Severity.fromString(result.getSeverity()))
                 .alerted(false)
                 .alertStatus(AlertStatus.PENDING)
@@ -85,15 +92,12 @@ public class AlertHandlerService {
             return;
         }
 
-        // Phase-1: simple alerting via logs
-        sendSimpleAlert(savedBreach, run);
+        sendAlert(savedBreach, run);
     }
 
-    private void sendSimpleAlert(SlaBreachEvent breach, CalculatorRun run) {
+    private void sendAlert(SlaBreachEvent breach, CalculatorRun run) {
         try {
-            log.info("event=sla.alert.send outcome=success severity={} reason={}",
-                    breach.getSeverity(), run.getSlaBreachReason());
-
+            alertSender.send(breach);
             breach.setAlerted(true);
             breach.setAlertedAt(Instant.now());
             breach.setAlertStatus(AlertStatus.SENT);
@@ -101,25 +105,33 @@ public class AlertHandlerService {
 
             meterRegistry.counter(SLA_ALERT_SENT,
                     "severity", breach.getSeverity().name(),
-                    "frequency", run.getFrequency().name()
+                    "frequency", run.getFrequency().name(),
+                    "channel", alertSender.channelName()
             ).increment();
 
             log.info("event=sla.alert.send outcome=success breachId={}", breach.getBreachId());
 
-        } catch (Exception e) {
-            log.error("event=sla.alert.send outcome=failure breachId={}", breach.getBreachId(), e);
-
-            breach.setAlertStatus(AlertStatus.FAILED);
-            breach.setRetryCount(breach.getRetryCount() + 1);
-            breach.setLastError(e.getMessage());
-            breachRepository.update(breach);
-
-            meterRegistry.counter(SLA_ALERT_FAILED,
-                    "frequency", run.getFrequency().name()
-            ).increment();
-
+        } catch (AlertDeliveryException e) {
+            markFailed(breach, run, e);
             throw e;
+        } catch (Exception e) {
+            AlertDeliveryException wrapped = new AlertDeliveryException("Unexpected sender failure", e);
+            markFailed(breach, run, wrapped);
+            throw wrapped;
         }
+    }
+
+    private void markFailed(SlaBreachEvent breach, CalculatorRun run, Exception e) {
+        log.error("event=sla.alert.send outcome=failure breachId={}", breach.getBreachId(), e);
+        breach.setAlertStatus(AlertStatus.FAILED);
+        breach.setRetryCount(breach.getRetryCount() + 1);
+        breach.setLastError(e.getMessage());
+        breachRepository.update(breach);
+
+        meterRegistry.counter(SLA_ALERT_FAILED,
+                "frequency", run.getFrequency().name(),
+                "channel", alertSender.channelName()
+        ).increment();
     }
 
     private String determineBreachType(String reason) {

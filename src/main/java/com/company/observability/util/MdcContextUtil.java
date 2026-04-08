@@ -1,5 +1,6 @@
 package com.company.observability.util;
 
+import com.company.observability.domain.SlaBreachEvent;
 import org.slf4j.MDC;
 
 import java.util.HashMap;
@@ -41,6 +42,38 @@ public final class MdcContextUtil {
         MDC.put("requestId", "job-" + shortId);
         MDC.put("tenant", "system");
         return snapshot;
+    }
+
+    /**
+     * Set alert context in MDC for structured alert log emission. Returns snapshot of prior state.
+     * Must always be followed by restoreContext(snapshot) in a finally block.
+     */
+    public static Map<String, String> setAlertContext(SlaBreachEvent breach) {
+        Map<String, String> snapshot = MDC.getCopyOfContextMap();
+        if (snapshot == null) {
+            snapshot = new HashMap<>();
+        }
+        MDC.put("alert_source", "observability-service");
+        MDC.put("alert_type", "SLA_BREACH");
+        MDC.put("calculatorId", nullSafe(breach.getCalculatorId()));
+        MDC.put("calculatorName", nullSafe(breach.getCalculatorName()));
+        MDC.put("tenantId", nullSafe(breach.getTenantId()));
+        MDC.put("runId", nullSafe(breach.getRunId()));
+        MDC.put("severity", breach.getSeverity() != null ? breach.getSeverity().name() : "UNKNOWN");
+        MDC.put("breachType", breach.getBreachType() != null ? breach.getBreachType().name() : "UNKNOWN");
+        if (breach.getExpectedValue() != null) {
+            MDC.put("expectedValue", String.valueOf(breach.getExpectedValue()));
+            MDC.put("expectedUnit", nullSafe(breach.getExpectedUnit()));
+        }
+        if (breach.getActualValue() != null) {
+            MDC.put("actualValue", String.valueOf(breach.getActualValue()));
+            MDC.put("actualUnit", nullSafe(breach.getActualUnit()));
+        }
+        return snapshot;
+    }
+
+    private static String nullSafe(String v) {
+        return v != null ? v : "-";
     }
 
     /**

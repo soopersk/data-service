@@ -1,5 +1,7 @@
 package com.company.observability.service;
 
+import com.company.observability.alert.AlertDeliveryException;
+import com.company.observability.alert.AlertSender;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
@@ -20,8 +22,10 @@ import org.springframework.dao.DuplicateKeyException;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -32,17 +36,21 @@ class AlertHandlerServiceTest {
     @Mock
     private SlaBreachEventRepository breachRepository;
 
+    @Mock
+    private AlertSender alertSender;
+
     private SimpleMeterRegistry meterRegistry;
     private AlertHandlerService service;
 
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        service = new AlertHandlerService(breachRepository, meterRegistry);
+        service = new AlertHandlerService(breachRepository, meterRegistry, alertSender);
     }
 
     @Test
     void handleSlaBreachEvent_savesAndMarksAlertSent() {
+        when(alertSender.channelName()).thenReturn("logging");
         CalculatorRun run = baseRun();
         SlaEvaluationResult result = new SlaEvaluationResult(true, "Finished 10 minutes late", "HIGH");
 
@@ -62,6 +70,7 @@ class AlertHandlerServiceTest {
         service.handleSlaBreachEvent(new SlaBreachedEvent(run, result));
 
         verify(breachRepository).save(any(SlaBreachEvent.class));
+        verify(alertSender).send(any(SlaBreachEvent.class));
 
         ArgumentCaptor<SlaBreachEvent> updateCaptor = ArgumentCaptor.forClass(SlaBreachEvent.class);
         verify(breachRepository).update(updateCaptor.capture());
@@ -70,7 +79,39 @@ class AlertHandlerServiceTest {
         assertTrue(Boolean.TRUE.equals(updated.getAlerted()));
         assertEquals(AlertStatus.SENT, updated.getAlertStatus());
         assertEquals(1.0, meterRegistry.get("obs.sla.breach.created").counter().count());
-        assertEquals(1.0, meterRegistry.get("obs.sla.alert.sent").counter().count());
+        assertEquals(1.0, meterRegistry.get("obs.sla.alert.sent").tag("channel", "logging").counter().count());
+    }
+
+    @Test
+    void handleSlaBreachEvent_senderFails_marksAlertFailed() {
+        when(alertSender.channelName()).thenReturn("logging");
+        CalculatorRun run = baseRun();
+        SlaEvaluationResult result = new SlaEvaluationResult(true, "Finished 10 minutes late", "HIGH");
+
+        SlaBreachEvent saved = SlaBreachEvent.builder()
+                .breachId(102L)
+                .runId(run.getRunId())
+                .calculatorId(run.getCalculatorId())
+                .tenantId(run.getTenantId())
+                .severity(Severity.HIGH)
+                .alerted(false)
+                .retryCount(0)
+                .build();
+
+        when(breachRepository.save(any(SlaBreachEvent.class))).thenReturn(saved);
+        doThrow(new AlertDeliveryException("send failed")).when(alertSender).send(any());
+
+        assertThrows(AlertDeliveryException.class,
+                () -> service.handleSlaBreachEvent(new SlaBreachedEvent(run, result)));
+
+        ArgumentCaptor<SlaBreachEvent> updateCaptor = ArgumentCaptor.forClass(SlaBreachEvent.class);
+        verify(breachRepository).update(updateCaptor.capture());
+        SlaBreachEvent updated = updateCaptor.getValue();
+
+        assertEquals(AlertStatus.FAILED, updated.getAlertStatus());
+        assertEquals(1, updated.getRetryCount());
+        assertEquals("send failed", updated.getLastError());
+        assertEquals(1.0, meterRegistry.get("obs.sla.alert.failed").tag("channel", "logging").counter().count());
     }
 
     @Test
@@ -84,6 +125,7 @@ class AlertHandlerServiceTest {
         service.handleSlaBreachEvent(new SlaBreachedEvent(run, result));
 
         verify(breachRepository).save(any(SlaBreachEvent.class));
+        verify(alertSender, never()).send(any());
         verify(breachRepository, never()).update(any(SlaBreachEvent.class));
         assertEquals(1.0, meterRegistry.get("obs.sla.breach.duplicate").counter().count());
     }

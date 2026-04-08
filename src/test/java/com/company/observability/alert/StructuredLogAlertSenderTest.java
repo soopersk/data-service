@@ -1,0 +1,136 @@
+package com.company.observability.alert;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.domain.enums.BreachType;
+import com.company.observability.domain.enums.Severity;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+
+import java.time.Instant;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class StructuredLogAlertSenderTest {
+
+    private StructuredLogAlertSender sender;
+    private ListAppender<ILoggingEvent> listAppender;
+    private Logger senderLogger;
+
+    @BeforeEach
+    void setUp() {
+        sender = new StructuredLogAlertSender();
+        senderLogger = (Logger) LoggerFactory.getLogger(StructuredLogAlertSender.class);
+        listAppender = new ListAppender<>();
+        listAppender.start();
+        senderLogger.addAppender(listAppender);
+        MDC.clear();
+    }
+
+    @AfterEach
+    void tearDown() {
+        senderLogger.detachAppender(listAppender);
+        MDC.clear();
+    }
+
+    @Test
+    void send_emitsErrorLogWithAlertMessage() {
+        SlaBreachEvent breach = validBreach();
+
+        sender.send(breach);
+
+        assertEquals(1, listAppender.list.size());
+        String message = listAppender.list.get(0).getFormattedMessage();
+        assertTrue(message.contains("SLA_BREACH_ALERT"));
+        assertTrue(message.contains("CALC-1"));
+        assertTrue(message.contains("HIGH"));
+    }
+
+    @Test
+    void send_setsMdcAlertFieldsDuringSend_andRestoresAfterward() {
+        MDC.put("calculatorId", "prior-calc");
+        MDC.put("requestId", "req-123");
+
+        sender.send(validBreach());
+
+        // After send, MDC must be restored to prior state
+        assertEquals("prior-calc", MDC.get("calculatorId"));
+        assertEquals("req-123", MDC.get("requestId"));
+        assertNull(MDC.get("alert_source"));
+        assertNull(MDC.get("alert_type"));
+        assertNull(MDC.get("severity"));
+    }
+
+    @Test
+    void send_mdcKeysSetDuringLogEmission() {
+        listAppender.list.clear();
+
+        sender.send(validBreach());
+
+        assertEquals(1, listAppender.list.size());
+        ILoggingEvent event = listAppender.list.get(0);
+        assertEquals("observability-service", event.getMDCPropertyMap().get("alert_source"));
+        assertEquals("SLA_BREACH", event.getMDCPropertyMap().get("alert_type"));
+        assertEquals("HIGH", event.getMDCPropertyMap().get("severity"));
+        assertEquals("TIME_EXCEEDED", event.getMDCPropertyMap().get("breachType"));
+        assertEquals("CALC-1", event.getMDCPropertyMap().get("calculatorId"));
+        assertEquals("tenant-1", event.getMDCPropertyMap().get("tenantId"));
+    }
+
+    @Test
+    void send_whenNullBreach_throwsAlertDeliveryException() {
+        assertThrows(AlertDeliveryException.class, () -> sender.send(null));
+    }
+
+    @Test
+    void send_whenSeverityMissing_throwsAlertDeliveryException() {
+        SlaBreachEvent breach = SlaBreachEvent.builder()
+                .calculatorId("CALC-1")
+                .tenantId("tenant-1")
+                .runId("run-1")
+                .severity(null)
+                .build();
+
+        assertThrows(AlertDeliveryException.class, () -> sender.send(breach));
+    }
+
+    @Test
+    void send_whenSeverityMissing_mdcIsNotModified() {
+        MDC.put("requestId", "req-abc");
+        SlaBreachEvent breach = SlaBreachEvent.builder()
+                .calculatorId("CALC-1").tenantId("tenant-1").runId("run-1").severity(null).build();
+
+        assertThrows(AlertDeliveryException.class, () -> sender.send(breach));
+
+        // MDC must be untouched — validation fires before setAlertContext
+        assertEquals("req-abc", MDC.get("requestId"));
+        assertNull(MDC.get("alert_source"));
+    }
+
+    @Test
+    void channelName_returnsLogging() {
+        assertEquals("logging", sender.channelName());
+    }
+
+    private SlaBreachEvent validBreach() {
+        return SlaBreachEvent.builder()
+                .breachId(1L)
+                .runId("run-1")
+                .calculatorId("CALC-1")
+                .calculatorName("Risk Calculator")
+                .tenantId("tenant-1")
+                .severity(Severity.HIGH)
+                .breachType(BreachType.TIME_EXCEEDED)
+                .expectedValue(1740200100L)
+                .expectedUnit("epoch_seconds")
+                .actualValue(1740200700L)
+                .actualUnit("epoch_seconds")
+                .createdAt(Instant.now())
+                .build();
+    }
+}

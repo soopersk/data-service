@@ -102,6 +102,9 @@ observability:
       interval-ms: 180000        # Every 3 minutes
       threshold-minutes: 10      # Warn if SLA within 10 minutes
 
+  alerts:
+    channel: logging
+
   cache:
     eviction:
       enabled: true
@@ -122,9 +125,6 @@ logging:
     org.springframework.cache.interceptor: TRACE
     org.springframework.data.redis.cache: TRACE
     io.lettuce.core: DEBUG
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [reqId=%X{requestId:-} tenant=%X{tenant:-} calc=%X{calculatorId:-} run=%X{runId:-}] - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [reqId=%X{requestId:-} tenant=%X{tenant:-} calc=%X{calculatorId:-} run=%X{runId:-}] - %msg%n"
 
 # Springdoc OpenAPI
 springdoc:

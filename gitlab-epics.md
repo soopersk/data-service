@@ -840,9 +840,9 @@ Register the `calculator.runs.active` Gauge metric that exposes the count of cur
 Define the three application events and confirm publication points in the ingestion service.
 
 **Technical Scope:**
-- `RunStartedEvent(CalculatorRun run)`: extends `ApplicationEvent`
-- `RunCompletedEvent(CalculatorRun run)`: extends `ApplicationEvent`
-- `SlaBreachedEvent(CalculatorRun run, SlaEvaluationResult result)`: extends `ApplicationEvent`
+- `RunStartedEvent(CalculatorRun run)`: plain POJO, Lombok `@Getter @AllArgsConstructor` (no `ApplicationEvent` inheritance — Spring 4.2+ `publishEvent()` accepts any `Object`)
+- `RunCompletedEvent(CalculatorRun run)`: plain POJO, Lombok `@Getter @AllArgsConstructor`
+- `SlaBreachedEvent(CalculatorRun run, SlaEvaluationResult result)`: plain POJO, Lombok `@Getter @AllArgsConstructor`
 - `SlaEvaluationResult`: Lombok `@AllArgsConstructor`, fields `boolean breached`, `String reason`, `String severity`
 - Publication in `RunIngestionService`: `startRun` publishes `RunStartedEvent` (+ optionally `SlaBreachedEvent`); `completeRun` publishes `SlaBreachedEvent` or `RunCompletedEvent`
 

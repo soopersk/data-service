@@ -30,4 +30,7 @@ public class SlaBreachEvent {
     private Integer retryCount;
     private String lastError;
     private Instant createdAt;
+    // Transient — not persisted, set at alert time to disambiguate expectedValue/actualValue units
+    private String expectedUnit;
+    private String actualUnit;
 }

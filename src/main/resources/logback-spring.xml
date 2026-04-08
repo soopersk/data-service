@@ -17,10 +17,22 @@
     <springProfile name="!local">
         <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!-- request/job context -->
                 <includeMdcKeyName>requestId</includeMdcKeyName>
                 <includeMdcKeyName>tenant</includeMdcKeyName>
                 <includeMdcKeyName>calculatorId</includeMdcKeyName>
                 <includeMdcKeyName>runId</includeMdcKeyName>
+                <!-- alert delivery keys — required for App Insights custom dimensions / BigPanda routing -->
+                <includeMdcKeyName>alert_source</includeMdcKeyName>
+                <includeMdcKeyName>alert_type</includeMdcKeyName>
+                <includeMdcKeyName>calculatorName</includeMdcKeyName>
+                <includeMdcKeyName>tenantId</includeMdcKeyName>
+                <includeMdcKeyName>severity</includeMdcKeyName>
+                <includeMdcKeyName>breachType</includeMdcKeyName>
+                <includeMdcKeyName>expectedValue</includeMdcKeyName>
+                <includeMdcKeyName>expectedUnit</includeMdcKeyName>
+                <includeMdcKeyName>actualValue</includeMdcKeyName>
+                <includeMdcKeyName>actualUnit</includeMdcKeyName>
             </encoder>
         </appender>
         <root level="INFO">
