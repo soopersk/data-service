@@ -23,6 +23,7 @@ import java.time.*;
 import java.util.*;
 
 import static com.company.observability.util.ObservabilityConstants.*;
+import static com.company.observability.util.TimeUtils.fromTimestamp;
 import static com.company.observability.util.TimeUtils.toTimestamp;
 
 /**
@@ -469,13 +470,13 @@ public class CalculatorRunRepository {
                     rs.getString("calculator_id"),
                     rs.getString("calculator_name"),
                     rs.getObject("reporting_date", LocalDate.class),
-                    getInstant(rs, "start_time"),
-                    getInstant(rs, "end_time"),
+                    fromTimestamp(rs.getTimestamp("start_time")),
+                    fromTimestamp(rs.getTimestamp("end_time")),
                     rs.getObject("duration_ms", Long.class),
                     rs.getBigDecimal("start_hour_cet"),
                     rs.getBigDecimal("end_hour_cet"),
-                    getInstant(rs, "sla_time"),
-                    getInstant(rs, "estimated_start_time"),
+                    fromTimestamp(rs.getTimestamp("sla_time")),
+                    fromTimestamp(rs.getTimestamp("estimated_start_time")),
                     CalculatorFrequency.from(rs.getString("frequency")),
                     RunStatus.fromString(rs.getString("status")),
                     rs.getObject("sla_breached", Boolean.class),
@@ -496,11 +497,6 @@ public class CalculatorRunRepository {
     }
 
 
-    private static Instant getInstant(ResultSet rs, String columnName) throws SQLException {
-        Timestamp timestamp = rs.getTimestamp(columnName);
-        return timestamp != null ? timestamp.toInstant() : null;
-    }
-
     private class CalculatorRunRowMapper implements RowMapper<CalculatorRun> {
         private final boolean includeJsonb;
 
@@ -518,24 +514,24 @@ public class CalculatorRunRepository {
                         .tenantId(rs.getString("tenant_id"))
                         .frequency(CalculatorFrequency.from(rs.getString("frequency")))
                         .reportingDate(rs.getObject("reporting_date", LocalDate.class))
-                        .startTime(getInstant(rs, "start_time"))
-                        .endTime(getInstant(rs, "end_time"))
+                        .startTime(fromTimestamp(rs.getTimestamp("start_time")))
+                        .endTime(fromTimestamp(rs.getTimestamp("end_time")))
                         .durationMs(rs.getObject("duration_ms", Long.class))
                         .startHourCet(rs.getBigDecimal("start_hour_cet"))
                         .endHourCet(rs.getBigDecimal("end_hour_cet"))
                         .status(RunStatus.fromString(rs.getString("status")))
-                        .slaTime(getInstant(rs, "sla_time"))
+                        .slaTime(fromTimestamp(rs.getTimestamp("sla_time")))
                         .expectedDurationMs(rs.getObject("expected_duration_ms", Long.class))
-                        .estimatedStartTime(getInstant(rs, "estimated_start_time"))
-                        .estimatedEndTime(getInstant(rs, "estimated_end_time"))
+                        .estimatedStartTime(fromTimestamp(rs.getTimestamp("estimated_start_time")))
+                        .estimatedEndTime(fromTimestamp(rs.getTimestamp("estimated_end_time")))
                         .slaBreached(rs.getBoolean("sla_breached"))
                         .slaBreachReason(rs.getString("sla_breach_reason"))
-                        .createdAt(getInstant(rs, "created_at"))
-                        .updatedAt(getInstant(rs, "updated_at"));
+                        .createdAt(fromTimestamp(rs.getTimestamp("created_at")))
+                        .updatedAt(fromTimestamp(rs.getTimestamp("updated_at")));
 
                 if (includeJsonb) {
-                    builder.runParameters(jsonbConverter.fromJsonb(rs, "run_parameters"))
-                           .additionalAttributes(jsonbConverter.fromJsonb(rs, "additional_attributes"));
+                    builder.runParameters(jsonbConverter.fromJsonb(rs.getObject("run_parameters")))
+                           .additionalAttributes(jsonbConverter.fromJsonb(rs.getObject("additional_attributes")));
                 }
 
                 return builder.build();

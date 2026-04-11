@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.util.*;
 
 import static com.company.observability.util.ObservabilityConstants.*;
+import static com.company.observability.util.TimeUtils.fromTimestamp;
 
 /**
  * Daily aggregate repository with reporting_date alignment
@@ -161,7 +162,7 @@ public class DailyAggregateRepository {
                         rs.getLong("avg_duration_ms"),
                         rs.getInt("avg_start_min_cet"),
                         rs.getInt("avg_end_min_cet"),
-                        rs.getTimestamp("computed_at").toInstant()
+                        fromTimestamp(rs.getTimestamp("computed_at"))
                 );
             } catch (SQLException e) {
                 throw new RuntimeException("Failed to map daily aggregate", e);

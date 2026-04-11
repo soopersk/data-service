@@ -122,4 +122,8 @@ public class TimeUtils {
         return instant != null ? Timestamp.from(instant) : null;
     }
 
+    public static Instant fromTimestamp(Timestamp timestamp) {
+        return timestamp != null ? timestamp.toInstant() : null;
+    }
+
 }

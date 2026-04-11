@@ -524,4 +524,24 @@ class TimeUtilsTest {
             assertNull(TimeUtils.toTimestamp(null));
         }
     }
+
+    // -----------------------------------------------------------------------
+    // fromTimestamp
+    // -----------------------------------------------------------------------
+
+    @Nested
+    class FromTimestamp {
+
+        @Test
+        void convertsTimestampToInstant() {
+            Instant expected = Instant.parse("2026-02-06T05:15:00Z");
+            Timestamp ts = Timestamp.from(expected);
+            assertEquals(expected, TimeUtils.fromTimestamp(ts));
+        }
+
+        @Test
+        void null_returnsNull() {
+            assertNull(TimeUtils.fromTimestamp(null));
+        }
+    }
 }

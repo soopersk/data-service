@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.util.*;
 
 import static com.company.observability.util.ObservabilityConstants.*;
+import static com.company.observability.util.TimeUtils.fromTimestamp;
 
 @Repository
 @RequiredArgsConstructor
@@ -347,12 +348,11 @@ public class SlaBreachEventRepository {
                     .actualValue(rs.getObject("actual_value", Long.class))
                     .severity(Severity.fromString(rs.getString("severity")))
                     .alerted(rs.getBoolean("alerted"))
-                    .alertedAt(rs.getTimestamp("alerted_at") != null ?
-                            rs.getTimestamp("alerted_at").toInstant() : null)
+                    .alertedAt(fromTimestamp(rs.getTimestamp("alerted_at")))
                     .alertStatus(AlertStatus.fromString(rs.getString("alert_status")))
                     .retryCount(rs.getInt("retry_count"))
                     .lastError(rs.getString("last_error"))
-                    .createdAt(rs.getTimestamp("created_at").toInstant())
+                    .createdAt(fromTimestamp(rs.getTimestamp("created_at")))
                     .build();
         }
     }
