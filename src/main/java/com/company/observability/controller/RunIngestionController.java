@@ -74,7 +74,7 @@ public class RunIngestionController {
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
-            CalculatorRun run = ingestionService.completeRun(runId, request, tenantId);
+            CalculatorRun run = ingestionService.completeRun(runId, request.getReportingDate(), request, tenantId);
 
             return ResponseEntity.ok(toRunResponse(run));
         } finally {

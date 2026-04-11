@@ -1,19 +1,16 @@
 package com.company.observability.controller;
 
+import com.company.observability.config.TestMetricsConfig;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
 import com.company.observability.service.RunQueryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Bean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -35,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = RunQueryController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@Import(RunQueryControllerTest.MetricsTestConfig.class)
+@Import(TestMetricsConfig.class)
 class RunQueryControllerTest {
 
     private static final String TENANT_HEADER = "X-Tenant-Id";
@@ -46,16 +43,8 @@ class RunQueryControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private RunQueryService queryService;
-
-    @TestConfiguration
-    static class MetricsTestConfig {
-        @Bean
-        MeterRegistry meterRegistry() {
-            return new SimpleMeterRegistry();
-        }
-    }
 
     @Test
     void getCalculatorStatus_returnsCacheableResponse_whenBypassCacheFalse() throws Exception {
@@ -144,6 +133,24 @@ class RunQueryControllerTest {
         verify(queryService).getBatchCalculatorStatus(
                 List.of("calc-fresh"), "tenant-a",
                 CalculatorFrequency.DAILY, 5, false);
+    }
+
+    @Test
+    void getCalculatorStatus_missingTenantIdHeader_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/calculators/calc-1/status")
+                        .param("frequency", "DAILY")
+                        .param("historyLimit", "5"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getBatchStatus_missingTenantIdHeader_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/calculators/batch/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .param("frequency", "DAILY")
+                        .param("historyLimit", "5")
+                        .content(objectMapper.writeValueAsString(List.of("calc-1"))))
+                .andExpect(status().isBadRequest());
     }
 
     private static CalculatorStatusResponse sampleStatusResponse(String calculatorName) {

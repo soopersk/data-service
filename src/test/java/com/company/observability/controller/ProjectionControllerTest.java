@@ -1,17 +1,14 @@
 package com.company.observability.controller;
 
+import com.company.observability.config.TestMetricsConfig;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.PerformanceCardResponse;
 import com.company.observability.service.ProjectionService;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Bean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
@@ -27,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = ProjectionController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@Import(ProjectionControllerTest.MetricsTestConfig.class)
+@Import(TestMetricsConfig.class)
 class ProjectionControllerTest {
 
     private static final String TENANT_HEADER = "X-Tenant-Id";
@@ -35,16 +32,8 @@ class ProjectionControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    @MockitoBean
     private ProjectionService projectionService;
-
-    @TestConfiguration
-    static class MetricsTestConfig {
-        @Bean
-        MeterRegistry meterRegistry() {
-            return new SimpleMeterRegistry();
-        }
-    }
 
     @Test
     void getPerformanceCard_returnsCacheableResponse() throws Exception {
@@ -93,5 +82,12 @@ class ProjectionControllerTest {
                 .andExpect(jsonPath("$.calculatorId").value("calc-2"));
 
         verify(projectionService).getPerformanceCard("calc-2", "tenant-b", 30, CalculatorFrequency.DAILY);
+    }
+
+    @Test
+    void missingTenantIdHeader_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/analytics/projections/calculators/calc-1/performance-card")
+                        .param("days", "30"))
+                .andExpect(status().isBadRequest());
     }
 }

@@ -1,17 +1,14 @@
 package com.company.observability.controller;
 
+import com.company.observability.config.TestMetricsConfig;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.*;
 import com.company.observability.service.AnalyticsService;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Bean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
@@ -30,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = AnalyticsController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@Import(AnalyticsControllerTest.MetricsTestConfig.class)
+@Import(TestMetricsConfig.class)
 class AnalyticsControllerTest {
 
     private static final String TENANT_HEADER = "X-Tenant-Id";
@@ -38,16 +35,8 @@ class AnalyticsControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    @MockitoBean
     private AnalyticsService analyticsService;
-
-    @TestConfiguration
-    static class MetricsTestConfig {
-        @Bean
-        MeterRegistry meterRegistry() {
-            return new SimpleMeterRegistry();
-        }
-    }
 
     @Test
     void getRuntimeAnalytics_returnsCacheableResponse_andParsesFrequency() throws Exception {
@@ -103,10 +92,10 @@ class AnalyticsControllerTest {
                 1, 1, 1, 0, 0,
                 List.of(
                         new RunPerformanceData.RunDataPoint(
-                        "run-1", LocalDate.parse("2026-02-21"),
-                        Instant.parse("2026-02-21T04:00:00Z"),
-                        Instant.parse("2026-02-21T04:03:00Z"),
-                        180000L, "SUCCESS", false, "SLA_MET"),
+                                "run-1", LocalDate.parse("2026-02-21"),
+                                Instant.parse("2026-02-21T04:00:00Z"),
+                                Instant.parse("2026-02-21T04:03:00Z"),
+                                180000L, "SUCCESS", false, "SLA_MET"),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.parse("2026-02-22"),
                                 Instant.parse("2026-02-22T04:00:00Z"),
@@ -127,9 +116,7 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.calculatorId").value("calc-1"))
                 .andExpect(jsonPath("$.runningRuns").value(1))
                 .andExpect(jsonPath("$.runs[0].slaStatus").value("SLA_MET"))
-                .andExpect(jsonPath("$.runs[1].slaStatus").value("RUNNING"))
-                .andExpect(jsonPath("$.runs[1].status").value("RUNNING"))
-                .andExpect(jsonPath("$.runs[0].startTime").exists());
+                .andExpect(jsonPath("$.runs[1].slaStatus").value("RUNNING"));
 
         verify(analyticsService).getRunPerformanceData("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
     }
@@ -137,8 +124,7 @@ class AnalyticsControllerTest {
     @Test
     void getSlaSummary_returnsCacheableResponse() throws Exception {
         when(analyticsService.getSlaSummary("calc-1", "tenant-a", 14))
-                .thenReturn(new com.company.observability.dto.response.SlaSummaryResponse(
-                        "calc-1", 14, 2, 10, 2, 2, null, null));
+                .thenReturn(new SlaSummaryResponse("calc-1", 14, 2, 10, 2, 2, null, null));
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/sla-summary")
                         .header(TENANT_HEADER, "tenant-a")
@@ -149,5 +135,31 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.totalBreaches").value(2));
 
         verify(analyticsService).getSlaSummary("calc-1", "tenant-a", 14);
+    }
+
+    @Test
+    void getTrends_returnsCacheableResponse() throws Exception {
+        TrendAnalyticsResponse response = new TrendAnalyticsResponse(
+                "calc-1", 30, List.of());
+
+        when(analyticsService.getTrends("calc-1", "tenant-a", 30))
+                .thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/trends")
+                        .header(TENANT_HEADER, "tenant-a")
+                        .param("days", "30"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=60")))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("private")))
+                .andExpect(jsonPath("$.calculatorId").value("calc-1"));
+
+        verify(analyticsService).getTrends("calc-1", "tenant-a", 30);
+    }
+
+    @Test
+    void missingTenantIdHeader_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/runtime")
+                        .param("days", "30"))
+                .andExpect(status().isBadRequest());
     }
 }

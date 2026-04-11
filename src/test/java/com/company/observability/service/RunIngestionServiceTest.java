@@ -9,6 +9,7 @@ import com.company.observability.dto.request.CompleteRunRequest;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.event.RunCompletedEvent;
 import com.company.observability.event.SlaBreachedEvent;
+import com.company.observability.exception.DomainAccessDeniedException;
 import com.company.observability.exception.DomainValidationException;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.repository.DailyAggregateRepository;
@@ -29,8 +30,12 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -79,7 +84,7 @@ class RunIngestionServiceTest {
                 .build();
 
         assertThrows(DomainValidationException.class,
-                () -> service.completeRun("run-1", request, "tenant-1"));
+                () -> service.completeRun("run-1", LocalDate.now(), request, "tenant-1"));
 
         verify(runRepository, never()).upsert(any());
         verify(slaMonitoringCache, never()).deregisterFromSlaMonitoring(anyString(), anyString(), any(LocalDate.class));
@@ -161,7 +166,7 @@ class RunIngestionServiceTest {
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
-        service.completeRun("run-1", request, "tenant-1");
+        service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
 
         verify(eventPublisher).publishEvent(any(RunCompletedEvent.class));
         verify(eventPublisher, never()).publishEvent(any(SlaBreachedEvent.class));
@@ -184,13 +189,149 @@ class RunIngestionServiceTest {
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
-        service.completeRun("run-1", request, "tenant-1");
+        service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
 
         verify(runRepository).upsert(argThat(saved ->
                 Boolean.TRUE.equals(saved.getSlaBreached())
                         && "Finished 30 minutes late".equals(saved.getSlaBreachReason())));
         verify(eventPublisher).publishEvent(any(SlaBreachedEvent.class));
         verify(eventPublisher, never()).publishEvent(any(RunCompletedEvent.class));
+    }
+
+    // ---------------------------------------------------------------
+    // startRun — additional coverage
+    // ---------------------------------------------------------------
+
+    @Test
+    void startRun_idempotent_returnsExistingRunWithoutPublishingEvents() {
+        LocalDate reportingDate = LocalDate.of(2026, 4, 10);
+        Instant start = Instant.parse("2026-04-10T05:00:00Z");
+        CalculatorRun existing = runningRun(start);
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-1")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(CalculatorFrequency.DAILY)
+                .reportingDate(reportingDate)
+                .startTime(start)
+                .slaTimeCet(java.time.LocalTime.of(6, 15))
+                .build();
+
+        when(runRepository.findById("run-1", reportingDate)).thenReturn(Optional.of(existing));
+
+        CalculatorRun result = service.startRun(request, "tenant-1");
+
+        assertThat(result).isEqualTo(existing);
+        verify(runRepository, never()).upsert(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void startRun_monthly_nonEomDate_warnsButPersistsRun() {
+        // Jan 15 is not end-of-month — should warn but NOT reject
+        LocalDate nonEom = LocalDate.of(2026, 1, 15);
+        Instant start = Instant.parse("2026-01-15T05:00:00Z");
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-monthly")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(CalculatorFrequency.MONTHLY)
+                .reportingDate(nonEom)
+                .startTime(start)
+                .slaTimeCet(java.time.LocalTime.of(6, 15))
+                .build();
+
+        when(runRepository.findById("run-monthly", nonEom)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        // Should not throw
+        service.startRun(request, "tenant-1");
+
+        verify(runRepository).upsert(any());
+        verify(eventPublisher).publishEvent(any(com.company.observability.event.RunStartedEvent.class));
+    }
+
+    // ---------------------------------------------------------------
+    // completeRun — additional coverage
+    // ---------------------------------------------------------------
+
+    @Test
+    void completeRun_endTimeEqualsStartTime_durationIsZeroAndSucceeds() {
+        Instant start = Instant.parse("2026-04-10T05:00:00Z");
+        CalculatorRun run = runningRun(start);
+        when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
+        when(slaEvaluationService.evaluateSla(any())).thenReturn(new SlaEvaluationResult(false, null, "LOW"));
+        when(runRepository.upsert(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        CompleteRunRequest request = CompleteRunRequest.builder()
+                .endTime(start)   // exactly equal to startTime
+                .status(CompletionStatus.SUCCESS)
+                .build();
+
+        CalculatorRun result = service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
+
+        assertThat(result.getDurationMs()).isZero();
+        verify(eventPublisher).publishEvent(any(RunCompletedEvent.class));
+    }
+
+    @Test
+    void completeRun_tenantMismatch_throwsDomainAccessDeniedException() {
+        Instant start = Instant.parse("2026-04-10T05:00:00Z");
+        CalculatorRun run = runningRun(start); // tenantId = "tenant-1"
+        when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
+
+        CompleteRunRequest request = CompleteRunRequest.builder()
+                .endTime(start.plusSeconds(600))
+                .status(CompletionStatus.SUCCESS)
+                .build();
+
+        assertThrows(DomainAccessDeniedException.class,
+                () -> service.completeRun("run-1", LocalDate.now(), request, "different-tenant"));
+
+        verify(runRepository, never()).upsert(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void completeRun_dailyAggregateException_isSwallowed_andEventStillPublished() {
+        Instant start = Instant.parse("2026-04-10T05:00:00Z");
+        CalculatorRun run = runningRun(start);
+        when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
+        when(slaEvaluationService.evaluateSla(any())).thenReturn(new SlaEvaluationResult(false, null, "LOW"));
+        when(runRepository.upsert(any())).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.doThrow(new RuntimeException("DB unavailable"))
+                .when(dailyAggregateRepository).upsertDaily(any(), any(), any(), any(), anyBoolean(), anyLong(), anyInt(), anyInt());
+
+        CompleteRunRequest request = CompleteRunRequest.builder()
+                .endTime(start.plusSeconds(300))
+                .status(CompletionStatus.SUCCESS)
+                .build();
+
+        // Must NOT throw — exception from dailyAggregate is swallowed
+        CalculatorRun result = service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
+
+        assertThat(result.getStatus()).isEqualTo(RunStatus.SUCCESS);
+        verify(eventPublisher).publishEvent(any(RunCompletedEvent.class));
+    }
+
+    @Test
+    void completeRun_wrongReportingDate_throwsNotFoundException() {
+        LocalDate wrongDate = LocalDate.of(2026, 1, 1);
+        when(runRepository.findById(eq("run-1"), eq(wrongDate))).thenReturn(Optional.empty());
+
+        CompleteRunRequest request = CompleteRunRequest.builder()
+                .endTime(Instant.parse("2026-04-10T06:00:00Z"))
+                .status(CompletionStatus.SUCCESS)
+                .build();
+
+        assertThrows(com.company.observability.exception.DomainNotFoundException.class,
+                () -> service.completeRun("run-1", wrongDate, request, "tenant-1"));
+
+        verify(runRepository, never()).upsert(any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     private CalculatorRun runningRun(Instant start) {

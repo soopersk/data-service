@@ -149,12 +149,11 @@ public class RunIngestionService {
     }
 
     @Transactional
-    public CalculatorRun completeRun(String runId, CompleteRunRequest request, String tenantId) {
-        // Try to find with recent reporting dates first
-        Optional<CalculatorRun> runOpt = findRecentRun(runId);
+    public CalculatorRun completeRun(String runId, LocalDate reportingDate, CompleteRunRequest request, String tenantId) {
+        Optional<CalculatorRun> runOpt = runRepository.findById(runId, reportingDate);
 
         if (runOpt.isEmpty()) {
-            throw new DomainNotFoundException("Run not found: " + runId);
+            throw new DomainNotFoundException("Run not found: " + runId + " for reportingDate=" + reportingDate);
         }
 
         CalculatorRun run = runOpt.get();
@@ -225,24 +224,6 @@ public class RunIngestionService {
                 run.getReportingDate());
 
         return run;
-    }
-
-    /**
-     * Find recent run by ID (checks recent partitions)
-     */
-    private Optional<CalculatorRun> findRecentRun(String runId) {
-        // Try last 7 days of partitions
-        LocalDate today = LocalDate.now();
-        for (int i = 0; i < 7; i++) {
-            LocalDate reportingDate = today.minusDays(i);
-            Optional<CalculatorRun> run = runRepository.findById(runId, reportingDate);
-            if (run.isPresent()) {
-                return run;
-            }
-        }
-
-        // Fallback to full scan (slower)
-        return runRepository.findById(runId);
     }
 
     /**

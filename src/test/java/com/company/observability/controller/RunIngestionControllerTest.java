@@ -4,22 +4,19 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.exception.GlobalExceptionHandler;
 import com.company.observability.service.RunIngestionService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.company.observability.config.TestMetricsConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Bean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -33,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = RunIngestionController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@Import({GlobalExceptionHandler.class, RunIngestionControllerTest.MetricsTestConfig.class})
+@Import({GlobalExceptionHandler.class, TestMetricsConfig.class})
 class RunIngestionControllerTest {
 
     private static final String TENANT_HEADER = "X-Tenant-Id";
@@ -43,19 +40,8 @@ class RunIngestionControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    @MockBean
+    @MockitoBean
     private RunIngestionService ingestionService;
-
-    @TestConfiguration
-    static class MetricsTestConfig {
-        @Bean
-        MeterRegistry meterRegistry() {
-            return new SimpleMeterRegistry();
-        }
-    }
 
     @Test
     void startRun_returnsCreatedWithLocationAndResponseBody() throws Exception {
@@ -131,11 +117,12 @@ class RunIngestionControllerTest {
                 .slaBreached(false)
                 .build();
 
-        when(ingestionService.completeRun(eq("run-1"), any(), eq("tenant-a")))
+        when(ingestionService.completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a")))
                 .thenReturn(completedRun);
 
         String payload = """
                 {
+                  "reportingDate": "2026-02-22",
                   "endTime": "2026-02-22T06:10:00Z",
                   "status": "SUCCESS"
                 }
@@ -150,11 +137,11 @@ class RunIngestionControllerTest {
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.durationMs").value(600000));
 
-        verify(ingestionService).completeRun(eq("run-1"), any(), eq("tenant-a"));
+        verify(ingestionService).completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a"));
     }
 
     @Test
-    void completeRun_whenServiceThrows_returnsInternalServerError() throws Exception {
+    void completeRun_missingReportingDate_returnsBadRequest() throws Exception {
         String payload = """
                 {
                   "endTime": "2026-02-22T06:10:00Z",
@@ -162,7 +149,27 @@ class RunIngestionControllerTest {
                 }
                 """;
 
-        when(ingestionService.completeRun(eq("run-1"), any(), eq("tenant-a")))
+        mockMvc.perform(post("/api/v1/runs/run-1/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header(TENANT_HEADER, "tenant-a")
+                        .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Validation Failed"));
+
+        verifyNoInteractions(ingestionService);
+    }
+
+    @Test
+    void completeRun_whenServiceThrows_returnsInternalServerError() throws Exception {
+        String payload = """
+                {
+                  "reportingDate": "2026-02-22",
+                  "endTime": "2026-02-22T06:10:00Z",
+                  "status": "SUCCESS"
+                }
+                """;
+
+        when(ingestionService.completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a")))
                 .thenThrow(new RuntimeException("boom"));
 
         mockMvc.perform(post("/api/v1/runs/run-1/complete")
@@ -172,6 +179,28 @@ class RunIngestionControllerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.message").value("An unexpected error occurred"));
 
-        verify(ingestionService).completeRun(eq("run-1"), any(), eq("tenant-a"));
+        verify(ingestionService).completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a"));
+    }
+
+    @Test
+    void startRun_missingTenantIdHeader_returnsBadRequest() throws Exception {
+        String payload = """
+                {
+                  "runId": "run-1",
+                  "calculatorId": "calc-1",
+                  "calculatorName": "Calculator One",
+                  "frequency": "DAILY",
+                  "reportingDate": "2026-02-22",
+                  "startTime": "2026-02-22T06:00:00Z",
+                  "slaTimeCet": "06:15:00"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/runs/start")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(ingestionService);
     }
 }
