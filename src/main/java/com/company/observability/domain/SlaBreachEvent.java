@@ -6,6 +6,7 @@ import com.company.observability.domain.enums.Severity;
 import lombok.*;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -20,6 +21,7 @@ public class SlaBreachEvent {
     private String calculatorId;
     private String calculatorName;
     private String tenantId;
+    private LocalDate reportingDate;
     private BreachType breachType;
     private Long expectedValue;
     private Long actualValue;

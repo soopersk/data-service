@@ -59,6 +59,11 @@ public class CalculatorRun implements Serializable {
     private Boolean slaBreached;
     private String slaBreachReason;
 
+    // Promoted from run_parameters JSONB
+    private String runNumber;
+    private String runType;
+    private String region;
+
     // Metadata
     private Map<String, Object> runParameters;
     private Map<String, Object> additionalAttributes;
