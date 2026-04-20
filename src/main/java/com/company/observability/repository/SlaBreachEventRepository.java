@@ -34,6 +34,7 @@ public class SlaBreachEventRepository {
 
     private static final String SELECT_COLUMNS = """
             breach_id, run_id, calculator_id, calculator_name, tenant_id,
+            reporting_date,
             breach_type, expected_value, actual_value, severity,
             alerted, alerted_at, alert_status, retry_count, last_error, created_at""";
 
@@ -59,10 +60,12 @@ public class SlaBreachEventRepository {
         String sql = """
             INSERT INTO sla_breach_events (
                 run_id, calculator_id, calculator_name, tenant_id,
+                reporting_date,
                 breach_type, expected_value, actual_value, severity,
                 alerted, alerted_at, alert_status, retry_count, last_error, created_at
             ) VALUES (
                 :runId, :calculatorId, :calculatorName, :tenantId,
+                :reportingDate,
                 :breachType, :expectedValue, :actualValue, :severity,
                 :alerted, :alertedAt, :alertStatus, :retryCount, :lastError, :createdAt
             )
@@ -73,6 +76,7 @@ public class SlaBreachEventRepository {
                 .addValue("calculatorId", breach.getCalculatorId())
                 .addValue("calculatorName", breach.getCalculatorName())
                 .addValue("tenantId", breach.getTenantId())
+                .addValue("reportingDate", breach.getReportingDate())
                 .addValue("breachType", breach.getBreachType().name())
                 .addValue("expectedValue", breach.getExpectedValue())
                 .addValue("actualValue", breach.getActualValue())
@@ -343,6 +347,7 @@ public class SlaBreachEventRepository {
                     .calculatorId(rs.getString("calculator_id"))
                     .calculatorName(rs.getString("calculator_name"))
                     .tenantId(rs.getString("tenant_id"))
+                    .reportingDate(rs.getObject("reporting_date", LocalDate.class))
                     .breachType(BreachType.fromString(rs.getString("breach_type")))
                     .expectedValue(rs.getObject("expected_value", Long.class))
                     .actualValue(rs.getObject("actual_value", Long.class))
