@@ -45,7 +45,8 @@ class AlertHandlerServiceTest {
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        service = new AlertHandlerService(breachRepository, meterRegistry, alertSender);
+        service = new AlertHandlerService(breachRepository, meterRegistry, alertSender,
+                new com.company.observability.logging.LifecycleLogger());
     }
 
     @Test

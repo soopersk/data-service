@@ -3,6 +3,7 @@ package com.company.observability.controller;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.exception.GlobalExceptionHandler;
+import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.service.RunIngestionService;
 import com.company.observability.config.TestMetricsConfig;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,9 @@ class RunIngestionControllerTest {
 
     @MockitoBean
     private RunIngestionService ingestionService;
+
+    @MockitoBean
+    private LifecycleLogger lifecycleLogger;
 
     @Test
     void startRun_returnsCreatedWithLocationAndResponseBody() throws Exception {
@@ -117,7 +121,7 @@ class RunIngestionControllerTest {
                 .slaBreached(false)
                 .build();
 
-        when(ingestionService.completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a")))
+        when(ingestionService.completeRun(eq("run-1"), any(), eq("tenant-a")))
                 .thenReturn(completedRun);
 
         String payload = """
@@ -137,7 +141,7 @@ class RunIngestionControllerTest {
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.durationMs").value(600000));
 
-        verify(ingestionService).completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a"));
+        verify(ingestionService).completeRun(eq("run-1"), any(), eq("tenant-a"));
     }
 
     @Test
@@ -169,7 +173,7 @@ class RunIngestionControllerTest {
                 }
                 """;
 
-        when(ingestionService.completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a")))
+        when(ingestionService.completeRun(eq("run-1"), any(), eq("tenant-a")))
                 .thenThrow(new RuntimeException("boom"));
 
         mockMvc.perform(post("/api/v1/runs/run-1/complete")
@@ -179,7 +183,7 @@ class RunIngestionControllerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.message").value("An unexpected error occurred"));
 
-        verify(ingestionService).completeRun(eq("run-1"), any(LocalDate.class), any(), eq("tenant-a"));
+        verify(ingestionService).completeRun(eq("run-1"), any(), eq("tenant-a"));
     }
 
     @Test

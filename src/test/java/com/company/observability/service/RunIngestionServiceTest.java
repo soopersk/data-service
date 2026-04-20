@@ -68,7 +68,8 @@ class RunIngestionServiceTest {
                 slaEvaluationService,
                 eventPublisher,
                 new SimpleMeterRegistry(),
-                slaMonitoringCache
+                slaMonitoringCache,
+                new com.company.observability.logging.LifecycleLogger()
         );
     }
 
@@ -79,12 +80,13 @@ class RunIngestionServiceTest {
         when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
+                .reportingDate(LocalDate.now())
                 .endTime(start.minusSeconds(1))
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
         assertThrows(DomainValidationException.class,
-                () -> service.completeRun("run-1", LocalDate.now(), request, "tenant-1"));
+                () -> service.completeRun("run-1", request, "tenant-1"));
 
         verify(runRepository, never()).upsert(any());
         verify(slaMonitoringCache, never()).deregisterFromSlaMonitoring(anyString(), anyString(), any(LocalDate.class));
@@ -162,11 +164,12 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
+                .reportingDate(LocalDate.now())
                 .endTime(start.plusSeconds(600))
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
-        service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
+        service.completeRun("run-1", request, "tenant-1");
 
         verify(eventPublisher).publishEvent(any(RunCompletedEvent.class));
         verify(eventPublisher, never()).publishEvent(any(SlaBreachedEvent.class));
@@ -185,11 +188,12 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
+                .reportingDate(LocalDate.now())
                 .endTime(start.plusSeconds(1800))
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
-        service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
+        service.completeRun("run-1", request, "tenant-1");
 
         verify(runRepository).upsert(argThat(saved ->
                 Boolean.TRUE.equals(saved.getSlaBreached())
@@ -267,11 +271,12 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any())).thenAnswer(inv -> inv.getArgument(0));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
+                .reportingDate(LocalDate.now())
                 .endTime(start)   // exactly equal to startTime
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
-        CalculatorRun result = service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
+        CalculatorRun result = service.completeRun("run-1", request, "tenant-1");
 
         assertThat(result.getDurationMs()).isZero();
         verify(eventPublisher).publishEvent(any(RunCompletedEvent.class));
@@ -284,12 +289,13 @@ class RunIngestionServiceTest {
         when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
+                .reportingDate(LocalDate.now())
                 .endTime(start.plusSeconds(600))
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
         assertThrows(DomainAccessDeniedException.class,
-                () -> service.completeRun("run-1", LocalDate.now(), request, "different-tenant"));
+                () -> service.completeRun("run-1", request, "different-tenant"));
 
         verify(runRepository, never()).upsert(any());
         verify(eventPublisher, never()).publishEvent(any());
@@ -306,12 +312,13 @@ class RunIngestionServiceTest {
                 .when(dailyAggregateRepository).upsertDaily(any(), any(), any(), any(), anyBoolean(), anyLong(), anyInt(), anyInt());
 
         CompleteRunRequest request = CompleteRunRequest.builder()
+                .reportingDate(LocalDate.now())
                 .endTime(start.plusSeconds(300))
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
         // Must NOT throw — exception from dailyAggregate is swallowed
-        CalculatorRun result = service.completeRun("run-1", LocalDate.now(), request, "tenant-1");
+        CalculatorRun result = service.completeRun("run-1", request, "tenant-1");
 
         assertThat(result.getStatus()).isEqualTo(RunStatus.SUCCESS);
         verify(eventPublisher).publishEvent(any(RunCompletedEvent.class));
@@ -323,12 +330,13 @@ class RunIngestionServiceTest {
         when(runRepository.findById(eq("run-1"), eq(wrongDate))).thenReturn(Optional.empty());
 
         CompleteRunRequest request = CompleteRunRequest.builder()
+                .reportingDate(wrongDate)
                 .endTime(Instant.parse("2026-04-10T06:00:00Z"))
                 .status(CompletionStatus.SUCCESS)
                 .build();
 
         assertThrows(com.company.observability.exception.DomainNotFoundException.class,
-                () -> service.completeRun("run-1", wrongDate, request, "tenant-1"));
+                () -> service.completeRun("run-1", request, "tenant-1"));
 
         verify(runRepository, never()).upsert(any());
         verify(eventPublisher, never()).publishEvent(any());

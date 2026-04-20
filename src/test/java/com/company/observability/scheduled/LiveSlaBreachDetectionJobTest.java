@@ -41,7 +41,8 @@ class LiveSlaBreachDetectionJobTest {
     @BeforeEach
     void setUp() {
         job = new LiveSlaBreachDetectionJob(
-                slaMonitoringCache, runRepository, eventPublisher, new SimpleMeterRegistry());
+                slaMonitoringCache, runRepository, eventPublisher, new SimpleMeterRegistry(),
+                new com.company.observability.logging.LifecycleLogger());
         job.registerGauges();
         // lenient: only called by breach-detection tests that reach recordMetrics, not early-warning tests
         lenient().when(slaMonitoringCache.getMonitoredRunCount()).thenReturn(0L);

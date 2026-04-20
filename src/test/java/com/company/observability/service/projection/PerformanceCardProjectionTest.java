@@ -1,8 +1,9 @@
-package com.company.observability.service;
+package com.company.observability.service.projection;
 
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.PerformanceCardResponse;
 import com.company.observability.dto.response.RunPerformanceData;
+import com.company.observability.service.AnalyticsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,16 +19,16 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class ProjectionServiceTest {
+class PerformanceCardProjectionTest {
 
     @Mock
     private AnalyticsService analyticsService;
 
-    private ProjectionService projectionService;
+    private PerformanceCardProjection projection;
 
     @BeforeEach
     void setUp() {
-        projectionService = new ProjectionService(analyticsService);
+        projection = new PerformanceCardProjection(analyticsService);
     }
 
     @Test
@@ -40,7 +41,7 @@ class ProjectionServiceTest {
         when(analyticsService.getRunPerformanceData("calc-1", "t1", 30, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
-        PerformanceCardResponse result = projectionService
+        PerformanceCardResponse result = projection
                 .getPerformanceCard("calc-1", "t1", 30, CalculatorFrequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
@@ -79,31 +80,27 @@ class ProjectionServiceTest {
         when(analyticsService.getRunPerformanceData("calc-1", "t1", 30, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
-        PerformanceCardResponse result = projectionService
+        PerformanceCardResponse result = projection
                 .getPerformanceCard("calc-1", "t1", 30, CalculatorFrequency.DAILY);
 
-        // Verify formatted fields
-        assertEquals("3m 0s", result.meanDurationFormatted());
+        assertEquals("3mins 0s", result.meanDurationFormatted());
         assertEquals("Calculator One", result.calculatorName());
 
-        // Schedule info from estStart
         assertNotNull(result.schedule());
         assertEquals("DAILY", result.schedule().frequency());
         assertNotNull(result.schedule().estimatedStartTimeCet());
 
-        // SLA summary percentages
         assertEquals(2, result.slaSummary().totalRuns());
         assertEquals(50.0, result.slaSummary().slaMetPct());
         assertEquals(50.0, result.slaSummary().latePct());
         assertEquals(0.0, result.slaSummary().veryLatePct());
 
-        // Run bars (includes RUNNING row)
         assertEquals(3, result.runs().size());
         PerformanceCardResponse.RunBar bar1 = result.runs().get(0);
         assertEquals("run-1", bar1.runId());
         assertEquals("SLA_MET", bar1.slaStatus());
         assertEquals(180000L, bar1.durationMs());
-        assertEquals("3m 0s", bar1.durationFormatted());
+        assertEquals("3mins 0s", bar1.durationFormatted());
         assertNotNull(bar1.dateFormatted());
         assertNotNull(bar1.startHourCet());
         assertNotNull(bar1.endHourCet());
@@ -111,7 +108,6 @@ class ProjectionServiceTest {
         assertTrue(bar1.endTimeCet().endsWith(" CET"));
         assertEquals("RUNNING", result.runs().get(2).slaStatus());
 
-        // Reference lines
         assertNotNull(result.referenceLines());
         assertNotNull(result.referenceLines().slaStartHourCet());
         assertNotNull(result.referenceLines().slaEndHourCet());
@@ -129,7 +125,7 @@ class ProjectionServiceTest {
         when(analyticsService.getRunPerformanceData("calc-1", "t1", 7, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
-        PerformanceCardResponse result = projectionService
+        PerformanceCardResponse result = projection
                 .getPerformanceCard("calc-1", "t1", 7, CalculatorFrequency.DAILY);
 
         assertEquals(1, result.runs().size());
@@ -144,7 +140,6 @@ class ProjectionServiceTest {
 
     @Test
     void getPerformanceCard_durationFormattingCoversAllRanges() {
-        // Test hours range: 7200000ms = 2h 0m
         RunPerformanceData hourData = new RunPerformanceData(
                 "calc-1", "Calc", "DAILY", 30, 7200000L,
                 1, 0, 1, 0, 0,
@@ -159,11 +154,11 @@ class ProjectionServiceTest {
         when(analyticsService.getRunPerformanceData("calc-1", "t1", 30, CalculatorFrequency.DAILY))
                 .thenReturn(hourData);
 
-        PerformanceCardResponse result = projectionService
+        PerformanceCardResponse result = projection
                 .getPerformanceCard("calc-1", "t1", 30, CalculatorFrequency.DAILY);
 
-        assertEquals("2h 0m", result.meanDurationFormatted());
-        assertEquals("2h 0m", result.runs().get(0).durationFormatted());
+        assertEquals("2hrs 0mins", result.meanDurationFormatted());
+        assertEquals("2hrs 0mins", result.runs().get(0).durationFormatted());
     }
 
     @Test
@@ -187,7 +182,7 @@ class ProjectionServiceTest {
         when(analyticsService.getRunPerformanceData("calc-1", "t1", 3, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
-        PerformanceCardResponse result = projectionService
+        PerformanceCardResponse result = projection
                 .getPerformanceCard("calc-1", "t1", 3, CalculatorFrequency.DAILY);
 
         assertEquals(0, result.slaSummary().totalRuns());

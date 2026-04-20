@@ -161,7 +161,7 @@ class RunQueryServiceTest {
                 List.of("calc-1"), "tenant-1", CalculatorFrequency.DAILY, 5, true);
 
         verify(runRepository).findBatchRecentRunsDbOnly(
-                List.of("calc-1"), eq("tenant-1"), eq(CalculatorFrequency.DAILY), eq(6));
+                eq(List.of("calc-1")), eq("tenant-1"), eq(CalculatorFrequency.DAILY), eq(6));
         verify(redisCache).cacheBatchStatusResponses(any(), eq("tenant-1"), eq(CalculatorFrequency.DAILY), eq(5));
     }
 

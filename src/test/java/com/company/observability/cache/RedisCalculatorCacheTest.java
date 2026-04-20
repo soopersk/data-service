@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,8 +61,8 @@ class RedisCalculatorCacheTest {
     @BeforeEach
     void setUp() {
         cache = new RedisCalculatorCache(redisTemplate, new SimpleMeterRegistry());
-        when(redisTemplate.opsForZSet()).thenReturn(zSetOps);
-        when(redisTemplate.opsForSet()).thenReturn(setOps);
+        lenient().when(redisTemplate.opsForZSet()).thenReturn(zSetOps);
+        lenient().when(redisTemplate.opsForSet()).thenReturn(setOps);
     }
 
     // ---------------------------------------------------------------

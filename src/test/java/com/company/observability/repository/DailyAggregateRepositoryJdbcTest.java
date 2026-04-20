@@ -62,9 +62,8 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     }
 
     @Test
-    void upsertDaily_secondUpsert_computesRunningAverage() {
-        // TD-3: this running-average formula is NOT concurrency-safe under parallel writes.
-        // This test validates the correct sequential (single-writer) behavior only.
+    void upsertDaily_secondUpsert_accumulatesSumsAndComputesCorrectAverage() {
+        // TD-3 fixed: sums are accumulated atomically; average is computed at read time.
         LocalDate date = LocalDate.of(2026, 4, 10);
 
         repository.upsertDaily("calc-1", "tenant-1", date, "SUCCESS", false, 100L, 300, 360);
@@ -76,7 +75,7 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         DailyAggregate agg = results.get(0);
         assertThat(agg.totalRuns()).isEqualTo(2);
         assertThat(agg.successRuns()).isEqualTo(2);
-        // avg = (100 * 1 + 200) / (1 + 1) = 150
+        // sumDurationMs = 100 + 200 = 300; avgDurationMs() = 300 / 2 = 150
         assertThat(agg.avgDurationMs()).isEqualTo(150L);
     }
 

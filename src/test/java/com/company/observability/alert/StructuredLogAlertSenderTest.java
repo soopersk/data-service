@@ -1,11 +1,13 @@
 package com.company.observability.alert;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.BreachType;
 import com.company.observability.domain.enums.Severity;
+import com.company.observability.logging.LifecycleLogger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,33 +22,37 @@ class StructuredLogAlertSenderTest {
 
     private StructuredLogAlertSender sender;
     private ListAppender<ILoggingEvent> listAppender;
-    private Logger senderLogger;
+    private Logger lifecycleLogger;
 
     @BeforeEach
     void setUp() {
-        sender = new StructuredLogAlertSender();
-        senderLogger = (Logger) LoggerFactory.getLogger(StructuredLogAlertSender.class);
+        sender = new StructuredLogAlertSender(new LifecycleLogger());
+        lifecycleLogger = (Logger) LoggerFactory.getLogger("lifecycle");
         listAppender = new ListAppender<>();
         listAppender.start();
-        senderLogger.addAppender(listAppender);
+        lifecycleLogger.addAppender(listAppender);
+        lifecycleLogger.setLevel(Level.ALL);
         MDC.clear();
     }
 
     @AfterEach
     void tearDown() {
-        senderLogger.detachAppender(listAppender);
+        lifecycleLogger.detachAppender(listAppender);
         MDC.clear();
     }
 
     @Test
-    void send_emitsErrorLogWithAlertMessage() {
+    void send_emitsErrorLogWithStructuredAlertEvent() {
         SlaBreachEvent breach = validBreach();
 
         sender.send(breach);
 
         assertEquals(1, listAppender.list.size());
-        String message = listAppender.list.get(0).getFormattedMessage();
-        assertTrue(message.contains("SLA_BREACH_ALERT"));
+        ILoggingEvent event = listAppender.list.get(0);
+        String message = event.getFormattedMessage();
+        assertEquals(Level.ERROR, event.getLevel());
+        assertTrue(message.contains("event=sla.breach.alert"), "message should contain event=sla.breach.alert, got: " + message);
+        assertTrue(message.contains("outcome=emitted"), "message should contain outcome=emitted, got: " + message);
         assertTrue(message.contains("CALC-1"));
         assertTrue(message.contains("HIGH"));
     }

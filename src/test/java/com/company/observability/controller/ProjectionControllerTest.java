@@ -3,7 +3,9 @@ package com.company.observability.controller;
 import com.company.observability.config.TestMetricsConfig;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.PerformanceCardResponse;
-import com.company.observability.service.ProjectionService;
+import com.company.observability.service.projection.DashboardProjection;
+import com.company.observability.service.projection.PerformanceCardProjection;
+import com.company.observability.service.projection.RegionalBatchProjection;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -33,7 +35,13 @@ class ProjectionControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private ProjectionService projectionService;
+    private PerformanceCardProjection performanceCardProjection;
+
+    @MockitoBean
+    private RegionalBatchProjection regionalBatchProjection;
+
+    @MockitoBean
+    private DashboardProjection dashboardProjection;
 
     @Test
     void getPerformanceCard_returnsCacheableResponse() throws Exception {
@@ -49,7 +57,7 @@ class ProjectionControllerTest {
                 new PerformanceCardResponse.ReferenceLines(
                         BigDecimal.valueOf(6.00), BigDecimal.valueOf(6.25)));
 
-        when(projectionService.getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
+        when(performanceCardProjection.getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/projections/calculators/calc-1/performance-card")
@@ -62,7 +70,7 @@ class ProjectionControllerTest {
                 .andExpect(jsonPath("$.meanDurationFormatted").value("3m 0s"))
                 .andExpect(jsonPath("$.schedule.frequency").value("DAILY"));
 
-        verify(projectionService).getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
+        verify(performanceCardProjection).getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
     }
 
     @Test
@@ -72,7 +80,7 @@ class ProjectionControllerTest {
                 new PerformanceCardResponse.SlaSummaryPct(0, 0, 0.0, 0, 0.0, 0, 0.0),
                 List.of(), null);
 
-        when(projectionService.getPerformanceCard("calc-2", "tenant-b", 30, CalculatorFrequency.DAILY))
+        when(performanceCardProjection.getPerformanceCard("calc-2", "tenant-b", 30, CalculatorFrequency.DAILY))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/projections/calculators/calc-2/performance-card")
@@ -81,7 +89,7 @@ class ProjectionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.calculatorId").value("calc-2"));
 
-        verify(projectionService).getPerformanceCard("calc-2", "tenant-b", 30, CalculatorFrequency.DAILY);
+        verify(performanceCardProjection).getPerformanceCard("calc-2", "tenant-b", 30, CalculatorFrequency.DAILY);
     }
 
     @Test

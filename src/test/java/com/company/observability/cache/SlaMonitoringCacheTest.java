@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -60,8 +61,8 @@ class SlaMonitoringCacheTest {
     void setUp() {
         cache = new SlaMonitoringCache(redisTemplate, new ObjectMapper(), new SimpleMeterRegistry());
         ReflectionTestUtils.setField(cache, "liveTrackingEnabled", true);
-        when(redisTemplate.opsForZSet()).thenReturn(zSetOps);
-        when(redisTemplate.opsForHash()).thenReturn(hashOps);
+        lenient().when(redisTemplate.opsForZSet()).thenReturn(zSetOps);
+        lenient().when(redisTemplate.opsForHash()).thenReturn(hashOps);
     }
 
     // ---------------------------------------------------------------

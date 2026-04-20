@@ -136,12 +136,12 @@ public final class TestFixtures {
                 DEFAULT_CALC_ID,
                 DEFAULT_TENANT_ID,
                 DEFAULT_DATE,
-                5,         // totalRuns
-                4,         // successRuns
-                1,         // slaBreaches
-                120_000L,  // avgDurationMs
-                300,       // avgStartMinCet
-                310,       // avgEndMinCet
+                5,           // totalRuns
+                4,           // successRuns
+                1,           // slaBreaches
+                600_000L,    // sumDurationMs  (avg = 120_000ms per run)
+                1_500L,      // sumStartMinCet (avg = 300 min CET per run)
+                1_550L,      // sumEndMinCet   (avg = 310 min CET per run)
                 Instant.now()
         );
     }
