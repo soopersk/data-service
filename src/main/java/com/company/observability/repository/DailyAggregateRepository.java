@@ -38,25 +38,16 @@ public class DailyAggregateRepository {
             INSERT INTO calculator_sli_daily (
                 calculator_id, tenant_id, day_cet,
                 total_runs, success_runs, sla_breaches,
-                avg_duration_ms, avg_start_min_cet, avg_end_min_cet, computed_at
+                sum_duration_ms, sum_start_min_cet, sum_end_min_cet, computed_at
             ) VALUES (:calculatorId, :tenantId, :reportingDate, 1, :successIncr, :breachIncr, :durationMs, :startMinCet, :endMinCet, NOW())
             ON CONFLICT (calculator_id, tenant_id, day_cet)
             DO UPDATE SET
                 total_runs = calculator_sli_daily.total_runs + 1,
                 success_runs = calculator_sli_daily.success_runs + EXCLUDED.success_runs,
                 sla_breaches = calculator_sli_daily.sla_breaches + EXCLUDED.sla_breaches,
-                avg_duration_ms = (
-                    (calculator_sli_daily.avg_duration_ms * calculator_sli_daily.total_runs + EXCLUDED.avg_duration_ms)
-                    / (calculator_sli_daily.total_runs + 1)
-                ),
-                avg_start_min_cet = (
-                    (calculator_sli_daily.avg_start_min_cet * calculator_sli_daily.total_runs + EXCLUDED.avg_start_min_cet)
-                    / (calculator_sli_daily.total_runs + 1)
-                ),
-                avg_end_min_cet = (
-                    (calculator_sli_daily.avg_end_min_cet * calculator_sli_daily.total_runs + EXCLUDED.avg_end_min_cet)
-                    / (calculator_sli_daily.total_runs + 1)
-                ),
+                sum_duration_ms = calculator_sli_daily.sum_duration_ms + EXCLUDED.sum_duration_ms,
+                sum_start_min_cet = calculator_sli_daily.sum_start_min_cet + EXCLUDED.sum_start_min_cet,
+                sum_end_min_cet = calculator_sli_daily.sum_end_min_cet + EXCLUDED.sum_end_min_cet,
                 computed_at = NOW()
             """;
 
@@ -92,7 +83,7 @@ public class DailyAggregateRepository {
 
         String sql = """
             SELECT calculator_id, tenant_id, day_cet, total_runs, success_runs,
-                   sla_breaches, avg_duration_ms, avg_start_min_cet, avg_end_min_cet, computed_at
+                   sla_breaches, sum_duration_ms, sum_start_min_cet, sum_end_min_cet, computed_at
             FROM calculator_sli_daily
             WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
             AND day_cet >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
@@ -128,7 +119,7 @@ public class DailyAggregateRepository {
 
         String sql = """
             SELECT calculator_id, tenant_id, day_cet, total_runs, success_runs,
-                   sla_breaches, avg_duration_ms, avg_start_min_cet, avg_end_min_cet, computed_at
+                   sla_breaches, sum_duration_ms, sum_start_min_cet, sum_end_min_cet, computed_at
             FROM calculator_sli_daily
             WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
             AND day_cet IN (:reportingDates)
@@ -155,13 +146,13 @@ public class DailyAggregateRepository {
                 return new DailyAggregate(
                         rs.getString("calculator_id"),
                         rs.getString("tenant_id"),
-                        rs.getDate("day_cet").toLocalDate(),
+                        rs.getObject("day_cet", LocalDate.class),
                         rs.getInt("total_runs"),
                         rs.getInt("success_runs"),
                         rs.getInt("sla_breaches"),
-                        rs.getLong("avg_duration_ms"),
-                        rs.getInt("avg_start_min_cet"),
-                        rs.getInt("avg_end_min_cet"),
+                        rs.getLong("sum_duration_ms"),
+                        rs.getLong("sum_start_min_cet"),
+                        rs.getLong("sum_end_min_cet"),
                         fromTimestamp(rs.getTimestamp("computed_at"))
                 );
             } catch (SQLException e) {
