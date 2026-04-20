@@ -49,6 +49,7 @@ public class CalculatorRunRepository {
                status, sla_time, expected_duration_ms,
                estimated_start_time, estimated_end_time,
                sla_breached, sla_breach_reason,
+               run_number, run_type, region,
                run_parameters, additional_attributes,
                created_at, updated_at
         FROM calculator_runs
@@ -60,6 +61,7 @@ public class CalculatorRunRepository {
                status, sla_time, expected_duration_ms,
                estimated_start_time, estimated_end_time,
                sla_breached, sla_breach_reason,
+               run_number, run_type, region,
                created_at, updated_at
         FROM calculator_runs
         """;
@@ -217,6 +219,7 @@ public class CalculatorRunRepository {
                        status, sla_time, expected_duration_ms,
                        estimated_start_time, estimated_end_time,
                        sla_breached, sla_breach_reason,
+                       run_number, run_type, region,
                        created_at, updated_at,
                        ROW_NUMBER() OVER (
                            PARTITION BY calculator_id
@@ -286,6 +289,7 @@ public class CalculatorRunRepository {
                 status, sla_time, expected_duration_ms,
                 estimated_start_time, estimated_end_time,
                 sla_breached, sla_breach_reason,
+                run_number, run_type, region,
                 run_parameters, additional_attributes,
                 created_at, updated_at
             ) VALUES (
@@ -294,6 +298,7 @@ public class CalculatorRunRepository {
                 :status, :slaTime, :expectedDurationMs,
                 :estimatedStartTime, :estimatedEndTime,
                 :slaBreached, :slaBreachReason,
+                :runNumber, :runType, :region,
                 :runParameters, :additionalAttributes,
                 :createdAt, :updatedAt
             )
@@ -304,6 +309,9 @@ public class CalculatorRunRepository {
                 status = EXCLUDED.status,
                 sla_breached = EXCLUDED.sla_breached,
                 sla_breach_reason = EXCLUDED.sla_breach_reason,
+                run_number = EXCLUDED.run_number,
+                run_type = EXCLUDED.run_type,
+                region = EXCLUDED.region,
                 run_parameters = EXCLUDED.run_parameters,
                 additional_attributes = EXCLUDED.additional_attributes,
                 updated_at = EXCLUDED.updated_at
@@ -329,6 +337,9 @@ public class CalculatorRunRepository {
                 .addValue("estimatedEndTime", toTimestamp(run.getEstimatedEndTime()))
                 .addValue("slaBreached", run.getSlaBreached())
                 .addValue("slaBreachReason", run.getSlaBreachReason())
+                .addValue("runNumber", run.getRunNumber())
+                .addValue("runType", run.getRunType())
+                .addValue("region", run.getRegion())
                 .addValue("runParameters", jsonbConverter.toJsonb(run.getRunParameters()))
                 .addValue("additionalAttributes", jsonbConverter.toJsonb(run.getAdditionalAttributes()))
                 .addValue("createdAt", Timestamp.from(run.getCreatedAt()))
@@ -365,16 +376,18 @@ public class CalculatorRunRepository {
      * Find by run_id with partition key hint
      */
     public Optional<CalculatorRun> findById(String runId, LocalDate reportingDate) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        Objects.requireNonNull(reportingDate, "reportingDate must not be null");
         String sql = SELECT_BASE + " WHERE run_id = :runId AND reporting_date = :reportingDate";
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("runId", runId)
                 .addValue("reportingDate", reportingDate);
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<CalculatorRun> results = jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(true));
+        List<CalculatorRun> results = jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(false));
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_by_id").register(meterRegistry));
 
-        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+        return Optional.ofNullable(DataAccessUtils.singleResult(results));
     }
 
     /**
@@ -490,6 +503,258 @@ public class CalculatorRunRepository {
     }
 
     /**
+     * Find latest regional batch run per region for a given reporting date.
+     * Backward-compatible overload — delegates with no run_number filter.
+     */
+    public List<CalculatorRun> findRegionalBatchRuns(String tenantId, LocalDate reportingDate) {
+        return findRegionalBatchRuns(tenantId, reportingDate, null);
+    }
+
+    /**
+     * Find latest regional batch run per region for a given reporting date and run number.
+     * Filters by run_parameters->>'run_type' = 'BATCH' and extracts region from JSONB.
+     * Uses ROW_NUMBER to pick the latest run per region by start_time DESC.
+     * Partition-pruned by exact reportingDate (single partition scan).
+     *
+     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (backward compat)
+     */
+    public List<CalculatorRun> findRegionalBatchRuns(String tenantId, LocalDate reportingDate, String runNumber) {
+        String runNumberClause = runNumber != null
+                ? "AND run_number = :runNumber\n"
+                : "";
+
+        String sql = """
+            SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
+                   start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+                   status, sla_time, expected_duration_ms,
+                   estimated_start_time, estimated_end_time,
+                   sla_breached, sla_breach_reason,
+                   run_number, run_type, region,
+                   run_parameters, additional_attributes,
+                   created_at, updated_at
+            FROM (
+                SELECT *,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY region
+                           ORDER BY start_time DESC
+                       ) as rn
+                FROM calculator_runs
+                WHERE tenant_id = :tenantId
+                  AND reporting_date = :reportingDate
+                  AND run_type = 'BATCH'
+                  AND region IS NOT NULL
+                  """ + runNumberClause + """
+            ) ranked
+            WHERE rn = 1
+            ORDER BY start_time ASC
+            """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId)
+                .addValue("reportingDate", reportingDate);
+        if (runNumber != null) {
+            params.addValue("runNumber", runNumber);
+        }
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<CalculatorRun> runs = jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(true));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_regional_batch").register(meterRegistry));
+
+        return runs;
+    }
+
+    /**
+     * Find historical regional batch start/end times for median estimation.
+     * Backward-compatible overload — delegates with no run_number filter.
+     */
+    public List<RegionalBatchTiming> findRegionalBatchHistory(
+            String tenantId, LocalDate excludeDate, int lookbackDays) {
+        return findRegionalBatchHistory(tenantId, excludeDate, lookbackDays, null);
+    }
+
+    /**
+     * Find historical regional batch start/end times for median estimation.
+     * Returns one row per region per reporting date (latest run per region per day),
+     * for the last {@code lookbackDays} days excluding {@code excludeDate}.
+     * Only includes completed (terminal) runs.
+     *
+     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (backward compat)
+     */
+    public List<RegionalBatchTiming> findRegionalBatchHistory(
+            String tenantId, LocalDate excludeDate, int lookbackDays, String runNumber) {
+
+        String runNumberClause = runNumber != null
+                ? "AND run_number = :runNumber\n"
+                : "";
+
+        String sql = """
+            SELECT region, reporting_date, start_time, end_time FROM (
+                SELECT region,
+                       reporting_date, start_time, end_time, status,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY region, reporting_date
+                           ORDER BY start_time DESC
+                       ) as rn
+                FROM calculator_runs
+                WHERE tenant_id = :tenantId
+                  AND reporting_date >= :fromDate
+                  AND reporting_date < :excludeDate
+                  AND run_type = 'BATCH'
+                  AND region IS NOT NULL
+                  AND status != 'RUNNING'
+                  """ + runNumberClause + """
+            ) ranked
+            WHERE rn = 1
+            ORDER BY region, reporting_date
+            """;
+
+        LocalDate fromDate = excludeDate.minusDays(lookbackDays);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId)
+                .addValue("fromDate", fromDate)
+                .addValue("excludeDate", excludeDate);
+        if (runNumber != null) {
+            params.addValue("runNumber", runNumber);
+        }
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<RegionalBatchTiming> results = jdbcTemplate.query(sql, params, (rs, rowNum) ->
+                new RegionalBatchTiming(
+                        rs.getString("region"),
+                        rs.getObject("reporting_date", LocalDate.class),
+                        fromTimestamp(rs.getTimestamp("start_time")),
+                        fromTimestamp(rs.getTimestamp("end_time"))
+                ));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_regional_batch_history").register(meterRegistry));
+
+        return results;
+    }
+
+    public record RegionalBatchTiming(String region, LocalDate reportingDate, Instant startTime, Instant endTime) {}
+
+    // ── Dashboard queries ──────────────────────────────────────────────────────
+
+    /**
+     * Fetches the latest run per calculator_id for all non-regional dashboard sections
+     * in a single query. Partition-pruned by exact {@code reportingDate}.
+     *
+     * @param calculatorIds all calculator IDs across Portfolio, Group Portfolio,
+     *                      Risk Governed, and Consolidation sections
+     * @param runNumber     e.g. "1" or "2" from run_parameters->>'run_number'
+     * @return map keyed by calculator_id
+     */
+    public Map<String, CalculatorRun> findDashboardCalculatorRuns(
+            String tenantId, LocalDate reportingDate, String frequency,
+            String runNumber, List<String> calculatorIds) {
+
+        if (calculatorIds == null || calculatorIds.isEmpty()) {
+            return Map.of();
+        }
+
+        String sql = """
+            SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
+                   start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+                   status, sla_time, expected_duration_ms,
+                   estimated_start_time, estimated_end_time,
+                   sla_breached, sla_breach_reason,
+                   run_number, run_type, region,
+                   run_parameters, additional_attributes,
+                   created_at, updated_at
+            FROM (
+                SELECT *,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY calculator_id
+                           ORDER BY start_time DESC NULLS LAST
+                       ) as rn
+                FROM calculator_runs
+                WHERE tenant_id = :tenantId
+                  AND reporting_date = :reportingDate
+                  AND frequency = :frequency
+                  AND calculator_id IN (:calculatorIds)
+                  AND run_number = :runNumber
+            ) ranked
+            WHERE rn = 1
+            """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId)
+                .addValue("reportingDate", reportingDate)
+                .addValue("frequency", frequency)
+                .addValue("runNumber", runNumber)
+                .addValue("calculatorIds", calculatorIds);
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<CalculatorRun> runs = jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(true));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_dashboard_runs").register(meterRegistry));
+
+        Map<String, CalculatorRun> result = new java.util.LinkedHashMap<>();
+        for (CalculatorRun run : runs) {
+            result.put(run.getCalculatorId(), run);
+        }
+        return result;
+    }
+
+    /**
+     * Fetches the last {@code lookbackDays} reporting dates' terminal run status
+     * for each calculator, used to populate the "Last runs" dot strip in the UI.
+     * Returns the latest run per (calculator_id, reporting_date) — excludes RUNNING.
+     *
+     * @param runNumber e.g. "1" or "2" from run_parameters->>'run_number'
+     * @return list ordered by calculator_id, reporting_date DESC
+     */
+    public List<HistoricalRunStatus> findDashboardCalculatorHistory(
+            String tenantId, LocalDate excludeDate, int lookbackDays,
+            String frequency, String runNumber, List<String> calculatorIds) {
+
+        if (calculatorIds == null || calculatorIds.isEmpty()) {
+            return List.of();
+        }
+
+        String sql = """
+            SELECT calculator_id, reporting_date, status, sla_breached FROM (
+                SELECT calculator_id, reporting_date, status, sla_breached,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY calculator_id, reporting_date
+                           ORDER BY start_time DESC NULLS LAST
+                       ) as rn
+                FROM calculator_runs
+                WHERE tenant_id = :tenantId
+                  AND reporting_date < :excludeDate
+                  AND reporting_date >= :fromDate
+                  AND frequency = :frequency
+                  AND calculator_id IN (:calculatorIds)
+                  AND run_number = :runNumber
+                  AND status != 'RUNNING'
+            ) ranked
+            WHERE rn = 1
+            ORDER BY calculator_id, reporting_date DESC
+            """;
+
+        LocalDate fromDate = excludeDate.minusDays(lookbackDays);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId)
+                .addValue("excludeDate", excludeDate)
+                .addValue("fromDate", fromDate)
+                .addValue("frequency", frequency)
+                .addValue("runNumber", runNumber)
+                .addValue("calculatorIds", calculatorIds);
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<HistoricalRunStatus> results = jdbcTemplate.query(sql, params, (rs, rowNum) ->
+                new HistoricalRunStatus(
+                        rs.getString("calculator_id"),
+                        rs.getObject("reporting_date", LocalDate.class),
+                        rs.getString("status"),
+                        rs.getBoolean("sla_breached")
+                ));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_dashboard_history").register(meterRegistry));
+
+        return results;
+    }
+
+    public record HistoricalRunStatus(String calculatorId, LocalDate reportingDate, String status, boolean slaBreached) {}
+
+    /**
      * Get partition statistics for monitoring
      */
     public List<Map<String, Object>> getPartitionStatistics() {
@@ -526,6 +791,9 @@ public class CalculatorRunRepository {
                         .estimatedEndTime(fromTimestamp(rs.getTimestamp("estimated_end_time")))
                         .slaBreached(rs.getBoolean("sla_breached"))
                         .slaBreachReason(rs.getString("sla_breach_reason"))
+                        .runNumber(rs.getString("run_number"))
+                        .runType(rs.getString("run_type"))
+                        .region(rs.getString("region"))
                         .createdAt(fromTimestamp(rs.getTimestamp("created_at")))
                         .updatedAt(fromTimestamp(rs.getTimestamp("updated_at")));
 
