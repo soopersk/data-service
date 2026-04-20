@@ -10,12 +10,17 @@ Controller
   ├── Validates request (@Valid, @Min, @Max, @Pattern)
   ├── Records Micrometer counter
   ├── Sets Cache-Control response header
-  └── Calls Service method (tenantId always passed explicitly)
+  └── Calls Projection or Service method (tenantId always passed explicitly)
 
-Service
+Projection (service/projection/)
+  ├── Cache read/write orchestration (Redis → miss → build → cache)
+  ├── DTO mapping and CET formatting
+  └── Delegates business logic entirely to domain Services
+
+Service (domain)
   ├── Business logic, SLA evaluation, event publication
   ├── Calls Repository (DB) and Cache (Redis) directly
-  └── Does NOT know about HTTP concerns
+  └── Does NOT know about HTTP or presentation concerns
 
 Repository
   ├── NamedParameterJdbcTemplate (no JPA)
@@ -31,21 +36,41 @@ Repository
 | `RunIngestionController` | `/api/v1/runs` | Airflow-facing; records run start and completion |
 | `RunQueryController` | `/api/v1/calculators` | Status queries, single and batch |
 | `AnalyticsController` | `/api/v1/analytics` | Trend analysis, SLA summaries, and run-performance domain data |
+| `ProjectionController` | `/api/v1/analytics/projections` | Formatted BFF projections: performance card, calculator dashboard, regional batch status |
 | `HealthController` | `/api/v1/health` | Unauthenticated health check |
 
-### Services
+### Projection Services (`service/projection/`)
+
+Each projection service owns exactly one response type: cache check → domain service call → DTO mapping → cache write.
+
+| Projection | Domain Dependency | Response Type |
+|-----------|------------------|--------------|
+| `PerformanceCardProjection` | `AnalyticsService` | `PerformanceCardResponse` |
+| `RegionalBatchProjection` ⚠️ deprecated | `RegionalBatchService`, `RegionalBatchCacheService` | `RegionalBatchStatusResponse` |
+| `DashboardProjection` | `DashboardService`, `DashboardCacheService` | `CalculatorDashboardResponse` |
+
+### Domain Services
 
 | Service | Responsibility |
 |---------|---------------|
 | `RunIngestionService` | Idempotency check, SLA deadline calculation, DB upsert, SLA registration, event publication |
 | `RunQueryService` | Cache-first status retrieval, batch status with pipelining |
 | `AnalyticsService` | Aggregate analytics queries and cache orchestration |
-| `ProjectionService` | Builds formatted projection payloads from raw analytics data |
+| `RegionalBatchService` | Regional batch run aggregation, median estimation, dependency resolution |
+| `DashboardService` | Multi-section dashboard assembly, sub-run history aggregation, dependency chain resolution |
 | `SlaEvaluationService` | Synchronous SLA breach evaluation logic |
 | `AlertHandlerService` | Persists breach events, sends alerts (currently log-only) |
 | `CacheWarmingService` | Evicts and re-warms Redis cache after run state changes |
 | `AnalyticsCacheService` | Invalidates analytics cache keys on run completion/breach |
 | `CacheEvictionService` | Legacy eviction-only service (disabled by default) |
+
+### Shared Utilities (`util/`)
+
+| Utility | Purpose |
+|---------|---------|
+| `RunStatusClassifier` | Single source of truth for run status classification: `classify()`, `isSlaBreach()`, `worstStatus()`, and 5 status string constants (`ON_TIME`, `DELAYED`, `FAILED`, `RUNNING`, `NOT_STARTED`). Used by both `DashboardService` and `RegionalBatchService`. |
+| `TimeUtils` | CET time conversion, SLA deadline calculation |
+| `ObservabilityConstants` | Shared string constants |
 
 ### Repositories
 
@@ -164,19 +189,20 @@ sequenceDiagram
 ```
 com.company.observability
 ├── controller/          # REST controllers
-├── service/             # Business logic services
+├── service/             # Domain business logic services
+│   └── projection/      # BFF projection layer (cache + DTO mapping)
 ├── repository/          # JDBC repositories
 ├── cache/               # Redis cache classes
 ├── domain/              # Domain objects and enums
 │   └── enums/           # CalculatorFrequency, RunStatus, etc.
 ├── dto/
 │   ├── request/         # StartRunRequest, CompleteRunRequest
-│   └── response/        # RunResponse, CalculatorStatusResponse, etc.
+│   └── response/        # RunResponse, CalculatorStatusResponse, TimeReference, etc.
 ├── event/               # Spring ApplicationEvents
 ├── scheduled/           # Scheduled jobs
-├── config/              # Spring configuration classes
+├── config/              # Spring configuration classes (incl. DashboardProperties)
 ├── exception/           # Domain exceptions + GlobalExceptionHandler
 ├── security/            # RequestLoggingFilter
-└── util/                # TimeUtils, ObservabilityConstants, etc.
+└── util/                # TimeUtils, RunStatusClassifier, ObservabilityConstants, etc.
 ```
 

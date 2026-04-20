@@ -1,15 +1,21 @@
 package com.company.observability.alert;
 
 import com.company.observability.domain.SlaBreachEvent;
+import com.company.observability.logging.LifecycleEvent;
+import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.util.MdcContextUtil;
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
-@Slf4j
+import static net.logstash.logback.argument.StructuredArguments.kv;
+
 @Component
+@RequiredArgsConstructor
 public class StructuredLogAlertSender implements AlertSender {
+
+    private final LifecycleLogger lifecycleLogger;
 
     @Override
     public void send(SlaBreachEvent breach) throws AlertDeliveryException {
@@ -22,11 +28,11 @@ public class StructuredLogAlertSender implements AlertSender {
 
         Map<String, String> snapshot = MdcContextUtil.setAlertContext(breach);
         try {
-            log.error("SLA_BREACH_ALERT | calculator={} severity={} breach={} tenant={}",
-                    breach.getCalculatorId(),
-                    breach.getSeverity().name(),
-                    breach.getBreachType() != null ? breach.getBreachType().name() : "UNKNOWN",
-                    breach.getTenantId());
+            lifecycleLogger.emit(LifecycleEvent.SLA_BREACH_ALERT,
+                    kv("calculator", breach.getCalculatorId()),
+                    kv("severity", breach.getSeverity().name()),
+                    kv("breach", breach.getBreachType() != null ? breach.getBreachType().name() : "UNKNOWN"),
+                    kv("tenant", breach.getTenantId()));
         } catch (Exception e) {
             throw new AlertDeliveryException("Failed to emit structured alert log", e);
         } finally {

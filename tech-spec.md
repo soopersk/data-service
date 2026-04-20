@@ -87,14 +87,24 @@ Event-driven, layered REST service.
             │  │  RunIngestionController       │   │
             │  │  RunQueryController           │   │
             │  │  AnalyticsController          │   │
+            │  │  ProjectionController         │   │
             │  │  HealthController             │   │
             │  └───────────────┬──────────────┘   │
             │                  │                   │
             │  ┌───────────────▼──────────────┐   │
-            │  │           Services           │   │
+            │  │    Projection Layer          │   │
+            │  │  PerformanceCardProjection    │   │
+            │  │  RegionalBatchProjection ⚠️   │   │
+            │  │  DashboardProjection          │   │
+            │  └───────────────┬──────────────┘   │
+            │                  │                   │
+            │  ┌───────────────▼──────────────┐   │
+            │  │       Domain Services        │   │
             │  │  RunIngestionService          │   │
             │  │  RunQueryService              │   │
             │  │  AnalyticsService             │   │
+            │  │  RegionalBatchService         │   │
+            │  │  DashboardService             │   │
             │  │  SlaEvaluationService         │   │
             │  │  AlertHandlerService          │   │
             │  │  CacheWarmingService          │   │
@@ -421,6 +431,11 @@ The expression `reporting_date = (DATE_TRUNC('month', reporting_date) + INTERVAL
 | `obs:analytics:{prefix}:{calcId}:{tenantId}:{days}` | String (JSON) | 5m | Analytics responses without frequency |
 | `obs:analytics:{prefix}:{calcId}:{tenantId}:{freq}:{days}` | String (JSON) | 5m | Analytics responses with frequency |
 | `obs:analytics:index:{calcId}:{tenantId}` | Set | 1h | Tracks all analytics keys for bulk invalidation |
+| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` | String (JSON) | 24h | 7-day history for median estimation — immutable once written |
+| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 24h | Run-number-scoped history variant |
+| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` | String (JSON) | 30s / 60s / 5m / 4h | Full `RegionalBatchStatusResponse` — smart TTL (see §5.4) |
+| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 30s / 60s / 5m / 4h | Run-number-scoped status variant |
+| `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}` | String (JSON) | 30s / 60s / 5m / 4h | Full `CalculatorDashboardResponse` — smart TTL (see §5.4) |
 
 ### Key Details per Structure
 
@@ -887,7 +902,107 @@ ORDER BY cr.reporting_date ASC, cr.created_at ASC
 
 **Purpose:** Formatted projection payload (CET labels, chart coordinates, formatted durations).
 
-**Composition:** `ProjectionService` composes from `AnalyticsService.getRunPerformanceData()` only. No additional repository queries.
+**Composition:** `PerformanceCardProjection` composes from `AnalyticsService.getRunPerformanceData()` only. No additional repository queries.
+
+---
+
+#### `GET /api/v1/analytics/projections/calculator-dashboard`
+
+**Purpose:** Unified calculator dashboard — all configured calculator sections (Regional, Portfolio,
+Group Portfolio, Risk Governed, Consolidation) in a single response for a given reporting date,
+frequency, and run number.
+
+**Query params:**
+
+| Name | Type | Default | Constraints |
+|------|------|---------|-------------|
+| `reportingDate` | ISO date | required | |
+| `frequency` | String | `DAILY` | `DAILY` or `MONTHLY` |
+| `runNumber` | int | `1` | `@Min(1) @Max(2)` |
+
+**Response:** `CalculatorDashboardResponse` — includes per-section SLA state, dependency chain
+status, per-calculator run status with historical dots, sub-run status for multi-sub-run
+calculators (e.g. Modelled Exposure with OTC/ETD/SFT buttons), and `displayLabels` for
+sections that render multiple UI rows from a single calculator run (e.g. Portfolio's 5 CAP rows).
+
+**Composition:**
+1. `DashboardProjection.getCalculatorDashboard()` checks `DashboardCacheService` status cache. Cache hit returns immediately.
+2. On miss: `DashboardService.buildDashboard()` runs:
+   - `findDashboardRuns()` — section-aware DB query for current-day runs.
+   - `buildNonRegionalSection()` for each configured section, resolving dependency chain.
+   - `buildSubRunEntry()` aggregates history from sub-run calculator IDs for multi-sub-run calculators.
+3. `DashboardProjection` formats the domain result into `CalculatorDashboardResponse`.
+4. Response stored in cache with smart TTL.
+
+**Cache key:** `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}`
+**HTTP:** `Cache-Control: max-age=30, private`
+
+---
+
+#### `GET /api/v1/analytics/projections/regional-batch-status` ⚠️ Deprecated
+
+**Deprecation:** This endpoint is superseded by `/calculator-dashboard` which returns a richer
+superset of the same regional data with `frequency` and `runNumber` support. Consumers should
+migrate before **2026-05-31**.
+
+Response headers:
+- `Deprecation: true`
+- `Sunset: Sun, 31 May 2026 00:00:00 GMT`
+- `Link: </api/v1/analytics/projections/calculator-dashboard>; rel="successor-version"`
+
+**Purpose:** Real-time status of all 10 regional batch runs for a given reporting date.
+
+**Query params:** `reportingDate` (ISO date, required). Header: `X-Tenant-Id`.
+
+**Response:** `RegionalBatchStatusResponse` — includes overall SLA breach state, estimated
+start/end times (median prediction or actual override), per-region status (ON_TIME / DELAYED /
+FAILED / RUNNING / NOT_STARTED), and run tooltip data (start/end CET, duration, batch type).
+
+**Composition:**
+1. `RegionalBatchProjection.getRegionalBatchStatus()` checks Tier-2 status cache (`obs:analytics:regional-batch:status:*`). Cache hit returns immediately.
+2. On miss: `RegionalBatchService.getRegionalBatchStatus()` runs:
+   - `findRegionalBatchRuns()` — single-partition DB query for current-day runs.
+   - History loaded once if needed: `loadHistory()` checks Tier-1 cache (`obs:analytics:regional-batch:history:*`); falls back to `findRegionalBatchHistory()` (7-partition scan) and stores in cache (24h TTL).
+3. `RegionalBatchProjection` formats the domain result into `RegionalBatchStatusResponse`.
+4. Response stored in Tier-2 status cache with smart TTL (see §5.4).
+
+**Caching:** See §5.4 Regional Batch Cache. HTTP `Cache-Control: max-age=30, private`.
+
+---
+
+### §5.4 Regional Batch Cache (Two-Tier)
+
+The regional batch endpoint is polled every 60 seconds by the dashboard. Two Redis caches
+reduce DB load:
+
+**Tier 1 — History Cache** (`RegionalBatchCacheService.getHistory / putHistory`):
+
+| Property | Value |
+|----------|-------|
+| Redis key | `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` |
+| TTL | 24 hours |
+| Content | List of `(region, reportingDate, startTime, endTime)` for last 7 days |
+| Rationale | Historical data is immutable; the 7-partition scan fires at most once per date |
+
+**Tier 2 — Status Response Cache** (`RegionalBatchCacheService.getStatusResponse / putStatusResponse`):
+
+| Property | Value |
+|----------|-------|
+| Redis key | `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` (or `:{runNumber}` suffix when run-number-scoped) |
+| Content | Serialized `RegionalBatchStatusResponse` DTO |
+| TTL | Smart — depends on run state |
+
+**Smart TTL selection** (`RegionalBatchCacheService.determineTtl()`):
+
+| State | Condition | TTL |
+|-------|-----------|-----|
+| TERMINAL_CLEAN | 0 running, 0 not-started, 0 failed | 4 hours |
+| TERMINAL_WITH_FAILURES | 0 running, 0 not-started, ≥1 failed | 5 minutes |
+| ACTIVE | ≥1 running | 30 seconds |
+| NOT_STARTED | 0 runs found | 60 seconds |
+
+All Redis exceptions are swallowed with `log.warn` — caching is best-effort and never blocks
+the response.
 
 ---
 
@@ -1372,6 +1487,8 @@ All MDC set/restore follows snapshot semantics — `setCalculatorContext()` and 
 | SLA monitoring ZSET unavailable | Live breach detection fails silently (swallowed exception); `sla.breach.live_detection.failures` counter incremented; no breaches detected via live path until Redis recovers |
 | Cache warming | Warm after completion fails; no data loss; next query re-reads from DB |
 | Analytics cache | All requests hit DB; 5-min analytics cache is skipped |
+| Regional batch status cache | Tier-2 miss; `findRegionalBatchRuns` always fires |
+| Regional batch history cache | Tier-1 miss; `findRegionalBatchHistory` (7-partition scan) fires on every request |
 
 **Recovery:** Self-healing. Once Redis reconnects (Lettuce auto-reconnect enabled), cache population resumes on the next write or read-through.
 
@@ -1422,7 +1539,7 @@ All analytics endpoints have a 5-minute Redis cache. Under heavy load, cache mis
 1. Add method to `AnalyticsService` — follow existing pattern: check `AnalyticsCacheService`, query repository, build response, cache.
 2. Define a new response DTO (implements `Serializable`).
 3. Add cache key prefix constant in `AnalyticsCacheService`.
-4. Add endpoint to `AnalyticsController` (raw domain) or `ProjectionController` (formatted projection) — extract `tenantId`, validate params, call service, set `Cache-Control`.
+4. Add endpoint to `AnalyticsController` (raw domain) or `ProjectionController` (formatted projection). For formatted projections, create a focused `*Projection` class in `service/projection/` with its own cache read/write logic — extract `tenantId`, validate params, call service, set `Cache-Control`.
 5. Add Micrometer counter in the controller.
 6. Verify all `calculator_runs` queries include `reporting_date` in the WHERE clause (see §3.2 rules below).
 

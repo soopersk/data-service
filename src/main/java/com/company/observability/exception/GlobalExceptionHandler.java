@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -59,6 +60,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({DomainValidationException.class, IllegalArgumentException.class})
     public ResponseEntity<Map<String, Object>> handleDomainValidation(RuntimeException ex) {
+        HttpStatus status = HttpStatus.BAD_REQUEST;
+        meterRegistry.counter(API_ERROR, "exception", ex.getClass().getSimpleName(), "status", String.valueOf(status.value())).increment();
+        log.warn("event=api.error status={} exception={} message={}", status.value(), ex.getClass().getSimpleName(), ex.getMessage());
+        return buildErrorResponse(status, ex.getMessage());
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<Map<String, Object>> handleMissingHeader(MissingRequestHeaderException ex) {
         HttpStatus status = HttpStatus.BAD_REQUEST;
         meterRegistry.counter(API_ERROR, "exception", ex.getClass().getSimpleName(), "status", String.valueOf(status.value())).increment();
         log.warn("event=api.error status={} exception={} message={}", status.value(), ex.getClass().getSimpleName(), ex.getMessage());

@@ -29,6 +29,11 @@ On any Redis failure, all reads fall back to PostgreSQL transparently. Redis wri
 | `obs:analytics:{prefix}:{calcId}:{tenantId}:{days}` | String (JSON) | 5m | Analytics responses without frequency dimension |
 | `obs:analytics:{prefix}:{calcId}:{tenantId}:{freq}:{days}` | String (JSON) | 5m | Analytics responses with frequency dimension |
 | `obs:analytics:index:{calcId}:{tenantId}` | Set | 1h | Tracks all analytics keys for bulk invalidation |
+| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` | String (JSON) | 24h | 7-day regional batch timing history — immutable once written |
+| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 24h | Run-number-scoped history variant |
+| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` | String (JSON) | 30s–4h | Full `RegionalBatchStatusResponse` — smart TTL |
+| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 30s–4h | Run-number-scoped status variant |
+| `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}` | String (JSON) | 30s–4h | Full `CalculatorDashboardResponse` — smart TTL |
 
 ---
 
@@ -138,6 +143,40 @@ Both keys have a 24-hour TTL.
 | `/sla-summary` | `obs:analytics:sla-summary:` |
 | `/trends` | `obs:analytics:trends:` |
 | `/run-performance` | `obs:analytics:run-perf:` |
+
+---
+
+### `obs:analytics:regional-batch:*` — Regional Batch Two-Tier Cache
+
+Managed by `RegionalBatchCacheService`. All Redis exceptions are swallowed — caching is best-effort.
+
+**Tier 1 — History Cache:**
+- Key: `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` (or `:{runNumber}` for run-scoped)
+- TTL: 24 hours (historical timing data is immutable once all runs complete)
+- Content: `List<RegionalBatchTiming>` — 7 days of `(region, reportingDate, startTime, endTime)` rows
+- Written once on first cache miss; the 7-partition DB scan fires at most once per reporting date
+
+**Tier 2 — Status Response Cache:**
+- Key: `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` (or `:{runNumber}`)
+- Content: Full serialized `RegionalBatchStatusResponse`
+- TTL selected dynamically by `RegionalBatchCacheService.determineTtl()`:
+
+| State | Condition | TTL |
+|-------|-----------|-----|
+| `TERMINAL_CLEAN` | 0 running, 0 not-started, 0 failed | 4 hours |
+| `TERMINAL_WITH_FAILURES` | 0 running, 0 not-started, ≥1 failed | 5 minutes |
+| `ACTIVE` | ≥1 running | 30 seconds |
+| `NOT_STARTED` | 0 runs found | 60 seconds |
+
+---
+
+### `obs:analytics:dashboard:status:*` — Calculator Dashboard Cache
+
+Managed by `DashboardCacheService`. Same smart TTL tiers as the regional batch status cache above.
+
+- Key: `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}`
+- Content: Full serialized `CalculatorDashboardResponse`
+- `frequency` and `runNumber` are always part of the key (Run 1 and Run 2 are separate cache entries)
 
 ---
 

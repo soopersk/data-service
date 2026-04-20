@@ -4,9 +4,13 @@ import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.event.SlaBreachedEvent;
+import com.company.observability.logging.LifecycleEvent;
+import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.util.MdcContextUtil;
 import com.company.observability.util.SlaEvaluationResult;
+
+import static net.logstash.logback.argument.StructuredArguments.kv;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +51,7 @@ public class LiveSlaBreachDetectionJob {
     private final CalculatorRunRepository runRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
+    private final LifecycleLogger lifecycleLogger;
     private final AtomicInteger approachingRunsGauge = new AtomicInteger(0);
     private final AtomicInteger lastBreachesGauge = new AtomicInteger(0);
     private final AtomicLong activeRunsGauge = new AtomicLong(0L);
@@ -143,8 +148,8 @@ public class LiveSlaBreachDetectionJob {
                         slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         processedCount++;
 
-                        log.warn("event=sla.live_breach outcome=success runId={} reason={} severity={}",
-                                runId, breachReason, severity);
+                        lifecycleLogger.emit(LifecycleEvent.SLA_LIVE_BREACH,
+                                kv("runId", runId), kv("reason", breachReason), kv("severity", severity));
 
                         meterRegistry.counter(SLA_BREACH_LIVE_DETECTED,
                                 "severity", severity

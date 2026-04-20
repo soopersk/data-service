@@ -300,9 +300,111 @@ Counters: `totalRuns` is terminal/evaluated only; `runningRuns` is tracked separ
 
 ---
 
+---
+
+## Analytics Projections
+
+All projection endpoints:
+- Require `Authorization` + `X-Tenant-Id`
+- Are served by `ProjectionController` → focused `*Projection` services
+- Cache is read before calling the domain service; response is written back with a smart TTL
+
 ### `GET /api/v1/analytics/projections/calculators/{calculatorId}/performance-card`
 
 Pre-formatted projection payload for dashboard consumers (CET labels, chart coordinates, percentages).
+
+**Query Parameters:** `days` (default `30`, 1-365), `frequency` (default `DAILY`)
+
+**Composition:** `PerformanceCardProjection` → `AnalyticsService.getRunPerformanceData()`
+
+**Response `PerformanceCardResponse`:** Includes `calculatorId`, `calculatorName`, `meanDurationFormatted`, `schedule` (frequency + estimated CET start), `slaSummary` (sla-met/late/very-late percentages), `runs` (list of `RunBar` with CET start/end labels, duration formatted), and `referenceLines` (SLA marker positions).
+
+---
+
+### `GET /api/v1/analytics/projections/calculator-dashboard`
+
+Unified multi-section dashboard for the Capital Calculation Insight UI.
+
+**Query Parameters:**
+
+| Name | Type | Default | Constraints |
+|------|------|---------|-------------|
+| `reportingDate` | Date | Required | `YYYY-MM-DD` |
+| `frequency` | String | `DAILY` | `DAILY` or `MONTHLY` |
+| `runNumber` | int | `1` | Min 1, Max 2 |
+
+**Cache:** `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}` — smart TTL (same tiers as regional batch cache).
+
+**Composition:** `DashboardProjection` → `DashboardService.buildDashboard()`
+
+**Response `CalculatorDashboardResponse`:**
+```json
+{
+  "reportingDate": "2026-04-17",
+  "reportingDateFormatted": "Thu 17 Apr 2026",
+  "frequency": "DAILY",
+  "runNumber": 1,
+  "sections": [
+    {
+      "sectionKey": "REGIONAL",
+      "displayName": "Regional",
+      "displayOrder": 1,
+      "sla": { "deadline": "17:45", "breached": false },
+      "dependency": null,
+      "summary": { "status": "ON_TIME", "completedCount": 8, "totalCount": 10 },
+      "calculators": [ ... ],
+      "displayLabels": null
+    },
+    {
+      "sectionKey": "PORTFOLIO",
+      "displayName": "Portfolio",
+      "displayOrder": 2,
+      "sla": { "deadline": "18:30", "breached": false },
+      "dependency": { "sectionKey": "REGIONAL", "satisfied": true },
+      "summary": { "status": "ON_TIME", "completedCount": 1, "totalCount": 1 },
+      "calculators": [
+        {
+          "calculatorId": "portfolio-cap-calc",
+          "displayName": "Portfolio CAP",
+          "status": "ON_TIME",
+          "startTimeCet": "17:52 CET",
+          "endTimeCet": "18:10 CET",
+          "durationFormatted": "18mins 0s",
+          "hasSubRuns": false,
+          "subRuns": [],
+          "history": [ { "reportingDate": "2026-04-16", "status": "ON_TIME", "slaBreached": false } ]
+        }
+      ],
+      "displayLabels": ["CAP - AM", "CAP - CM", "CAP - PM", "CAP - EOD", "CAP - Final"]
+    }
+  ]
+}
+```
+
+**`displayLabels`:** Non-null only for sections where multiple UI rows are rendered from a single calculator run (e.g. Portfolio's 5 CAP rows). `null` for all other sections.
+
+**Status values:** `ON_TIME`, `DELAYED`, `FAILED`, `RUNNING`, `NOT_STARTED`
+
+---
+
+### `GET /api/v1/analytics/projections/regional-batch-status` ⚠️ Deprecated
+
+**Deprecation notice:** This endpoint is superseded by `/calculator-dashboard`, which returns a richer superset including all calculator sections. Migrate before **2026-05-31**.
+
+Response headers on every call:
+- `Deprecation: true`
+- `Sunset: Sun, 31 May 2026 00:00:00 GMT`
+- `Link: </api/v1/analytics/projections/calculator-dashboard>; rel="successor-version"`
+
+**Query Parameters:** `reportingDate` (Date, required)
+
+**Cache:** `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` — smart TTL (see §5.4 in tech-spec).
+
+**Composition:** `RegionalBatchProjection` → `RegionalBatchService.getRegionalBatchStatus()`
+
+**Response `RegionalBatchStatusResponse`:** Includes overall SLA state, estimated start/end times (`TimeReference` with CET time, hourCet, actual/estimated flag), per-region status rows (`ON_TIME` / `DELAYED` / `FAILED` / `RUNNING` / `NOT_STARTED`), and run tooltip data (start/end CET, duration ms, batch type).
+
+**Status classification:** TIMEOUT and CANCELLED terminal runs are treated as `FAILED` (same as explicit FAILED status).
 
 ---
 

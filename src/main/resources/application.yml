@@ -105,6 +105,71 @@ observability:
   alerts:
     channel: logging
 
+  regional-batch:
+    overall-sla-time-cet: "17:45"
+    region-order: [WMAP, WMDE, ASIA, WMUS, AUNZ, WMCH, ZURI, LDNL, AMER, EURO]
+
+  # Unified Calculator Dashboard — section definitions
+  # Calculator IDs are placeholders; replace with real IDs from the Airflow team.
+  dashboard:
+    sections:
+      - section-key: REGIONAL
+        display-name: Regional
+        display-order: 1
+        sla-time-cet: "17:45"
+        calculators: []  # Regional uses regional-batch.region-order above
+
+      - section-key: PORTFOLIO
+        display-name: Portfolio
+        display-order: 2
+        sla-time-cet: "18:30"
+        depends-on: REGIONAL
+        display-labels:
+          - "CAP 8 - Securitization"
+          - "CAP 10 - Counterparty credit risk on derivatives and SFTs"
+          - "CAP 12 - Leverage ratio denominator"
+          - "CAP 13 - Credit valuation adjustments"
+          - "CAP 14 - Business indicator component"
+        calculators:
+          - calculator-id: portfolio-calc
+            display-name: Portfolio
+
+      - section-key: GROUP_PORTFOLIO
+        display-name: Group portfolio
+        display-order: 3
+        sla-time-cet: "19:00"
+        depends-on: PORTFOLIO
+        calculators:
+          - calculator-id: group-portfolio-calc
+            display-name: Group portfolio
+
+      - section-key: RISK_GOVERNED
+        display-name: Risk governed
+        display-order: 4
+        sla-time-cet: "20:30"
+        calculators:
+          - calculator-id: gemini-hedge-calc
+            display-name: Gemini Hedge
+          - calculator-id: modelled-exposure-calc
+            display-name: Modelled Exposure
+            has-sub-runs: true
+            sub-runs:
+              - sub-run-key: OTC
+                calculator-id: model-exposure-otc
+              - sub-run-key: ETD
+                calculator-id: model-exposure-etd
+              - sub-run-key: SFT
+                calculator-id: model-exposure-sft
+
+      - section-key: CONSOLIDATION
+        display-name: Consolidation
+        display-order: 5
+        sla-time-cet: "21:00"
+        depends-on: GROUP_PORTFOLIO
+        calculators:
+          - calculator-id: consolidation-calc
+            display-name: Consolidation
+
   cache:
     eviction:
       enabled: true

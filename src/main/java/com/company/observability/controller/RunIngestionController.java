@@ -4,6 +4,8 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.dto.request.CompleteRunRequest;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.dto.response.RunResponse;
+import com.company.observability.logging.LifecycleEvent;
+import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.service.RunIngestionService;
 import com.company.observability.util.ObservabilityConstants;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -12,10 +14,11 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import static net.logstash.logback.argument.StructuredArguments.kv;
 
 import java.net.URI;
 import java.security.Principal;
@@ -27,11 +30,11 @@ import java.security.Principal;
 @RequestMapping("/api/v1/runs")
 @Tag(name = "Run Ingestion", description = "APIs for Airflow to ingest calculator run data")
 @RequiredArgsConstructor
-@Slf4j
 public class RunIngestionController {
 
     private final RunIngestionService ingestionService;
     private final MeterRegistry meterRegistry;
+    private final LifecycleLogger lifecycleLogger;
 
     @PostMapping("/start")
     @ResponseStatus(HttpStatus.CREATED)
@@ -43,8 +46,8 @@ public class RunIngestionController {
 
         String userId = principal != null ? principal.getName() : "unknown";
 
-        log.info("event=run.start outcome=accepted user={} calculator={} tenant={}",
-                userId, request.getCalculatorId(), tenantId);
+        lifecycleLogger.emit(LifecycleEvent.RUN_START_ACCEPTED,
+                kv("user", userId), kv("calculator", request.getCalculatorId()), kv("tenant", tenantId));
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -69,12 +72,12 @@ public class RunIngestionController {
 
         String userId = principal != null ? principal.getName() : "unknown";
 
-        log.info("event=run.complete outcome=accepted user={} runId={} tenant={}",
-                userId, runId, tenantId);
+        lifecycleLogger.emit(LifecycleEvent.RUN_COMPLETE_ACCEPTED,
+                kv("user", userId), kv("runId", runId), kv("tenant", tenantId));
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
-            CalculatorRun run = ingestionService.completeRun(runId, request.getReportingDate(), request, tenantId);
+            CalculatorRun run = ingestionService.completeRun(runId, request, tenantId);
 
             return ResponseEntity.ok(toRunResponse(run));
         } finally {
