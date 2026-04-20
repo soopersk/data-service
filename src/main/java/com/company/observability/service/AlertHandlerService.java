@@ -8,12 +8,15 @@ import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.BreachType;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.event.SlaBreachedEvent;
+import com.company.observability.logging.LifecycleEvent;
+import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.repository.SlaBreachEventRepository;
 import com.company.observability.util.MdcContextUtil;
 import com.company.observability.util.SlaEvaluationResult;
+
+import static net.logstash.logback.argument.StructuredArguments.kv;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -27,13 +30,13 @@ import java.time.Instant;
 import static com.company.observability.util.ObservabilityConstants.*;
 
 @Service
-@Slf4j
 @RequiredArgsConstructor
 public class AlertHandlerService {
 
     private final SlaBreachEventRepository breachRepository;
     private final MeterRegistry meterRegistry;
     private final AlertSender alertSender;
+    private final LifecycleLogger lifecycleLogger;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
@@ -51,13 +54,14 @@ public class AlertHandlerService {
     }
 
     private void doHandleSlaBreachEvent(CalculatorRun run, SlaEvaluationResult result) {
-        log.info("event=sla.breach.process outcome=success reason={}", result.getReason());
+        lifecycleLogger.emit(LifecycleEvent.SLA_BREACH_PROCESSED, kv("reason", result.getReason()));
 
         SlaBreachEvent breach = SlaBreachEvent.builder()
                 .runId(run.getRunId())
                 .calculatorId(run.getCalculatorId())
                 .calculatorName(run.getCalculatorName())
                 .tenantId(run.getTenantId())
+                .reportingDate(run.getReportingDate())
                 .breachType(BreachType.fromString(determineBreachType(result.getReason())))
                 .expectedValue(calculateExpectedValue(run))
                 .expectedUnit(run.getSlaTime() != null ? "epoch_seconds"
@@ -83,7 +87,7 @@ public class AlertHandlerService {
             ).increment();
 
         } catch (DuplicateKeyException e) {
-            log.warn("event=sla.breach.persist outcome=rejected reason=duplicate");
+            lifecycleLogger.emit(LifecycleEvent.SLA_BREACH_PERSIST_REJECTED, kv("reason", "duplicate"));
 
             meterRegistry.counter(SLA_BREACH_DUPLICATE,
                     "frequency", run.getFrequency().name()
@@ -109,7 +113,7 @@ public class AlertHandlerService {
                     "channel", alertSender.channelName()
             ).increment();
 
-            log.info("event=sla.alert.send outcome=success breachId={}", breach.getBreachId());
+            lifecycleLogger.emit(LifecycleEvent.SLA_ALERT_SENT, kv("breachId", breach.getBreachId()));
 
         } catch (AlertDeliveryException e) {
             markFailed(breach, run, e);
@@ -122,7 +126,7 @@ public class AlertHandlerService {
     }
 
     private void markFailed(SlaBreachEvent breach, CalculatorRun run, Exception e) {
-        log.error("event=sla.alert.send outcome=failure breachId={}", breach.getBreachId(), e);
+        lifecycleLogger.emit(LifecycleEvent.SLA_ALERT_FAILED, e, kv("breachId", breach.getBreachId()));
         breach.setAlertStatus(AlertStatus.FAILED);
         breach.setRetryCount(breach.getRetryCount() + 1);
         breach.setLastError(e.getMessage());

@@ -1,8 +1,9 @@
-package com.company.observability.service;
+package com.company.observability.service.projection;
 
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.dto.response.PerformanceCardResponse;
 import com.company.observability.dto.response.RunPerformanceData;
+import com.company.observability.service.AnalyticsService;
 import com.company.observability.util.TimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -14,12 +15,12 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Transforms raw domain data into consumer-shaped projections.
- * No repository or cache dependencies — pure presentation logic.
+ * Maps {@link AnalyticsService} domain data to the pre-formatted
+ * {@link PerformanceCardResponse} used by the performance-card endpoint.
  */
 @Service
 @RequiredArgsConstructor
-public class ProjectionService {
+public class PerformanceCardProjection {
 
     private final AnalyticsService analyticsService;
 
@@ -43,23 +44,18 @@ public class ProjectionService {
                     Collections.emptyList(), null);
         }
 
-        // Reference lines from schedule timestamps
         BigDecimal slaStartHour = TimeUtils.calculateCetHour(data.estimatedStartTime());
-        BigDecimal slaEndHour = TimeUtils.calculateCetHour(data.slaTime());
+        BigDecimal slaEndHour   = TimeUtils.calculateCetHour(data.slaTime());
 
-        // Schedule info
-        String startTimeCet = slaStartHour != null
-                ? TimeUtils.formatCetHour(slaStartHour) : null;
+        String startTimeCet = slaStartHour != null ? TimeUtils.formatCetHour(slaStartHour) : null;
 
-        // SLA percentages
         PerformanceCardResponse.SlaSummaryPct slaSummary =
                 new PerformanceCardResponse.SlaSummaryPct(
                         data.totalRuns(),
-                        data.slaMetCount(), pct(data.slaMetCount(), data.totalRuns()),
-                        data.lateCount(), pct(data.lateCount(), data.totalRuns()),
+                        data.slaMetCount(),   pct(data.slaMetCount(),   data.totalRuns()),
+                        data.lateCount(),     pct(data.lateCount(),     data.totalRuns()),
                         data.veryLateCount(), pct(data.veryLateCount(), data.totalRuns()));
 
-        // Run bars with formatting
         List<PerformanceCardResponse.RunBar> runBars = data.runs().stream()
                 .map(this::toRunBar)
                 .toList();
@@ -81,12 +77,10 @@ public class ProjectionService {
                 ? run.reportingDate().format(DATE_FORMATTER) : null;
 
         BigDecimal startHour = TimeUtils.calculateCetHour(run.startTime());
-        BigDecimal endHour = TimeUtils.calculateCetHour(run.endTime());
+        BigDecimal endHour   = TimeUtils.calculateCetHour(run.endTime());
 
-        String startCet = startHour != null
-                ? TimeUtils.formatCetHour(startHour) + " CET" : null;
-        String endCet = endHour != null
-                ? TimeUtils.formatCetHour(endHour) + " CET" : null;
+        String startCet = startHour != null ? TimeUtils.formatCetHour(startHour) + " CET" : null;
+        String endCet   = endHour   != null ? TimeUtils.formatCetHour(endHour)   + " CET" : null;
 
         return new PerformanceCardResponse.RunBar(
                 run.runId(),

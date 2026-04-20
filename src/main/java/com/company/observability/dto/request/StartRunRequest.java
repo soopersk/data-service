@@ -51,6 +51,12 @@ public class StartRunRequest {
     private Long expectedDurationMs;
     private LocalTime estimatedStartTimeCet;
 
+    // Optional — promoted from run_parameters for query efficiency.
+    // Top-level fields take precedence; fall back to runParameters map for backward compat.
+    private String runNumber;
+    private String runType;
+    private String region;
+
     private Map<String, Object> runParameters;
     private Map<String, Object> additionalAttributes;
 }

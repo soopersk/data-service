@@ -10,6 +10,8 @@ import com.company.observability.exception.DomainAccessDeniedException;
 import com.company.observability.exception.DomainNotFoundException;
 import com.company.observability.exception.DomainValidationException;
 import com.company.observability.event.*;
+import com.company.observability.logging.LifecycleEvent;
+import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.repository.*;
 import com.company.observability.util.*;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -21,10 +23,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 import static com.company.observability.util.ObservabilityConstants.*;
+import static net.logstash.logback.argument.StructuredArguments.kv;
 
 @Service
 @Slf4j
@@ -37,6 +41,7 @@ public class RunIngestionService {
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
     private final SlaMonitoringCache slaMonitoringCache;
+    private final LifecycleLogger lifecycleLogger;
 
     @Value("${observability.sla.live-tracking.enabled:true}")
     private boolean liveTrackingEnabled;
@@ -57,13 +62,13 @@ public class RunIngestionService {
                 request.getRunId(), request.getReportingDate());
 
         if (existing.isPresent()) {
-            log.warn("event=run.start outcome=rejected reason=duplicate");
+            lifecycleLogger.emit(LifecycleEvent.RUN_START_REJECTED, kv("reason", "duplicate"));
             meterRegistry.counter(INGESTION_RUN_DUPLICATE, "phase", "start").increment();
             return existing.get();
         }
 
-        log.info("event=run.start outcome=success freq={} reportingDate={}",
-                request.getFrequency(), request.getReportingDate());
+        lifecycleLogger.emit(LifecycleEvent.RUN_START_SUCCESS,
+                kv("freq", request.getFrequency()), kv("reportingDate", request.getReportingDate()));
 
         // Validate reporting_date matches frequency expectations
         validateReportingDate(request);
@@ -111,6 +116,9 @@ public class RunIngestionService {
                 .expectedDurationMs(request.getExpectedDurationMs())
                 .estimatedStartTime(request.getStartTime())
                 .estimatedEndTime(estimatedEndTime)
+                .runNumber(resolveField(request.getRunNumber(), request.getRunParameters(), "run_number"))
+                .runType(resolveField(request.getRunType(), request.getRunParameters(), "run_type"))
+                .region(resolveField(request.getRegion(), request.getRunParameters(), "region"))
                 .runParameters(request.getRunParameters())
                 .additionalAttributes(request.getAdditionalAttributes())
                 .slaBreached(breachedAtStart)
@@ -149,11 +157,11 @@ public class RunIngestionService {
     }
 
     @Transactional
-    public CalculatorRun completeRun(String runId, LocalDate reportingDate, CompleteRunRequest request, String tenantId) {
-        Optional<CalculatorRun> runOpt = runRepository.findById(runId, reportingDate);
+    public CalculatorRun completeRun(String runId, CompleteRunRequest request, String tenantId) {
+        Optional<CalculatorRun> runOpt = runRepository.findById(runId, request.getReportingDate());
 
         if (runOpt.isEmpty()) {
-            throw new DomainNotFoundException("Run not found: " + runId + " for reportingDate=" + reportingDate);
+            throw new DomainNotFoundException("Run not found: " + runId + " for reportingDate=" + request.getReportingDate());
         }
 
         CalculatorRun run = runOpt.get();
@@ -172,7 +180,7 @@ public class RunIngestionService {
         }
 
         if (run.getStatus() != RunStatus.RUNNING) {
-            log.warn("event=run.complete outcome=rejected reason=duplicate");
+            lifecycleLogger.emit(LifecycleEvent.RUN_COMPLETE_REJECTED, kv("reason", "duplicate"));
             meterRegistry.counter(INGESTION_RUN_DUPLICATE, "phase", "complete").increment();
             return run;
         }
@@ -220,8 +228,7 @@ public class RunIngestionService {
             eventPublisher.publishEvent(new RunCompletedEvent(run));
         }
 
-        log.info("event=run.complete outcome=success reportingDate={}",
-                run.getReportingDate());
+        lifecycleLogger.emit(LifecycleEvent.RUN_COMPLETE_SUCCESS, kv("reportingDate", run.getReportingDate()));
 
         return run;
     }
@@ -240,6 +247,17 @@ public class RunIngestionService {
                         reportingDate);
             }
         }
+    }
+
+    /**
+     * Resolves a promoted field: top-level request field takes precedence,
+     * falls back to runParameters map for backward compatibility.
+     */
+    private String resolveField(String topLevel, Map<String, Object> params, String key) {
+        if (topLevel != null) return topLevel;
+        if (params == null) return null;
+        Object val = params.get(key);
+        return val != null ? val.toString() : null;
     }
 
     private void updateDailyAggregate(CalculatorRun run) {
