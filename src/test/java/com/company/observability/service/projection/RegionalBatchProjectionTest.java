@@ -73,7 +73,7 @@ class RegionalBatchProjectionTest {
             LocalDate date, int total, int completed, int running, int failed) {
         return new RegionalBatchStatusResponse(
                 date, "Fri 17 Apr 2026",
-                new RegionalBatchStatusResponse.OverallSla("17:45", false),
+                new RegionalBatchStatusResponse.OverallSla(Instant.parse("2026-04-17T15:45:00Z"), false),
                 null, null,
                 total, completed, running, failed,
                 List.of(), List.of()

@@ -117,9 +117,7 @@ public class DashboardProjection {
 
     private TimeReference toTimeReference(EstimatedTime est) {
         if (est == null) return null;
-        BigDecimal hourCet = TimeUtils.calculateCetHour(est.time());
-        String timeCet = TimeUtils.formatCetHour(hourCet) + " CET";
-        return new TimeReference(timeCet, hourCet, est.basedOn(), est.actual());
+        return new TimeReference(est.time(), est.basedOn(), est.actual());
     }
 
     private CalculatorEntry toCalculatorEntry(CalculatorEntryResult entry) {

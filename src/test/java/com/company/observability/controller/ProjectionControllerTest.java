@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
@@ -48,14 +48,14 @@ class ProjectionControllerTest {
         PerformanceCardResponse response = new PerformanceCardResponse(
                 "calc-1",
                 "Calculator One",
-                new PerformanceCardResponse.ScheduleInfo("06:00", "DAILY"),
+                new PerformanceCardResponse.ScheduleInfo(Instant.parse("2026-02-20T05:00:00Z"), "DAILY"),
                 30,
                 180000L,
                 "3m 0s",
                 new PerformanceCardResponse.SlaSummaryPct(1, 1, 100.0, 0, 0.0, 0, 0.0),
                 List.of(),
                 new PerformanceCardResponse.ReferenceLines(
-                        BigDecimal.valueOf(6.00), BigDecimal.valueOf(6.25)));
+                        Instant.parse("2026-02-20T05:00:00Z"), Instant.parse("2026-02-20T05:15:00Z")));
 
         when(performanceCardProjection.getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
                 .thenReturn(response);

@@ -53,7 +53,7 @@ class PerformanceCardProjectionTest {
     }
 
     @Test
-    void getPerformanceCard_formatsRunBarsWithCetTimesAndDuration() {
+    void getPerformanceCard_formatsRunBarsWithUtcTimesAndDuration() {
         // 2026-02-21 04:15 UTC = 05:15 CET (CET = UTC+1 in winter)
         Instant start = Instant.parse("2026-02-21T04:15:00Z");
         // 2026-02-21 04:18 UTC = 05:18 CET
@@ -88,7 +88,7 @@ class PerformanceCardProjectionTest {
 
         assertNotNull(result.schedule());
         assertEquals("DAILY", result.schedule().frequency());
-        assertNotNull(result.schedule().estimatedStartTimeCet());
+        assertNotNull(result.schedule().estimatedStartTime());
 
         assertEquals(2, result.slaSummary().totalRuns());
         assertEquals(50.0, result.slaSummary().slaMetPct());
@@ -102,15 +102,13 @@ class PerformanceCardProjectionTest {
         assertEquals(180000L, bar1.durationMs());
         assertEquals("3mins 0s", bar1.durationFormatted());
         assertNotNull(bar1.dateFormatted());
-        assertNotNull(bar1.startHourCet());
-        assertNotNull(bar1.endHourCet());
-        assertTrue(bar1.startTimeCet().endsWith(" CET"));
-        assertTrue(bar1.endTimeCet().endsWith(" CET"));
+        assertNotNull(bar1.startTime());
+        assertNotNull(bar1.endTime());
         assertEquals("RUNNING", result.runs().get(2).slaStatus());
 
         assertNotNull(result.referenceLines());
-        assertNotNull(result.referenceLines().slaStartHourCet());
-        assertNotNull(result.referenceLines().slaEndHourCet());
+        assertNotNull(result.referenceLines().slaStartTime());
+        assertNotNull(result.referenceLines().slaEndTime());
     }
 
     @Test
@@ -131,10 +129,8 @@ class PerformanceCardProjectionTest {
         assertEquals(1, result.runs().size());
         PerformanceCardResponse.RunBar bar = result.runs().get(0);
         assertNull(bar.dateFormatted());
-        assertNull(bar.startHourCet());
-        assertNull(bar.endHourCet());
-        assertNull(bar.startTimeCet());
-        assertNull(bar.endTimeCet());
+        assertNull(bar.startTime());
+        assertNull(bar.endTime());
         assertNull(bar.durationFormatted());
     }
 

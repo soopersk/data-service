@@ -68,7 +68,7 @@ class RunIngestionControllerTest {
                   "frequency": "DAILY",
                   "reportingDate": "2026-02-22",
                   "startTime": "2026-02-22T06:00:00Z",
-                  "slaTimeCet": "06:15:00"
+                  "slaTime": "2026-02-22T05:15:00Z"
                 }
                 """;
 
@@ -94,7 +94,7 @@ class RunIngestionControllerTest {
                   "frequency": "DAILY",
                   "reportingDate": "2026-02-22",
                   "startTime": "2026-02-22T06:00:00Z",
-                  "slaTimeCet": "06:15:00"
+                  "slaTime": "2026-02-22T05:15:00Z"
                 }
                 """;
 
@@ -196,7 +196,7 @@ class RunIngestionControllerTest {
                   "frequency": "DAILY",
                   "reportingDate": "2026-02-22",
                   "startTime": "2026-02-22T06:00:00Z",
-                  "slaTimeCet": "06:15:00"
+                  "slaTime": "2026-02-22T05:15:00Z"
                 }
                 """;
 

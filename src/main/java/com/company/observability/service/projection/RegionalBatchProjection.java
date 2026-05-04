@@ -12,7 +12,6 @@ import com.company.observability.util.TimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -50,9 +49,7 @@ public class RegionalBatchProjection {
     private RegionalBatchStatusResponse toRegionalBatchResponse(RegionalBatchResult result) {
         String dateFormatted = result.reportingDate().format(DATE_FORMATTER);
 
-        String slaTimeCetStr = TimeUtils.formatCetHour(
-                TimeUtils.calculateCetHour(result.slaDeadline()));
-        var overallSla = new RegionalBatchStatusResponse.OverallSla(slaTimeCetStr, result.overallBreached());
+        var overallSla = new RegionalBatchStatusResponse.OverallSla(result.slaDeadline(), result.overallBreached());
 
         TimeReference estimatedStart = toTimeReference(result.estimatedStart());
         TimeReference estimatedEnd   = toTimeReference(result.estimatedEnd());
@@ -79,9 +76,7 @@ public class RegionalBatchProjection {
 
     private TimeReference toTimeReference(EstimatedTime est) {
         if (est == null) return null;
-        BigDecimal hourCet = TimeUtils.calculateCetHour(est.time());
-        String timeCet = TimeUtils.formatCetHour(hourCet) + " CET";
-        return new TimeReference(timeCet, hourCet, est.basedOn(), est.actual());
+        return new TimeReference(est.time(), est.basedOn(), est.actual());
     }
 
     private RegionalBatchStatusResponse.RegionStatus toRegionStatus(
@@ -92,31 +87,24 @@ public class RegionalBatchProjection {
             return new RegionalBatchStatusResponse.RegionStatus(
                     entry.region(), null, entry.status(),
                     null, null, null, null,
-                    null, null, null, null, false);
+                    null, null, false);
         }
 
-        BigDecimal startHour = TimeUtils.calculateCetHour(run.getStartTime());
-        BigDecimal endHour   = TimeUtils.calculateCetHour(run.getEndTime());
-        String startCet = startHour != null ? TimeUtils.formatCetHour(startHour) + " CET" : null;
-        String endCet   = endHour   != null ? TimeUtils.formatCetHour(endHour)   + " CET" : null;
         LocalDate runDate = run.getStartTime() != null
                 ? TimeUtils.getCetDate(run.getStartTime()) : reportingDate;
         String runDay = runDate.format(DATE_FORMATTER);
-
         String batchType = run.getRunType();
 
         return new RegionalBatchStatusResponse.RegionStatus(
                 entry.region(),
                 run.getRunId(),
                 entry.status(),
-                startCet,
-                endCet,
-                startHour,
-                endHour,
+                run.getStartTime(),
+                run.getEndTime(),
                 run.getDurationMs(),
                 TimeUtils.formatDuration(run.getDurationMs()),
                 runDay,
-                batchType != null ? batchType.toString() : null,
+                batchType != null ? batchType : null,
                 entry.slaBreached()
         );
     }

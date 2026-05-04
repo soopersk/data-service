@@ -8,7 +8,6 @@ import com.company.observability.util.TimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
@@ -44,11 +43,6 @@ public class PerformanceCardProjection {
                     Collections.emptyList(), null);
         }
 
-        BigDecimal slaStartHour = TimeUtils.calculateCetHour(data.estimatedStartTime());
-        BigDecimal slaEndHour   = TimeUtils.calculateCetHour(data.slaTime());
-
-        String startTimeCet = slaStartHour != null ? TimeUtils.formatCetHour(slaStartHour) : null;
-
         PerformanceCardResponse.SlaSummaryPct slaSummary =
                 new PerformanceCardResponse.SlaSummaryPct(
                         data.totalRuns(),
@@ -63,33 +57,25 @@ public class PerformanceCardProjection {
         return new PerformanceCardResponse(
                 data.calculatorId(),
                 data.calculatorName(),
-                new PerformanceCardResponse.ScheduleInfo(startTimeCet, data.frequency()),
+                new PerformanceCardResponse.ScheduleInfo(data.estimatedStartTime(), data.frequency()),
                 data.periodDays(),
                 data.meanDurationMs(),
                 TimeUtils.formatDuration(data.meanDurationMs()),
                 slaSummary,
                 runBars,
-                new PerformanceCardResponse.ReferenceLines(slaStartHour, slaEndHour));
+                new PerformanceCardResponse.ReferenceLines(data.estimatedStartTime(), data.slaTime()));
     }
 
     private PerformanceCardResponse.RunBar toRunBar(RunPerformanceData.RunDataPoint run) {
         String dateFormatted = run.reportingDate() != null
                 ? run.reportingDate().format(DATE_FORMATTER) : null;
 
-        BigDecimal startHour = TimeUtils.calculateCetHour(run.startTime());
-        BigDecimal endHour   = TimeUtils.calculateCetHour(run.endTime());
-
-        String startCet = startHour != null ? TimeUtils.formatCetHour(startHour) + " CET" : null;
-        String endCet   = endHour   != null ? TimeUtils.formatCetHour(endHour)   + " CET" : null;
-
         return new PerformanceCardResponse.RunBar(
                 run.runId(),
                 run.reportingDate(),
                 dateFormatted,
-                startHour,
-                endHour,
-                startCet,
-                endCet,
+                run.startTime(),
+                run.endTime(),
                 run.durationMs() != null ? run.durationMs() : 0,
                 TimeUtils.formatDuration(run.durationMs()),
                 run.slaStatus());

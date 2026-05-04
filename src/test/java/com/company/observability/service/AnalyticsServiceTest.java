@@ -150,19 +150,19 @@ class AnalyticsServiceTest {
 
         RunWithSlaStatus slaMetRun = new RunWithSlaStatus(
                 "run-1", "calc-1", "Calculator One", day,
-                start, end, 180000L, null, null,
+                start, end, 180000L,
                 slaTime, start, CalculatorFrequency.DAILY,
                 RunStatus.SUCCESS, false, null, null);
 
         RunWithSlaStatus breachedRun = new RunWithSlaStatus(
                 "run-2", "calc-1", "Calculator One", day.plusDays(1),
-                start, end, 180000L, null, null,
+                start, end, 180000L,
                 slaTime, start, CalculatorFrequency.DAILY,
                 RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH);
 
         RunWithSlaStatus runningRun = new RunWithSlaStatus(
                 "run-3", "calc-1", "Calculator One", day.plusDays(2),
-                start, null, null, null, null,
+                start, null, null,
                 slaTime, start, CalculatorFrequency.DAILY,
                 RunStatus.RUNNING, false, null, null);
 

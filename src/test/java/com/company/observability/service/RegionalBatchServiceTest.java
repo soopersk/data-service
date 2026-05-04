@@ -208,6 +208,7 @@ class RegionalBatchServiceTest {
                 .endTime(end)
                 .durationMs(end != null ? end.toEpochMilli() - start.toEpochMilli() : null)
                 .status(status)
+                .region(region)
                 .runParameters(params)
                 .createdAt(start)
                 .build();

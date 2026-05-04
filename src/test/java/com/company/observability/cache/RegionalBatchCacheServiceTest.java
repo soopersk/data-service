@@ -14,7 +14,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -227,9 +226,9 @@ class RegionalBatchCacheServiceTest {
         return new RegionalBatchStatusResponse(
                 DATE,
                 "Fri 17 Apr 2026",
-                new RegionalBatchStatusResponse.OverallSla("17:45", false),
-                new TimeReference("05:00 CET", BigDecimal.valueOf(5.0), "ASIA", false),
-                new TimeReference("17:30 CET", BigDecimal.valueOf(17.5), "EURO", false),
+                new RegionalBatchStatusResponse.OverallSla(Instant.parse("2026-04-17T15:45:00Z"), false),
+                new TimeReference(Instant.parse("2026-04-17T03:00:00Z"), "ASIA", false),
+                new TimeReference(Instant.parse("2026-04-17T15:30:00Z"), "EURO", false),
                 total, completed, running, failed,
                 List.of(),
                 List.of()

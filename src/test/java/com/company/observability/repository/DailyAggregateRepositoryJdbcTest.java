@@ -54,7 +54,7 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         DailyAggregate agg = results.get(0);
         assertThat(agg.calculatorId()).isEqualTo("calc-1");
         assertThat(agg.tenantId()).isEqualTo("tenant-1");
-        assertThat(agg.dayCet()).isEqualTo(date);
+        assertThat(agg.reportingDate()).isEqualTo(date);
         assertThat(agg.totalRuns()).isEqualTo(1);
         assertThat(agg.successRuns()).isEqualTo(1);
         assertThat(agg.slaBreaches()).isZero();
@@ -95,8 +95,8 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
 
         assertThat(results).hasSize(2);
         // Results are ordered descending — most recent first
-        assertThat(results.get(0).dayCet()).isEqualTo(today.minusDays(1));
-        assertThat(results.get(1).dayCet()).isEqualTo(today.minusDays(5));
+        assertThat(results.get(0).reportingDate()).isEqualTo(today.minusDays(1));
+        assertThat(results.get(1).reportingDate()).isEqualTo(today.minusDays(5));
     }
 
     // ---------------------------------------------------------------

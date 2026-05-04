@@ -108,7 +108,7 @@ class RunIngestionServiceTest {
                 .frequency(CalculatorFrequency.DAILY)
                 .reportingDate(reportingDate)
                 .startTime(lateStart)
-                .slaTimeCet(LocalTime.of(6, 15))
+                .slaTime(Instant.parse("2026-02-20T05:15:00Z"))
                 .build();
 
         when(runRepository.findById("run-late", reportingDate)).thenReturn(Optional.empty());
@@ -135,7 +135,7 @@ class RunIngestionServiceTest {
                 .frequency(CalculatorFrequency.DAILY)
                 .reportingDate(reportingDate)
                 .startTime(lateStart)
-                .slaTimeCet(LocalTime.of(6, 15))
+                .slaTime(Instant.parse("2026-02-20T05:15:00Z"))
                 .build();
 
         when(runRepository.findById("run-late-persisted", reportingDate)).thenReturn(Optional.empty());
@@ -219,7 +219,7 @@ class RunIngestionServiceTest {
                 .frequency(CalculatorFrequency.DAILY)
                 .reportingDate(reportingDate)
                 .startTime(start)
-                .slaTimeCet(java.time.LocalTime.of(6, 15))
+                .slaTime(Instant.parse("2026-02-20T05:15:00Z"))
                 .build();
 
         when(runRepository.findById("run-1", reportingDate)).thenReturn(Optional.of(existing));
@@ -244,7 +244,7 @@ class RunIngestionServiceTest {
                 .frequency(CalculatorFrequency.MONTHLY)
                 .reportingDate(nonEom)
                 .startTime(start)
-                .slaTimeCet(java.time.LocalTime.of(6, 15))
+                .slaTime(Instant.parse("2026-01-15T05:15:00Z"))
                 .build();
 
         when(runRepository.findById("run-monthly", nonEom)).thenReturn(Optional.empty());
