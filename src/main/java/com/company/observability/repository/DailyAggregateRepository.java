@@ -33,21 +33,21 @@ public class DailyAggregateRepository {
      */
     public void upsertDaily(String calculatorId, String tenantId, LocalDate reportingDate,
                             String status, boolean slaBreached, long durationMs,
-                            int startMinCet, int endMinCet) {
+                            int startMinUtc, int endMinUtc) {
         String sql = """
             INSERT INTO calculator_sli_daily (
-                calculator_id, tenant_id, day_cet,
+                calculator_id, tenant_id, reporting_date,
                 total_runs, success_runs, sla_breaches,
-                sum_duration_ms, sum_start_min_cet, sum_end_min_cet, computed_at
-            ) VALUES (:calculatorId, :tenantId, :reportingDate, 1, :successIncr, :breachIncr, :durationMs, :startMinCet, :endMinCet, NOW())
-            ON CONFLICT (calculator_id, tenant_id, day_cet)
+                sum_duration_ms, sum_start_min_utc, sum_end_min_utc, computed_at
+            ) VALUES (:calculatorId, :tenantId, :reportingDate, 1, :successIncr, :breachIncr, :durationMs, :startMinUtc, :endMinUtc, NOW())
+            ON CONFLICT (calculator_id, tenant_id, reporting_date)
             DO UPDATE SET
                 total_runs = calculator_sli_daily.total_runs + 1,
                 success_runs = calculator_sli_daily.success_runs + EXCLUDED.success_runs,
                 sla_breaches = calculator_sli_daily.sla_breaches + EXCLUDED.sla_breaches,
                 sum_duration_ms = calculator_sli_daily.sum_duration_ms + EXCLUDED.sum_duration_ms,
-                sum_start_min_cet = calculator_sli_daily.sum_start_min_cet + EXCLUDED.sum_start_min_cet,
-                sum_end_min_cet = calculator_sli_daily.sum_end_min_cet + EXCLUDED.sum_end_min_cet,
+                sum_start_min_utc = calculator_sli_daily.sum_start_min_utc + EXCLUDED.sum_start_min_utc,
+                sum_end_min_utc = calculator_sli_daily.sum_end_min_utc + EXCLUDED.sum_end_min_utc,
                 computed_at = NOW()
             """;
 
@@ -61,8 +61,8 @@ public class DailyAggregateRepository {
                 .addValue("successIncr", successIncr)
                 .addValue("breachIncr", breachIncr)
                 .addValue("durationMs", durationMs)
-                .addValue("startMinCet", startMinCet)
-                .addValue("endMinCet", endMinCet);
+                .addValue("startMinUtc", startMinUtc)
+                .addValue("endMinUtc", endMinUtc);
 
         try {
             Timer.Sample sample = Timer.start(meterRegistry);
@@ -82,12 +82,12 @@ public class DailyAggregateRepository {
             String calculatorId, String tenantId, int days) {
 
         String sql = """
-            SELECT calculator_id, tenant_id, day_cet, total_runs, success_runs,
-                   sla_breaches, sum_duration_ms, sum_start_min_cet, sum_end_min_cet, computed_at
+            SELECT calculator_id, tenant_id, reporting_date, total_runs, success_runs,
+                   sla_breaches, sum_duration_ms, sum_start_min_utc, sum_end_min_utc, computed_at
             FROM calculator_sli_daily
             WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
-            AND day_cet >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
-            ORDER BY day_cet DESC
+            AND reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
+            ORDER BY reporting_date DESC
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -118,12 +118,12 @@ public class DailyAggregateRepository {
         }
 
         String sql = """
-            SELECT calculator_id, tenant_id, day_cet, total_runs, success_runs,
-                   sla_breaches, sum_duration_ms, sum_start_min_cet, sum_end_min_cet, computed_at
+            SELECT calculator_id, tenant_id, reporting_date, total_runs, success_runs,
+                   sla_breaches, sum_duration_ms, sum_start_min_utc, sum_end_min_utc, computed_at
             FROM calculator_sli_daily
             WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
-            AND day_cet IN (:reportingDates)
-            ORDER BY day_cet DESC
+            AND reporting_date IN (:reportingDates)
+            ORDER BY reporting_date DESC
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -146,13 +146,13 @@ public class DailyAggregateRepository {
                 return new DailyAggregate(
                         rs.getString("calculator_id"),
                         rs.getString("tenant_id"),
-                        rs.getObject("day_cet", LocalDate.class),
+                        rs.getObject("reporting_date", LocalDate.class),
                         rs.getInt("total_runs"),
                         rs.getInt("success_runs"),
                         rs.getInt("sla_breaches"),
                         rs.getLong("sum_duration_ms"),
-                        rs.getLong("sum_start_min_cet"),
-                        rs.getLong("sum_end_min_cet"),
+                        rs.getLong("sum_start_min_utc"),
+                        rs.getLong("sum_end_min_utc"),
                         fromTimestamp(rs.getTimestamp("computed_at"))
                 );
             } catch (SQLException e) {

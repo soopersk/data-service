@@ -92,7 +92,7 @@ public class AnalyticsService {
             maxDuration = Math.max(maxDuration, agg.avgDurationMs());
 
             dataPoints.add(new RuntimeAnalyticsResponse.DailyDataPoint(
-                    agg.dayCet(), agg.avgDurationMs(), agg.totalRuns(), agg.successRuns()));
+                    agg.reportingDate(), agg.avgDurationMs(), agg.totalRuns(), agg.successRuns()));
         }
 
         long avgDuration = totalRuns > 0 ? weightedSum / totalRuns : 0;
@@ -135,7 +135,7 @@ public class AnalyticsService {
         int greenDays = 0, amberDays = 0, redDays = 0;
 
         for (DailyAggregate agg : coreData.getAggregates()) {
-            String worstSeverity = coreData.getWorstSeverityByDay().get(agg.dayCet());
+            String worstSeverity = coreData.getWorstSeverityByDay().get(agg.reportingDate());
             if (worstSeverity == null || agg.slaBreaches() == 0) {
                 greenDays++;
             } else {
@@ -179,13 +179,13 @@ public class AnalyticsService {
 
         List<TrendAnalyticsResponse.TrendDataPoint> trends = coreData.getAggregates().stream()
                 .map(agg -> {
-                    String worstSeverity = coreData.getWorstSeverityByDay().get(agg.dayCet());
+                    String worstSeverity = coreData.getWorstSeverityByDay().get(agg.reportingDate());
                     String slaStatus = classifyDay(agg, worstSeverity);
 
                     return new TrendAnalyticsResponse.TrendDataPoint(
-                            agg.dayCet(), agg.avgDurationMs(), agg.totalRuns(),
+                            agg.reportingDate(), agg.avgDurationMs(), agg.totalRuns(),
                             agg.successRuns(), agg.slaBreaches(),
-                            agg.avgStartMinCet(), agg.avgEndMinCet(), slaStatus);
+                            agg.avgStartMinUtc(), agg.avgEndMinUtc(), slaStatus);
                 })
                 .toList();
 

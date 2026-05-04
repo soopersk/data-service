@@ -11,13 +11,13 @@ import java.time.LocalDate;
 public record DailyAggregate(
         String calculatorId,
         String tenantId,
-        LocalDate dayCet,
+        LocalDate reportingDate,
         int totalRuns,
         int successRuns,
         int slaBreaches,
         long sumDurationMs,
-        long sumStartMinCet,
-        long sumEndMinCet,
+        long sumStartMinUtc,
+        long sumEndMinUtc,
         Instant computedAt
 ) {
     /** Average run duration in ms. Returns 0 when no runs recorded. */
@@ -25,13 +25,13 @@ public record DailyAggregate(
         return totalRuns > 0 ? sumDurationMs / totalRuns : 0;
     }
 
-    /** Average start minute (CET) across all runs. Returns 0 when no runs recorded. */
-    public int avgStartMinCet() {
-        return totalRuns > 0 ? (int) (sumStartMinCet / totalRuns) : 0;
+    /** Average start minute (UTC) across all runs. Returns 0 when no runs recorded. */
+    public int avgStartMinUtc() {
+        return totalRuns > 0 ? (int) (sumStartMinUtc / totalRuns) : 0;
     }
 
-    /** Average end minute (CET) across all runs. Returns 0 when no runs recorded. */
-    public int avgEndMinCet() {
-        return totalRuns > 0 ? (int) (sumEndMinCet / totalRuns) : 0;
+    /** Average end minute (UTC) across all runs. Returns 0 when no runs recorded. */
+    public int avgEndMinUtc() {
+        return totalRuns > 0 ? (int) (sumEndMinUtc / totalRuns) : 0;
     }
 }
