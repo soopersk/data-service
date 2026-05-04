@@ -78,8 +78,7 @@ public class RunIngestionService {
 
         Instant slaDeadline = null;
         if (frequency == CalculatorFrequency.DAILY) {
-            slaDeadline = TimeUtils.calculateSlaDeadline(
-                    request.getReportingDate(), request.getSlaTimeCet());
+            slaDeadline = request.getSlaTime();
         }
 
         boolean breachedAtStart = false;

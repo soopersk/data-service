@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.Map;
 
 /**
@@ -42,14 +41,13 @@ public class StartRunRequest {
     @Schema(example = "2026-02-06T23:22:32Z")
     private Instant startTime;
 
-    @NotNull(message = "SLA time (CET) is required")
-    @Schema(type = "string", example = "06:15:00",
-            description = "Target completion time in CET (time-of-day). Used for DAILY runs only.")
-    private LocalTime slaTimeCet;
+    @NotNull(message = "SLA deadline time (UTC) is required")
+    @Schema(description = "SLA deadline as UTC instant (ISO-8601, e.g. '2025-03-15T05:15:00Z')")
+    private Instant slaTime;
 
     // Optional fields
     private Long expectedDurationMs;
-    private LocalTime estimatedStartTimeCet;
+    private Instant estimatedStartTime;
 
     // Optional — promoted from run_parameters for query efficiency.
     // Top-level fields take precedence; fall back to runParameters map for backward compat.
