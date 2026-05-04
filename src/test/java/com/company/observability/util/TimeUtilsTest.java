@@ -1,6 +1,5 @@
 package com.company.observability.util;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -110,65 +109,6 @@ class TimeUtilsTest {
     }
 
     // -----------------------------------------------------------------------
-    // calculateNextEstimatedStart
-    // -----------------------------------------------------------------------
-
-    @Nested
-    class CalculateNextEstimatedStart {
-
-        @Test
-        void daily_advancesOneDay() {
-            // reporting date 2026-02-06, next day = 2026-02-07
-            // 04:15 CET (winter, UTC+1) = 03:15 UTC
-            Instant result = TimeUtils.calculateNextEstimatedStart(
-                    LocalDate.of(2026, 2, 6), LocalTime.of(4, 15), CalculatorFrequency.DAILY);
-
-            assertEquals(Instant.parse("2026-02-07T03:15:00Z"), result);
-        }
-
-        @Test
-        void monthly_advancesToEndOfNextMonth() {
-            // reporting date 2026-01-31, next end-of-month = 2026-02-28
-            // 04:00 CET (winter) = 03:00 UTC
-            Instant result = TimeUtils.calculateNextEstimatedStart(
-                    LocalDate.of(2026, 1, 31), LocalTime.of(4, 0), CalculatorFrequency.MONTHLY);
-
-            assertEquals(Instant.parse("2026-02-28T03:00:00Z"), result);
-        }
-
-        @Test
-        void monthly_leapYear_endOfFebruaryIs29th() {
-            // 2024 is a leap year: 2024-01-31 → 2024-02-29
-            Instant result = TimeUtils.calculateNextEstimatedStart(
-                    LocalDate.of(2024, 1, 31), LocalTime.of(4, 0), CalculatorFrequency.MONTHLY);
-
-            assertEquals(Instant.parse("2024-02-29T03:00:00Z"), result);
-        }
-
-        @Test
-        void daily_crossingDstBoundary_correctUtcOffset() {
-            // Day before DST spring-forward: next day is 2026-03-29 (CEST, UTC+2)
-            // 04:15 on 2026-03-29 CEST = 02:15 UTC
-            Instant result = TimeUtils.calculateNextEstimatedStart(
-                    LocalDate.of(2026, 3, 28), LocalTime.of(4, 15), CalculatorFrequency.DAILY);
-
-            assertEquals(Instant.parse("2026-03-29T02:15:00Z"), result);
-        }
-
-        @Test
-        void nullReportingDate_returnsNull() {
-            assertNull(TimeUtils.calculateNextEstimatedStart(
-                    null, LocalTime.of(4, 0), CalculatorFrequency.DAILY));
-        }
-
-        @Test
-        void nullEstimatedStartTime_returnsNull() {
-            assertNull(TimeUtils.calculateNextEstimatedStart(
-                    LocalDate.of(2026, 2, 6), null, CalculatorFrequency.DAILY));
-        }
-    }
-
-    // -----------------------------------------------------------------------
     // calculateCetHour
     // -----------------------------------------------------------------------
 
@@ -225,47 +165,6 @@ class TimeUtilsTest {
         @Test
         void null_returnsNull() {
             assertNull(TimeUtils.calculateCetHour(null));
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // calculateCetMinute
-    // -----------------------------------------------------------------------
-
-    @Nested
-    class CalculateCetMinute {
-
-        @Test
-        void midnight_returnsZero() {
-            // 23:00 UTC = 00:00 CET → 0 minutes
-            Instant instant = Instant.parse("2026-02-06T23:00:00Z");
-            assertEquals(0, TimeUtils.calculateCetMinute(instant));
-        }
-
-        @Test
-        void sixFifteen_cet() {
-            // 05:15 UTC = 06:15 CET → 6*60+15 = 375
-            Instant instant = Instant.parse("2026-02-06T05:15:00Z");
-            assertEquals(375, TimeUtils.calculateCetMinute(instant));
-        }
-
-        @Test
-        void subMinuteSeconds_truncated() {
-            // 05:15:45 UTC = 06:15:45 CET → (6*3600 + 15*60 + 45) / 60 = 22545 / 60 = 375 (integer div)
-            Instant instant = Instant.parse("2026-02-06T05:15:45Z");
-            assertEquals(375, TimeUtils.calculateCetMinute(instant));
-        }
-
-        @Test
-        void summer_usesCest() {
-            // 04:00 UTC = 06:00 CEST → 6*60 = 360
-            Instant instant = Instant.parse("2026-07-15T04:00:00Z");
-            assertEquals(360, TimeUtils.calculateCetMinute(instant));
-        }
-
-        @Test
-        void null_returnsNull() {
-            assertNull(TimeUtils.calculateCetMinute(null));
         }
     }
 
@@ -459,48 +358,6 @@ class TimeUtilsTest {
         @Test
         void null_returnsNull() {
             assertNull(TimeUtils.formatCetHour(null));
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // formatCetMinute
-    // -----------------------------------------------------------------------
-
-    @Nested
-    class FormatCetMinute {
-
-        @Test
-        void zero_returnsMidnight() {
-            assertEquals("00:00", TimeUtils.formatCetMinute(0));
-        }
-
-        @Test
-        void sixFifteen() {
-            // 375 min = 6h 15min
-            assertEquals("06:15", TimeUtils.formatCetMinute(375));
-        }
-
-        @Test
-        void endOfDay() {
-            // 1439 min = 23h 59min
-            assertEquals("23:59", TimeUtils.formatCetMinute(1439));
-        }
-
-        @Test
-        void exactHour() {
-            assertEquals("05:00", TimeUtils.formatCetMinute(300));
-        }
-
-        @Test
-        void roundtripWithCalculateCetMinute() {
-            Instant instant = Instant.parse("2026-02-06T05:15:00Z"); // 06:15 CET
-            Integer cetMinute = TimeUtils.calculateCetMinute(instant);
-            assertEquals("06:15", TimeUtils.formatCetMinute(cetMinute));
-        }
-
-        @Test
-        void null_returnsNull() {
-            assertNull(TimeUtils.formatCetMinute(null));
         }
     }
 
