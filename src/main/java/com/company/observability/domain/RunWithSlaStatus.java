@@ -4,7 +4,6 @@ import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.Severity;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
@@ -20,8 +19,6 @@ public record RunWithSlaStatus(
         Instant startTime,
         Instant endTime,
         Long durationMs,
-        BigDecimal startHourCet,
-        BigDecimal endHourCet,
         Instant slaTime,
         Instant estimatedStartTime,
         CalculatorFrequency frequency,

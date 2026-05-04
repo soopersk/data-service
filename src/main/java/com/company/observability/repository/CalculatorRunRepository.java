@@ -45,7 +45,7 @@ public class CalculatorRunRepository {
 
     private static final String SELECT_BASE = """
         SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-               start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+               start_time, end_time, duration_ms,
                status, sla_time, expected_duration_ms,
                estimated_start_time, estimated_end_time,
                sla_breached, sla_breach_reason,
@@ -57,7 +57,7 @@ public class CalculatorRunRepository {
 
     private static final String SELECT_STATUS_BASE = """
         SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-               start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+               start_time, end_time, duration_ms,
                status, sla_time, expected_duration_ms,
                estimated_start_time, estimated_end_time,
                sla_breached, sla_breach_reason,
@@ -215,7 +215,7 @@ public class CalculatorRunRepository {
         String sql = String.format("""
             SELECT * FROM (
                 SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-                       start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+                       start_time, end_time, duration_ms,
                        status, sla_time, expected_duration_ms,
                        estimated_start_time, estimated_end_time,
                        sla_breached, sla_breach_reason,
@@ -285,7 +285,7 @@ public class CalculatorRunRepository {
         String sql = """
             INSERT INTO calculator_runs (
                 run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-                start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+                start_time, end_time, duration_ms,
                 status, sla_time, expected_duration_ms,
                 estimated_start_time, estimated_end_time,
                 sla_breached, sla_breach_reason,
@@ -294,7 +294,7 @@ public class CalculatorRunRepository {
                 created_at, updated_at
             ) VALUES (
                 :runId, :calculatorId, :calculatorName, :tenantId, :frequency, :reportingDate,
-                :startTime, :endTime, :durationMs, :startHourCet, :endHourCet,
+                :startTime, :endTime, :durationMs,
                 :status, :slaTime, :expectedDurationMs,
                 :estimatedStartTime, :estimatedEndTime,
                 :slaBreached, :slaBreachReason,
@@ -305,7 +305,6 @@ public class CalculatorRunRepository {
             ON CONFLICT (run_id, reporting_date) DO UPDATE SET
                 end_time = EXCLUDED.end_time,
                 duration_ms = EXCLUDED.duration_ms,
-                end_hour_cet = EXCLUDED.end_hour_cet,
                 status = EXCLUDED.status,
                 sla_breached = EXCLUDED.sla_breached,
                 sla_breach_reason = EXCLUDED.sla_breach_reason,
@@ -328,8 +327,6 @@ public class CalculatorRunRepository {
                 .addValue("startTime", toTimestamp(run.getStartTime()))
                 .addValue("endTime", toTimestamp(run.getEndTime()))
                 .addValue("durationMs", run.getDurationMs())
-                .addValue("startHourCet", run.getStartHourCet())
-                .addValue("endHourCet", run.getEndHourCet())
                 .addValue("status", run.getStatus().name())
                 .addValue("slaTime", toTimestamp(run.getSlaTime()))
                 .addValue("expectedDurationMs", run.getExpectedDurationMs())
@@ -457,7 +454,7 @@ public class CalculatorRunRepository {
 
         String sql = """
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
-                   cr.start_time, cr.end_time, cr.duration_ms, cr.start_hour_cet, cr.end_hour_cet,
+                   cr.start_time, cr.end_time, cr.duration_ms,
                    cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
                    cr.sla_breached, cr.sla_breach_reason,
                    sbe.severity
@@ -486,8 +483,6 @@ public class CalculatorRunRepository {
                     fromTimestamp(rs.getTimestamp("start_time")),
                     fromTimestamp(rs.getTimestamp("end_time")),
                     rs.getObject("duration_ms", Long.class),
-                    rs.getBigDecimal("start_hour_cet"),
-                    rs.getBigDecimal("end_hour_cet"),
                     fromTimestamp(rs.getTimestamp("sla_time")),
                     fromTimestamp(rs.getTimestamp("estimated_start_time")),
                     CalculatorFrequency.from(rs.getString("frequency")),
@@ -525,7 +520,7 @@ public class CalculatorRunRepository {
 
         String sql = """
             SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-                   start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+                   start_time, end_time, duration_ms,
                    status, sla_time, expected_duration_ms,
                    estimated_start_time, estimated_end_time,
                    sla_breached, sla_breach_reason,
@@ -653,7 +648,7 @@ public class CalculatorRunRepository {
 
         String sql = """
             SELECT run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-                   start_time, end_time, duration_ms, start_hour_cet, end_hour_cet,
+                   start_time, end_time, duration_ms,
                    status, sla_time, expected_duration_ms,
                    estimated_start_time, estimated_end_time,
                    sla_breached, sla_breach_reason,
@@ -782,8 +777,6 @@ public class CalculatorRunRepository {
                         .startTime(fromTimestamp(rs.getTimestamp("start_time")))
                         .endTime(fromTimestamp(rs.getTimestamp("end_time")))
                         .durationMs(rs.getObject("duration_ms", Long.class))
-                        .startHourCet(rs.getBigDecimal("start_hour_cet"))
-                        .endHourCet(rs.getBigDecimal("end_hour_cet"))
                         .status(RunStatus.fromString(rs.getString("status")))
                         .slaTime(fromTimestamp(rs.getTimestamp("sla_time")))
                         .expectedDurationMs(rs.getObject("expected_duration_ms", Long.class))

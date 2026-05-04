@@ -5,7 +5,6 @@ import com.company.observability.domain.enums.RunStatus;
 import lombok.*;
 
 import java.io.Serializable;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
@@ -41,10 +40,6 @@ public class CalculatorRun implements Serializable {
     private Instant startTime;
     private Instant endTime;
     private Long durationMs;
-
-    // CET time conversions for display
-    private BigDecimal startHourCet;
-    private BigDecimal endHourCet;
 
     // Default to RUNNING
     @Builder.Default

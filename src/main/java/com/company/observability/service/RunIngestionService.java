@@ -110,7 +110,6 @@ public class RunIngestionService {
                 .frequency(frequency)
                 .reportingDate(request.getReportingDate())
                 .startTime(request.getStartTime())
-                .startHourCet(TimeUtils.calculateCetHour(request.getStartTime()))
                 .status(RunStatus.RUNNING)
                 .slaTime(slaDeadline)
                 .expectedDurationMs(request.getExpectedDurationMs())
@@ -196,7 +195,6 @@ public class RunIngestionService {
 
         run.setEndTime(request.getEndTime());
         run.setDurationMs(durationMs);
-        run.setEndHourCet(TimeUtils.calculateCetHour(request.getEndTime()));
         CompletionStatus completionStatus = request.getStatus() != null
                 ? request.getStatus()
                 : CompletionStatus.SUCCESS;
@@ -262,6 +260,12 @@ public class RunIngestionService {
 
     private void updateDailyAggregate(CalculatorRun run) {
         try {
+            int startMinUtc = run.getStartTime().atZone(java.time.ZoneOffset.UTC).getHour() * 60
+                    + run.getStartTime().atZone(java.time.ZoneOffset.UTC).getMinute();
+            int endMinUtc = (run.getEndTime() != null)
+                    ? run.getEndTime().atZone(java.time.ZoneOffset.UTC).getHour() * 60
+                      + run.getEndTime().atZone(java.time.ZoneOffset.UTC).getMinute()
+                    : 0;
             dailyAggregateRepository.upsertDaily(
                     run.getCalculatorId(),
                     run.getTenantId(),
@@ -269,8 +273,8 @@ public class RunIngestionService {
                     run.getStatus().name(),
                     run.getSlaBreached(),
                     run.getDurationMs(),
-                    TimeUtils.calculateCetMinute(run.getStartTime()),
-                    TimeUtils.calculateCetMinute(run.getEndTime())
+                    startMinUtc,
+                    endMinUtc
             );
         } catch (Exception e) {
             log.error("event=daily_aggregate.upsert outcome=failure reportingDate={}",
