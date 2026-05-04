@@ -14,8 +14,6 @@ CREATE TABLE IF NOT EXISTS calculator_runs (
     start_time           TIMESTAMPTZ    NOT NULL,
     end_time             TIMESTAMPTZ,
     duration_ms          BIGINT,
-    start_hour_cet       DECIMAL(4, 2),
-    end_hour_cet         DECIMAL(4, 2),
 
     -- Status
     status               VARCHAR(20)    NOT NULL,
