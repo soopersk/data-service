@@ -203,7 +203,7 @@ public class SlaBreachEventRepository {
     public Map<LocalDate, String> findWorstSeverityByDay(
             String calculatorId, String tenantId, int days) {
         String sql = """
-            SELECT (created_at AT TIME ZONE 'CET')::DATE AS day_cet,
+            SELECT (created_at AT TIME ZONE 'Europe/Amsterdam')::DATE AS day_cet,
                    MAX(
                        CASE severity
                            WHEN 'CRITICAL' THEN 4
@@ -216,7 +216,7 @@ public class SlaBreachEventRepository {
             FROM sla_breach_events
             """ + BASE_WHERE + """
 
-            GROUP BY (created_at AT TIME ZONE 'CET')::DATE""";
+            GROUP BY (created_at AT TIME ZONE 'Europe/Amsterdam')::DATE""";
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
