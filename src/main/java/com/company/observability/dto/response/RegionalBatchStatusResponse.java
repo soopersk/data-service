@@ -1,6 +1,6 @@
 package com.company.observability.dto.response;
 
-import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -20,7 +20,7 @@ public record RegionalBatchStatusResponse(
 ) {
 
     public record OverallSla(
-            String deadlineTimeCet,
+            Instant deadlineTime,
             boolean breached
     ) {}
 
@@ -28,10 +28,8 @@ public record RegionalBatchStatusResponse(
             String region,
             String runId,
             String status,
-            String startTimeCet,
-            String endTimeCet,
-            BigDecimal startHourCet,
-            BigDecimal endHourCet,
+            Instant startTime,
+            Instant endTime,
             Long durationMs,
             String durationFormatted,
             String runDay,

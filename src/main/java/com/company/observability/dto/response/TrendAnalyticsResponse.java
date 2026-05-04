@@ -14,8 +14,8 @@ public record TrendAnalyticsResponse(
             int totalRuns,
             int successRuns,
             int slaBreaches,
-            int avgStartMinCet,
-            int avgEndMinCet,
+            int avgStartMinUtc,
+            int avgEndMinUtc,
             String slaStatus
     ) {}
 }

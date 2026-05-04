@@ -1,6 +1,6 @@
 package com.company.observability.dto.response;
 
-import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -16,7 +16,7 @@ public record PerformanceCardResponse(
         ReferenceLines referenceLines
 ) {
     public record ScheduleInfo(
-            String estimatedStartTimeCet,
+            Instant estimatedStartTime,
             String frequency
     ) {}
 
@@ -34,17 +34,15 @@ public record PerformanceCardResponse(
             String runId,
             LocalDate reportingDate,
             String dateFormatted,
-            BigDecimal startHourCet,
-            BigDecimal endHourCet,
-            String startTimeCet,
-            String endTimeCet,
+            Instant startTime,
+            Instant endTime,
             long durationMs,
             String durationFormatted,
             String slaStatus
     ) {}
 
     public record ReferenceLines(
-            BigDecimal slaStartHourCet,
-            BigDecimal slaEndHourCet
+            Instant slaStartTime,
+            Instant slaEndTime
     ) {}
 }
