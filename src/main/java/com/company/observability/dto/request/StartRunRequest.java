@@ -55,6 +55,10 @@ public class StartRunRequest {
     private String runType;
     private String region;
 
+    // Optional — set the same value on every physical split that belongs to one logical run.
+    // Null means this is a standalone run (not a split).
+    private String correlationId;
+
     private Map<String, Object> runParameters;
     private Map<String, Object> additionalAttributes;
 }

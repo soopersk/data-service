@@ -38,7 +38,8 @@ public record PerformanceCardResponse(
             Instant endTime,
             long durationMs,
             String durationFormatted,
-            String slaStatus
+            String slaStatus,
+            List<String> subRunIds   // non-null only when this bar represents a collapsed split group
     ) {}
 
     public record ReferenceLines(
