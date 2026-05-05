@@ -1,0 +1,207 @@
+{
+  "reportingDate": "2026-04-17",
+  "frequency": "DAILY",
+  "runNumber": 1,
+  "sections": [
+    {
+      "sectionKey": "REGIONAL",
+      "displayName": "Regional",
+      "displayOrder": 1,
+      "sla": {
+        "deadlineTime": "2026-04-17T15:45:00.000Z",
+        "breached": true
+      },
+      "dependency": null,
+      "summary": {
+        "totalCalculators": 10,
+        "completedCount": 8,
+        "runningCount": 1,
+        "failedCount": 1,
+        "notStartedCount": 0,
+        "estimatedStart": {
+          "time": "2026-04-17T02:15:00.000Z",
+          "basedOn": "ASIA",
+          "actual": true
+        },
+        "estimatedEnd": {
+          "time": "2026-04-17T15:30:00.000Z",
+          "basedOn": "EURO",
+          "actual": false
+        }
+      },
+      "calculators": [
+        {
+          "calculatorId": "regional-wmap-calc",
+          "calculatorName": "WMAP",
+          "runId": "run-wmap-20260417",
+          "status": "ON_TIME",
+          "startTime": "2026-04-17T03:00:00.000Z",
+          "endTime": "2026-04-17T05:15:00.000Z",
+          "durationMs": 8100000,
+          "slaBreached": false,
+          "subRuns": null,
+          "lastRuns": [
+            {
+              "reportingDate": "2026-04-16",
+              "status": "ON_TIME"
+            },
+            {
+              "reportingDate": "2026-04-15",
+              "status": "DELAYED"
+            }
+          ]
+        },
+        {
+          "calculatorId": "regional-wmde-calc",
+          "calculatorName": "WMDE",
+          "runId": "run-wmde-20260417",
+          "status": "DELAYED",
+          "startTime": "2026-04-17T04:30:00.000Z",
+          "endTime": "2026-04-17T16:10:00.000Z",
+          "durationMs": 42000000,
+          "slaBreached": true,
+          "subRuns": null,
+          "lastRuns": [
+            {
+              "reportingDate": "2026-04-16",
+              "status": "ON_TIME"
+            },
+            {
+              "reportingDate": "2026-04-15",
+              "status": "ON_TIME"
+            }
+          ]
+        }
+      ],
+      "displayLabels": null
+    },
+    {
+      "sectionKey": "PORTFOLIO",
+      "displayName": "Portfolio",
+      "displayOrder": 2,
+      "sla": {
+        "deadlineTime": "2026-04-17T16:30:00.000Z",
+        "breached": false
+      },
+      "dependency": {
+        "dependsOnSection": "REGIONAL",
+        "dependencyMet": false,
+        "statusLabel": "Waiting for Regional"
+      },
+      "summary": {
+        "totalCalculators": 1,
+        "completedCount": 0,
+        "runningCount": 0,
+        "failedCount": 0,
+        "notStartedCount": 1,
+        "estimatedStart": null,
+        "estimatedEnd": null
+      },
+      "calculators": [
+        {
+          "calculatorId": "portfolio-calc",
+          "calculatorName": "Portfolio",
+          "runId": null,
+          "status": "NOT_STARTED",
+          "startTime": null,
+          "endTime": null,
+          "durationMs": null,
+          "slaBreached": false,
+          "subRuns": null,
+          "lastRuns": [
+            {
+              "reportingDate": "2026-04-16",
+              "status": "ON_TIME"
+            },
+            {
+              "reportingDate": "2026-04-15",
+              "status": "ON_TIME"
+            }
+          ]
+        }
+      ],
+      "displayLabels": [
+        "CAP 8 - Securitization",
+        "CAP 10 - Counterparty credit risk on derivatives and SFTs",
+        "CAP 12 - Leverage ratio denominator",
+        "CAP 13 - Credit valuation adjustments",
+        "CAP 14 - Business indicator component"
+      ]
+    },
+    {
+      "sectionKey": "RISK_GOVERNED",
+      "displayName": "Risk governed",
+      "displayOrder": 4,
+      "sla": {
+        "deadlineTime": "2026-04-17T18:30:00.000Z",
+        "breached": false
+      },
+      "dependency": null,
+      "summary": {
+        "totalCalculators": 2,
+        "completedCount": 1,
+        "runningCount": 1,
+        "failedCount": 0,
+        "notStartedCount": 0,
+        "estimatedStart": {
+          "time": "2026-04-17T16:05:00.000Z",
+          "basedOn": "Modelled Exposure",
+          "actual": true
+        },
+        "estimatedEnd": null
+      },
+      "calculators": [
+        {
+          "calculatorId": "modelled-exposure-calc",
+          "calculatorName": "Modelled Exposure",
+          "runId": null,
+          "status": "RUNNING",
+          "startTime": "2026-04-17T16:05:00.000Z",
+          "endTime": null,
+          "durationMs": null,
+          "slaBreached": false,
+          "subRuns": [
+            {
+              "subRunKey": "OTC",
+              "runId": "run-model-exp-otc-20260417",
+              "status": "ON_TIME",
+              "startTime": "2026-04-17T16:05:00.000Z",
+              "endTime": "2026-04-17T16:30:00.000Z",
+              "durationMs": 1500000,
+              "slaBreached": false
+            },
+            {
+              "subRunKey": "ETD",
+              "runId": "run-model-exp-etd-20260417",
+              "status": "RUNNING",
+              "startTime": "2026-04-17T16:32:00.000Z",
+              "endTime": null,
+              "durationMs": null,
+              "slaBreached": false
+            },
+            {
+              "subRunKey": "SFT",
+              "runId": null,
+              "status": "NOT_STARTED",
+              "startTime": null,
+              "endTime": null,
+              "durationMs": null,
+              "slaBreached": false
+            }
+          ],
+          "lastRuns": [
+            {
+              "reportingDate": "2026-04-16",
+              "status": "ON_TIME"
+            },
+            {
+              "reportingDate": "2026-04-15",
+              "status": "FAILED"
+            }
+          ]
+        }
+      ],
+      "displayLabels": null
+    }
+  ]
+}

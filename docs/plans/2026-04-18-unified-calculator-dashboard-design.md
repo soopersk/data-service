@@ -28,12 +28,12 @@ The existing backend serves a **Regional Batch Status** endpoint that powers the
 ○ Portfolio          ∨    ← 1 run, 5 CAP display labels, each row shows same status
 ○ Group portfolio    ∨    ← 1 run, 1 row
 ○ Risk governed      ∨    ← 2 sub-calcs:
-                              Gemini Hedge: 1 row
+                              Gemini Hedge: 1 row, 3 sub-buttons (OTC, ETD, SFT)
                               Modelled Exposure: 1 row, 3 sub-buttons (OTC, ETD, SFT)
 ○ Consolidation      ∨    ← 1 run, 1 row
 
 Dependency chain: Regional → Portfolio → Group Portfolio → Consolidation
-                  Risk Governed runs in parallel (no strict dependency)
+                  Risk Governed runs in parallel (no strict dependency, but Gemini runs on back off Model exposure, so gemini also 3 runs (OTC, ETD, SFT))
 ```
 
 ---
@@ -164,6 +164,116 @@ The API returns **1 `CalculatorEntry`** for Portfolio. The config includes 5 dis
 ### Model Exposure special handling
 
 Modelled Exposure is **1 `CalculatorEntry`** with `subRuns` containing 3 items: `{OTC, ETD, SFT}`. The overall entry status = worst status across the 3 sub-runs.
+
+---
+
+## 2a. REST API Contract - UTC Projection Response
+
+This section supersedes the earlier CET-formatted DTO sketch for the projection-layer REST contract. The backend returns raw UTC timestamps and numeric durations only. The UI owns date formatting, local timezone display, CET labels, percentage formatting, and duration text.
+
+### Request
+
+```http
+GET /api/v1/analytics/projections/calculator-dashboard?reportingDate=2026-04-17&frequency=DAILY&runNumber=1
+X-Tenant-Id: tenant-1
+```
+
+| Field | Location | Type | Required | Notes |
+|-------|----------|------|----------|-------|
+| `reportingDate` | query | `YYYY-MM-DD` | Yes | Business/reporting date. |
+| `frequency` | query | string | Yes | `DAILY`, `MONTHLY`, `D`, or `M`. |
+| `runNumber` | query | integer | Yes | `1` or `2`. |
+| `X-Tenant-Id` | header | string | Yes | Tenant boundary. Required on every request. |
+
+### Response Principles
+
+- All timestamp fields are UTC and serialized as `YYYY-MM-DDThh:mm:ss.sssZ`.
+- No CET-specific response fields are required. Do not expose fields such as `deadlineTimeCet`, `startTimeCet`, `endTimeCet`, `startHourCet`, or `deadlineHourCet`.
+- Server-formatted display fields are intentionally omitted. Do not expose fields such as `reportingDateFormatted`, `durationFormatted`, or percentage strings/numbers whose only purpose is display formatting.
+- `reportingDate` and `lastRuns[].reportingDate` remain date-only business fields, not timestamps.
+- `durationMs` remains numeric because it is a raw measurement, not presentation text.
+- Nullable timestamp fields must be `null` when a run has not started or has not ended.
+
+### Response Shape
+
+```ts
+type CalculatorDashboardResponse = {
+  reportingDate: string;
+  frequency: "DAILY" | "MONTHLY";
+  runNumber: 1 | 2;
+  sections: DashboardSection[];
+};
+
+type DashboardSection = {
+  sectionKey: "REGIONAL" | "PORTFOLIO" | "GROUP_PORTFOLIO" | "RISK_GOVERNED" | "CONSOLIDATION";
+  displayName: string;
+  displayOrder: number;
+  sla: SectionSla;
+  dependency: DependencyStatus | null;
+  summary: SectionSummary;
+  calculators: CalculatorEntry[];
+  displayLabels: string[] | null;
+};
+
+type SectionSla = {
+  deadlineTime: string;
+  breached: boolean;
+};
+
+type DependencyStatus = {
+  dependsOnSection: string;
+  dependencyMet: boolean;
+  statusLabel: string;
+};
+
+type SectionSummary = {
+  totalCalculators: number;
+  completedCount: number;
+  runningCount: number;
+  failedCount: number;
+  notStartedCount: number;
+  estimatedStart: TimeReference | null;
+  estimatedEnd: TimeReference | null;
+};
+
+type TimeReference = {
+  time: string;
+  basedOn: string | null;
+  actual: boolean;
+};
+
+type CalculatorEntry = {
+  calculatorId: string;
+  calculatorName: string;
+  runId: string | null;
+  status: "ON_TIME" | "DELAYED" | "FAILED" | "RUNNING" | "NOT_STARTED";
+  startTime: string | null;
+  endTime: string | null;
+  durationMs: number | null;
+  slaBreached: boolean;
+  subRuns: SubRunStatus[] | null;
+  lastRuns: LastRunIndicator[];
+};
+
+type SubRunStatus = {
+  subRunKey: "OTC" | "ETD" | "SFT";
+  runId: string | null;
+  status: "ON_TIME" | "DELAYED" | "FAILED" | "RUNNING" | "NOT_STARTED";
+  startTime: string | null;
+  endTime: string | null;
+  durationMs: number | null;
+  slaBreached: boolean;
+};
+
+type LastRunIndicator = {
+  reportingDate: string;
+  status: "ON_TIME" | "DELAYED" | "FAILED";
+};
+```
+
+### Sample Response
+
+See `docs/plans/calculator-dashboard-sample-response.json` for a valid JSON example.
 
 ---
 

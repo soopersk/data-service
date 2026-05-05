@@ -19,18 +19,14 @@ import com.company.observability.service.DashboardService.DashboardResult;
 import com.company.observability.service.DashboardService.SectionResult;
 import com.company.observability.service.DashboardService.SubRunResult;
 import com.company.observability.service.RegionalBatchService.EstimatedTime;
-import com.company.observability.util.TimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Locale;
 
 /**
- * Maps {@link DashboardService} domain data to the pre-formatted
+ * Maps {@link DashboardService} domain data to the UTC REST response
  * {@link CalculatorDashboardResponse} used by the calculator-dashboard endpoint.
  */
 @Service
@@ -39,9 +35,6 @@ public class DashboardProjection {
 
     private final DashboardService dashboardService;
     private final DashboardCacheService dashboardCacheService;
-
-    private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("EEE dd MMM yyyy", Locale.ENGLISH);
 
     public CalculatorDashboardResponse getCalculatorDashboard(
             String tenantId, LocalDate reportingDate, String frequency, int runNumber) {
@@ -57,15 +50,12 @@ public class DashboardProjection {
     }
 
     private CalculatorDashboardResponse toDashboardResponse(DashboardResult result) {
-        String dateFormatted = result.reportingDate().format(DATE_FORMATTER);
-
         List<DashboardSection> sections = result.sections().stream()
                 .map(this::toSection)
                 .toList();
 
         return new CalculatorDashboardResponse(
                 result.reportingDate(),
-                dateFormatted,
                 result.frequency(),
                 result.runNumber(),
                 sections
@@ -73,9 +63,7 @@ public class DashboardProjection {
     }
 
     private DashboardSection toSection(SectionResult section) {
-        BigDecimal slaHour = TimeUtils.calculateCetHour(section.slaDeadline());
-        String slaTime = TimeUtils.formatCetHour(slaHour);
-        SectionSla sla = new SectionSla(slaTime, slaHour, section.slaBreached());
+        SectionSla sla = new SectionSla(section.slaDeadline(), section.slaBreached());
 
         DependencyStatus dependency = null;
         if (section.dependency() != null) {
@@ -123,10 +111,6 @@ public class DashboardProjection {
     private CalculatorEntry toCalculatorEntry(CalculatorEntryResult entry) {
         CalculatorRun run = entry.run();
 
-        BigDecimal startHour = run != null ? TimeUtils.calculateCetHour(run.getStartTime()) : null;
-        BigDecimal endHour   = run != null ? TimeUtils.calculateCetHour(run.getEndTime()) : null;
-        String startCet = startHour != null ? TimeUtils.formatCetHour(startHour) + " CET" : null;
-        String endCet   = endHour   != null ? TimeUtils.formatCetHour(endHour)   + " CET" : null;
         Long durationMs = run != null ? run.getDurationMs() : null;
 
         List<SubRunStatus> subRuns = null;
@@ -147,12 +131,9 @@ public class DashboardProjection {
                 entry.calculatorName(),
                 run != null ? run.getRunId() : null,
                 entry.status(),
-                startCet,
-                endCet,
-                startHour,
-                endHour,
+                run != null ? run.getStartTime() : null,
+                run != null ? run.getEndTime() : null,
                 durationMs,
-                TimeUtils.formatDuration(durationMs),
                 entry.slaBreached(),
                 subRuns,
                 lastRuns
@@ -161,20 +142,15 @@ public class DashboardProjection {
 
     private SubRunStatus toSubRunStatus(SubRunResult sub) {
         CalculatorRun run = sub.run();
-        BigDecimal startHour = run != null ? TimeUtils.calculateCetHour(run.getStartTime()) : null;
-        BigDecimal endHour   = run != null ? TimeUtils.calculateCetHour(run.getEndTime()) : null;
-        String startCet = startHour != null ? TimeUtils.formatCetHour(startHour) + " CET" : null;
-        String endCet   = endHour   != null ? TimeUtils.formatCetHour(endHour)   + " CET" : null;
         Long durationMs = run != null ? run.getDurationMs() : null;
 
         return new SubRunStatus(
                 sub.subRunKey(),
                 run != null ? run.getRunId() : null,
                 sub.status(),
-                startCet,
-                endCet,
+                run != null ? run.getStartTime() : null,
+                run != null ? run.getEndTime() : null,
                 durationMs,
-                TimeUtils.formatDuration(durationMs),
                 sub.slaBreached()
         );
     }

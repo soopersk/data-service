@@ -1,6 +1,8 @@
 package com.company.observability.dto.response;
 
-import java.math.BigDecimal;
+import com.fasterxml.jackson.annotation.JsonFormat;
+
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -25,7 +27,6 @@ import java.util.List;
  */
 public record CalculatorDashboardResponse(
         LocalDate reportingDate,
-        String reportingDateFormatted,        // "Fri 17 Apr 2026"
         String frequency,                     // "DAILY" or "MONTHLY"
         int runNumber,                        // 1 or 2
         List<DashboardSection> sections       // ordered by displayOrder
@@ -53,12 +54,11 @@ public record CalculatorDashboardResponse(
 
     /**
      * SLA deadline and breach status for a section.
-     * Used by the UI to render "SLA: 17:45 CET" in the accordion header,
-     * coloured red when {@code breached = true}.
+     * All timestamp values are UTC instants serialized as YYYY-MM-DDThh:mm:ss.sssZ.
      */
     public record SectionSla(
-            String deadlineTimeCet,           // "17:45"
-            BigDecimal deadlineHourCet,       // 17.75
+            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX", timezone = "UTC")
+            Instant deadlineTime,
             boolean breached
     ) {}
 
@@ -100,12 +100,11 @@ public record CalculatorDashboardResponse(
             String calculatorName,            // "Gemini Hedge", region code "WMAP", etc.
             String runId,                     // null if NOT_STARTED
             String status,                    // ON_TIME, DELAYED, FAILED, RUNNING, NOT_STARTED
-            String startTimeCet,              // "10:30 CET", null if not started
-            String endTimeCet,                // null if RUNNING or NOT_STARTED
-            BigDecimal startHourCet,
-            BigDecimal endHourCet,
+            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX", timezone = "UTC")
+            Instant startTime,                // null if not started
+            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX", timezone = "UTC")
+            Instant endTime,                  // null if RUNNING or NOT_STARTED
             Long durationMs,
-            String durationFormatted,
             boolean slaBreached,
             List<SubRunStatus> subRuns,
             List<LastRunIndicator> lastRuns
@@ -118,10 +117,11 @@ public record CalculatorDashboardResponse(
             String subRunKey,                 // "OTC", "ETD", "SFT"
             String runId,
             String status,                    // ON_TIME, DELAYED, FAILED, RUNNING, NOT_STARTED
-            String startTimeCet,
-            String endTimeCet,
+            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX", timezone = "UTC")
+            Instant startTime,
+            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX", timezone = "UTC")
+            Instant endTime,
             Long durationMs,
-            String durationFormatted,
             boolean slaBreached
     ) {}
 
