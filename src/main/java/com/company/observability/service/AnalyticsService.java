@@ -8,6 +8,7 @@ import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.enums.SlaStatus;
 import com.company.observability.dto.response.*;
+import com.company.observability.service.projection.LogicalRunGrouper;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.repository.DailyAggregateRepository;
 import com.company.observability.repository.SlaBreachEventRepository;
@@ -280,7 +281,10 @@ public class AnalyticsService {
                     Collections.emptyList(), null, null);
         }
 
-        RunWithSlaStatus latestRun = runs.get(runs.size() - 1);
+        // Collapse split runs that share a correlationId into one logical run each.
+        List<LogicalRunGrouper.LogicalRun> logicalRuns = LogicalRunGrouper.groupWithSla(runs);
+
+        RunWithSlaStatus latestRaw = runs.get(runs.size() - 1);
 
         long totalDuration = 0;
         int completedCount = 0;
@@ -290,43 +294,43 @@ public class AnalyticsService {
 
         List<RunPerformanceData.RunDataPoint> dataPoints = new ArrayList<>();
 
-        for (RunWithSlaStatus run : runs) {
-            if (run.status() == RunStatus.RUNNING) {
+        for (LogicalRunGrouper.LogicalRun lr : logicalRuns) {
+            boolean isRunning = RunStatus.RUNNING.name().equals(lr.status());
+
+            if (isRunning) {
                 runningRuns++;
             } else {
                 terminalRuns++;
             }
 
-            if (run.status() != RunStatus.RUNNING
-                    && run.durationMs() != null
-                    && run.durationMs() > 0) {
-                totalDuration += run.durationMs();
+            if (!isRunning && lr.wallClockDurationMs() != null && lr.wallClockDurationMs() > 0) {
+                totalDuration += lr.wallClockDurationMs();
                 completedCount++;
             }
 
-            String slaStatus = classifyRunSlaStatus(run);
-            if (run.status() != RunStatus.RUNNING) {
-                if (SlaStatus.SLA_MET.name().equals(slaStatus)) slaMetCount++;
-                else if (SlaStatus.LATE.name().equals(slaStatus)) lateCount++;
-                else if (SlaStatus.VERY_LATE.name().equals(slaStatus)) veryLateCount++;
+            if (!isRunning) {
+                if (SlaStatus.SLA_MET.name().equals(lr.slaStatus())) slaMetCount++;
+                else if (SlaStatus.LATE.name().equals(lr.slaStatus())) lateCount++;
+                else if (SlaStatus.VERY_LATE.name().equals(lr.slaStatus())) veryLateCount++;
             }
 
             dataPoints.add(new RunPerformanceData.RunDataPoint(
-                    run.runId(),
-                    run.reportingDate(),
-                    run.startTime(),
-                    run.endTime(),
-                    run.durationMs(),
-                    run.status().name(),
-                    run.slaBreached(),
-                    slaStatus));
+                    lr.runId(),
+                    lr.reportingDate(),
+                    lr.startTime(),
+                    lr.endTime(),
+                    lr.wallClockDurationMs(),
+                    lr.status(),
+                    lr.slaBreached(),
+                    lr.slaStatus(),
+                    lr.subRunIds()));
         }
 
         long meanDuration = completedCount > 0 ? totalDuration / completedCount : 0;
 
         return new RunPerformanceData(
                 calculatorId,
-                latestRun.calculatorName(),
+                latestRaw.calculatorName(),
                 frequency.name(),
                 days,
                 meanDuration,
@@ -336,32 +340,13 @@ public class AnalyticsService {
                 lateCount,
                 veryLateCount,
                 dataPoints,
-                latestRun.estimatedStartTime(),
-                latestRun.slaTime());
+                latestRaw.estimatedStartTime(),
+                latestRaw.slaTime());
     }
 
     // ================================================================
     // SLA classification helpers
     // ================================================================
-
-    /**
-     * Per-run classification for performance card (SLA_MET / LATE / VERY_LATE)
-     */
-    private String classifyRunSlaStatus(RunWithSlaStatus run) {
-        if (run.status() == RunStatus.RUNNING) {
-            return SlaStatus.RUNNING.name();
-        }
-        if (!Boolean.TRUE.equals(run.slaBreached())) {
-            return SlaStatus.SLA_MET.name();
-        }
-        if (run.severity() == null) {
-            return SlaStatus.LATE.name(); // fallback for breach without severity record
-        }
-        return switch (run.severity()) {
-            case HIGH, CRITICAL -> SlaStatus.VERY_LATE.name();
-            default -> SlaStatus.LATE.name();
-        };
-    }
 
     /**
      * Per-day classification for trends/summary (GREEN / AMBER / RED)

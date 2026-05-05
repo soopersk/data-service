@@ -78,7 +78,8 @@ public class PerformanceCardProjection {
                 run.endTime(),
                 run.durationMs() != null ? run.durationMs() : 0,
                 TimeUtils.formatDuration(run.durationMs()),
-                run.slaStatus());
+                run.slaStatus(),
+                run.subRunIds());
     }
 
     private double pct(int count, int total) {

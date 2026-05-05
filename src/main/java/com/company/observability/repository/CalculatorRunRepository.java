@@ -49,7 +49,7 @@ public class CalculatorRunRepository {
                status, sla_time, expected_duration_ms,
                estimated_start_time, estimated_end_time,
                sla_breached, sla_breach_reason,
-               run_number, run_type, region,
+               run_number, run_type, region, correlation_id,
                run_parameters, additional_attributes,
                created_at, updated_at
         FROM calculator_runs
@@ -219,7 +219,7 @@ public class CalculatorRunRepository {
                        status, sla_time, expected_duration_ms,
                        estimated_start_time, estimated_end_time,
                        sla_breached, sla_breach_reason,
-                       run_number, run_type, region,
+                       run_number, run_type, region, correlation_id,
                        created_at, updated_at,
                        ROW_NUMBER() OVER (
                            PARTITION BY calculator_id
@@ -289,7 +289,7 @@ public class CalculatorRunRepository {
                 status, sla_time, expected_duration_ms,
                 estimated_start_time, estimated_end_time,
                 sla_breached, sla_breach_reason,
-                run_number, run_type, region,
+                run_number, run_type, region, correlation_id,
                 run_parameters, additional_attributes,
                 created_at, updated_at
             ) VALUES (
@@ -298,7 +298,7 @@ public class CalculatorRunRepository {
                 :status, :slaTime, :expectedDurationMs,
                 :estimatedStartTime, :estimatedEndTime,
                 :slaBreached, :slaBreachReason,
-                :runNumber, :runType, :region,
+                :runNumber, :runType, :region, :correlationId,
                 :runParameters, :additionalAttributes,
                 :createdAt, :updatedAt
             )
@@ -337,6 +337,7 @@ public class CalculatorRunRepository {
                 .addValue("runNumber", run.getRunNumber())
                 .addValue("runType", run.getRunType())
                 .addValue("region", run.getRegion())
+                .addValue("correlationId", run.getCorrelationId())
                 .addValue("runParameters", jsonbConverter.toJsonb(run.getRunParameters()))
                 .addValue("additionalAttributes", jsonbConverter.toJsonb(run.getAdditionalAttributes()))
                 .addValue("createdAt", Timestamp.from(run.getCreatedAt()))
@@ -456,7 +457,7 @@ public class CalculatorRunRepository {
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
                    cr.start_time, cr.end_time, cr.duration_ms,
                    cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
-                   cr.sla_breached, cr.sla_breach_reason,
+                   cr.sla_breached, cr.sla_breach_reason, cr.correlation_id,
                    sbe.severity
             FROM calculator_runs cr
             LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id AND sbe.tenant_id = cr.tenant_id
@@ -489,7 +490,8 @@ public class CalculatorRunRepository {
                     RunStatus.fromString(rs.getString("status")),
                     rs.getObject("sla_breached", Boolean.class),
                     rs.getString("sla_breach_reason"),
-                    severityStr != null ? Severity.fromString(severityStr) : null
+                    severityStr != null ? Severity.fromString(severityStr) : null,
+                    rs.getString("correlation_id")
             );
         });
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_with_sla").register(meterRegistry));
@@ -787,6 +789,7 @@ public class CalculatorRunRepository {
                         .runNumber(rs.getString("run_number"))
                         .runType(rs.getString("run_type"))
                         .region(rs.getString("region"))
+                        .correlationId(rs.getString("correlation_id"))
                         .createdAt(fromTimestamp(rs.getTimestamp("created_at")))
                         .updatedAt(fromTimestamp(rs.getTimestamp("updated_at")));
 

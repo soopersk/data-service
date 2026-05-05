@@ -117,6 +117,7 @@ public class RunIngestionService {
                 .runNumber(resolveField(request.getRunNumber(), request.getRunParameters(), "run_number"))
                 .runType(resolveField(request.getRunType(), request.getRunParameters(), "run_type"))
                 .region(resolveField(request.getRegion(), request.getRunParameters(), "region"))
+                .correlationId(request.getCorrelationId())
                 .runParameters(request.getRunParameters())
                 .additionalAttributes(request.getAdditionalAttributes())
                 .slaBreached(breachedAtStart)

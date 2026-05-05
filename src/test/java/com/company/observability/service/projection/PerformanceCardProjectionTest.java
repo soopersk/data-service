@@ -67,13 +67,13 @@ class PerformanceCardProjectionTest {
                 List.of(
                         new RunPerformanceData.RunDataPoint(
                                 "run-1", LocalDate.of(2026, 2, 21),
-                                start, end, 180000L, "SUCCESS", false, "SLA_MET"),
+                                start, end, 180000L, "SUCCESS", false, "SLA_MET", null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.of(2026, 2, 22),
-                                start, end, 180000L, "SUCCESS", true, "LATE"),
+                                start, end, 180000L, "SUCCESS", true, "LATE", null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-3", LocalDate.of(2026, 2, 23),
-                                start, null, null, "RUNNING", false, "RUNNING")
+                                start, null, null, "RUNNING", false, "RUNNING", null)
                 ),
                 estStart, slaTime);
 
@@ -117,7 +117,7 @@ class PerformanceCardProjectionTest {
                 "calc-1", "Calc", "DAILY", 7, 0L,
                 1, 0, 1, 0, 0,
                 List.of(new RunPerformanceData.RunDataPoint(
-                        "run-1", null, null, null, null, "SUCCESS", false, "SLA_MET")),
+                        "run-1", null, null, null, null, "SUCCESS", false, "SLA_MET", null)),
                 null, null);
 
         when(analyticsService.getRunPerformanceData("calc-1", "t1", 7, CalculatorFrequency.DAILY))
@@ -143,7 +143,7 @@ class PerformanceCardProjectionTest {
                         "run-1", LocalDate.of(2026, 2, 21),
                         Instant.parse("2026-02-21T04:00:00Z"),
                         Instant.parse("2026-02-21T06:00:00Z"),
-                        7200000L, "SUCCESS", false, "SLA_MET")),
+                        7200000L, "SUCCESS", false, "SLA_MET", null)),
                 Instant.parse("2026-02-21T04:00:00Z"),
                 Instant.parse("2026-02-21T06:15:00Z"));
 
@@ -166,11 +166,11 @@ class PerformanceCardProjectionTest {
                         new RunPerformanceData.RunDataPoint(
                                 "run-1", LocalDate.of(2026, 2, 21),
                                 Instant.parse("2026-02-21T04:00:00Z"),
-                                null, null, "RUNNING", false, "RUNNING"),
+                                null, null, "RUNNING", false, "RUNNING", null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.of(2026, 2, 22),
                                 Instant.parse("2026-02-22T04:00:00Z"),
-                                null, null, "RUNNING", false, "RUNNING")
+                                null, null, "RUNNING", false, "RUNNING", null)
                 ),
                 Instant.parse("2026-02-21T04:00:00Z"),
                 Instant.parse("2026-02-21T06:15:00Z"));

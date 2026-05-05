@@ -59,6 +59,10 @@ public class CalculatorRun implements Serializable {
     private String runType;
     private String region;
 
+    // Split-run correlation: Airflow sets the same value on every physical split of one logical run.
+    // NULL = standalone run (not part of a split group).
+    private String correlationId;
+
     // Metadata
     private Map<String, Object> runParameters;
     private Map<String, Object> additionalAttributes;

@@ -95,12 +95,12 @@ class AnalyticsControllerTest {
                                 "run-1", LocalDate.parse("2026-02-21"),
                                 Instant.parse("2026-02-21T04:00:00Z"),
                                 Instant.parse("2026-02-21T04:03:00Z"),
-                                180000L, "SUCCESS", false, "SLA_MET"),
+                                180000L, "SUCCESS", false, "SLA_MET", null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.parse("2026-02-22"),
                                 Instant.parse("2026-02-22T04:00:00Z"),
                                 null,
-                                null, "RUNNING", false, "RUNNING")
+                                null, "RUNNING", false, "RUNNING", null)
                 ),
                 Instant.parse("2026-02-21T04:00:00Z"),
                 Instant.parse("2026-02-21T06:15:00Z"));
