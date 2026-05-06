@@ -323,7 +323,9 @@ public class AnalyticsService {
                     lr.status(),
                     lr.slaBreached(),
                     lr.slaStatus(),
-                    lr.subRunIds()));
+                    lr.subRunIds(),
+                    lr.estimatedStartTime(),
+                    lr.slaTime()));
         }
 
         long meanDuration = completedCount > 0 ? totalDuration / completedCount : 0;

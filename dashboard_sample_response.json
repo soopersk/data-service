@@ -1,0 +1,50 @@
+{
+  "calculatorId": "calc-pricing-engine-001",
+  "calculatorName": "Pricing Engine",
+  "schedule": { // make it an array of dict for run1/run2 [{"run1": {"estimatedStartTime" : "10:25", "sla": "10:45"}}, {"run2": {"estimatedStartTime" : "20:00", "sla": "20:15"}}]
+    "estimatedStartTimeCet": "10:00",  // not required
+    "frequency": "DAILY"
+  },
+  "periodDays": 30,
+  "meanDurationMs": 5940000,
+  "meanDurationFormatted": "1hr 39mins", // not required
+  "slaSummary": {
+    "totalRuns": 30,
+    "slaMetCount": 21, 
+    "slaMetPct": 70, // not required
+    "lateCount": 5,
+    "latePct": 16,  // not required
+    "veryLateCount": 4,
+    "veryLatePct": 14
+  },
+  "runs": [
+    {
+      "runId": "run-20260127-001",
+      "reportingDate": "2026-01-27",
+      "dateFormatted": "Tue 27 Jan 2026",   // not required
+      "startHourCet": 11.07,   // not required
+      "endHourCet": 13.14,     // not required
+      "startTime": "2026-04-28T10:00:05.030Z",   // YYYY-MM-DDThh:mm:ss.sssZ
+      "endTime": "2026-04-28T11:00:05.030Z", // YYYY-MM-DDThh:mm:ss.sssZ
+      "durationMs": 7620000,
+      "durationFormatted": "2hrs 7mins",  // not required
+      "slaStatus": "VERY_LATE"
+    },
+    {
+      "runId": "run-20260127-001",
+      "reportingDate": "2026-01-27",
+      "dateFormatted": "Tue 27 Jan 2026",   // not required
+      "startHourCet": 11.07,   // not required
+      "endHourCet": 13.14,     // not required
+      "startTime": "2026-04-28T20:00:05.030Z",   // YYYY-MM-DDThh:mm:ss.sssZ
+      "endTime": "2026-04-28T21:00:05.030Z", // YYYY-MM-DDThh:mm:ss.sssZ
+      "durationMs": 7620000,
+      "durationFormatted": "2hrs 7mins",  // not required
+      "slaStatus": "SLA_MET"
+    }
+  ],
+  "referenceLines": {
+    "slaStartHourCet": 10.00,
+    "slaEndHourCet": 12.00
+  }
+}

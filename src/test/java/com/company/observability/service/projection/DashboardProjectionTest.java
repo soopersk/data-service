@@ -4,8 +4,8 @@ import com.company.observability.cache.DashboardCacheService;
 import com.company.observability.dto.response.CalculatorDashboardResponse;
 import com.company.observability.dto.response.CalculatorDashboardResponse.CalculatorEntry;
 import com.company.observability.dto.response.CalculatorDashboardResponse.DashboardSection;
-import com.company.observability.dto.response.CalculatorDashboardResponse.SectionSla;
 import com.company.observability.dto.response.CalculatorDashboardResponse.SectionSummary;
+import com.company.observability.dto.response.SlaIndicator;
 import com.company.observability.dto.response.TimeReference;
 import com.company.observability.service.DashboardService;
 import com.company.observability.service.DashboardService.DashboardResult;
@@ -105,7 +105,7 @@ class DashboardProjectionTest {
                         "REGIONAL",
                         "Regional",
                         1,
-                        new SectionSla(deadline, false),
+                        new SlaIndicator(deadline, false),
                         null,
                         new SectionSummary(
                                 1, 1, 0, 0, 0,
@@ -127,6 +127,7 @@ class DashboardProjectionTest {
         String json = mapper.writeValueAsString(response);
 
         assertThat(json).contains("\"deadlineTime\":\"2026-04-17T15:45:00.000Z\"");
+        assertThat(json).contains("\"breached\":false");
         assertThat(json).contains("\"startTime\":\"2026-04-17T04:15:05.030Z\"");
         assertThat(json).contains("\"endTime\":\"2026-04-17T06:30:00.000Z\"");
         assertThat(json).doesNotContain("reportingDateFormatted");

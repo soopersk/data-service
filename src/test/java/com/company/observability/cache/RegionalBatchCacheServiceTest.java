@@ -1,6 +1,7 @@
 package com.company.observability.cache;
 
 import com.company.observability.dto.response.RegionalBatchStatusResponse;
+import com.company.observability.dto.response.SlaIndicator;
 import com.company.observability.dto.response.TimeReference;
 import com.company.observability.repository.CalculatorRunRepository.RegionalBatchTiming;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -226,7 +227,7 @@ class RegionalBatchCacheServiceTest {
         return new RegionalBatchStatusResponse(
                 DATE,
                 "Fri 17 Apr 2026",
-                new RegionalBatchStatusResponse.OverallSla(Instant.parse("2026-04-17T15:45:00Z"), false),
+                new SlaIndicator(Instant.parse("2026-04-17T15:45:00Z"), false),
                 new TimeReference(Instant.parse("2026-04-17T03:00:00Z"), "ASIA", false),
                 new TimeReference(Instant.parse("2026-04-17T15:30:00Z"), "EURO", false),
                 total, completed, running, failed,

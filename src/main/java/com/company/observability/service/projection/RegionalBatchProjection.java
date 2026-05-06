@@ -3,6 +3,7 @@ package com.company.observability.service.projection;
 import com.company.observability.cache.RegionalBatchCacheService;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.dto.response.RegionalBatchStatusResponse;
+import com.company.observability.dto.response.SlaIndicator;
 import com.company.observability.dto.response.TimeReference;
 import com.company.observability.service.RegionalBatchService;
 import com.company.observability.service.RegionalBatchService.EstimatedTime;
@@ -49,7 +50,7 @@ public class RegionalBatchProjection {
     private RegionalBatchStatusResponse toRegionalBatchResponse(RegionalBatchResult result) {
         String dateFormatted = result.reportingDate().format(DATE_FORMATTER);
 
-        var overallSla = new RegionalBatchStatusResponse.OverallSla(result.slaDeadline(), result.overallBreached());
+        var overallSla = new SlaIndicator(result.slaDeadline(), result.overallBreached());
 
         TimeReference estimatedStart = toTimeReference(result.estimatedStart());
         TimeReference estimatedEnd   = toTimeReference(result.estimatedEnd());

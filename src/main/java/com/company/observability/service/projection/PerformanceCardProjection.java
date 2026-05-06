@@ -8,10 +8,11 @@ import com.company.observability.util.TimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Maps {@link AnalyticsService} domain data to the pre-formatted
@@ -22,9 +23,6 @@ import java.util.Locale;
 public class PerformanceCardProjection {
 
     private final AnalyticsService analyticsService;
-
-    private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("EEE dd MMM yyyy", Locale.ENGLISH);
 
     public PerformanceCardResponse getPerformanceCard(
             String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
@@ -38,46 +36,75 @@ public class PerformanceCardProjection {
     private PerformanceCardResponse toPerformanceCard(RunPerformanceData data) {
         if (data.runs().isEmpty()) {
             return new PerformanceCardResponse(
-                    data.calculatorId(), null, null, data.periodDays(), 0L, null,
-                    new PerformanceCardResponse.SlaSummaryPct(0, 0, 0.0, 0, 0.0, 0, 0.0),
+                    data.calculatorId(), null, Collections.emptyList(), data.periodDays(), 0L,
+                    new PerformanceCardResponse.SlaSummaryPct(0, 0, 0, 0, 0.0),
                     Collections.emptyList(), null);
         }
+
+        List<PerformanceCardResponse.ScheduleEntry> schedule = buildSchedule(data.runs());
 
         PerformanceCardResponse.SlaSummaryPct slaSummary =
                 new PerformanceCardResponse.SlaSummaryPct(
                         data.totalRuns(),
-                        data.slaMetCount(),   pct(data.slaMetCount(),   data.totalRuns()),
-                        data.lateCount(),     pct(data.lateCount(),     data.totalRuns()),
-                        data.veryLateCount(), pct(data.veryLateCount(), data.totalRuns()));
+                        data.slaMetCount(),
+                        data.lateCount(),
+                        data.veryLateCount(),
+                        pct(data.veryLateCount(), data.totalRuns()));
 
         List<PerformanceCardResponse.RunBar> runBars = data.runs().stream()
                 .map(this::toRunBar)
                 .toList();
 
+        PerformanceCardResponse.ReferenceLines refLines = data.estimatedStartTime() != null
+                ? new PerformanceCardResponse.ReferenceLines(
+                        TimeUtils.calculateCetHour(data.estimatedStartTime()).doubleValue(),
+                        TimeUtils.calculateCetHour(data.slaTime()).doubleValue())
+                : null;
+
         return new PerformanceCardResponse(
                 data.calculatorId(),
                 data.calculatorName(),
-                new PerformanceCardResponse.ScheduleInfo(data.estimatedStartTime(), data.frequency()),
+                schedule,
                 data.periodDays(),
                 data.meanDurationMs(),
-                TimeUtils.formatDuration(data.meanDurationMs()),
                 slaSummary,
                 runBars,
-                new PerformanceCardResponse.ReferenceLines(data.estimatedStartTime(), data.slaTime()));
+                refLines);
+    }
+
+    private List<PerformanceCardResponse.ScheduleEntry> buildSchedule(
+            List<RunPerformanceData.RunDataPoint> runs) {
+
+        record SlotKey(String startCet, String slaCet) {}
+
+        LinkedHashSet<SlotKey> seen = new LinkedHashSet<>();
+        for (RunPerformanceData.RunDataPoint run : runs) {
+            if (run.estimatedStartTime() == null || run.slaTime() == null) continue;
+            String startCet = TimeUtils.formatCetHour(TimeUtils.calculateCetHour(run.estimatedStartTime()));
+            String slaCet   = TimeUtils.formatCetHour(TimeUtils.calculateCetHour(run.slaTime()));
+            seen.add(new SlotKey(startCet, slaCet));
+        }
+
+        List<SlotKey> sorted = seen.stream()
+                .sorted(Comparator.comparing(SlotKey::startCet))
+                .toList();
+
+        List<PerformanceCardResponse.ScheduleEntry> entries = new ArrayList<>(sorted.size());
+        for (int i = 0; i < sorted.size(); i++) {
+            SlotKey slot = sorted.get(i);
+            entries.add(new PerformanceCardResponse.ScheduleEntry(
+                    "run" + (i + 1), slot.startCet(), slot.slaCet()));
+        }
+        return entries;
     }
 
     private PerformanceCardResponse.RunBar toRunBar(RunPerformanceData.RunDataPoint run) {
-        String dateFormatted = run.reportingDate() != null
-                ? run.reportingDate().format(DATE_FORMATTER) : null;
-
         return new PerformanceCardResponse.RunBar(
                 run.runId(),
                 run.reportingDate(),
-                dateFormatted,
                 run.startTime(),
                 run.endTime(),
                 run.durationMs() != null ? run.durationMs() : 0,
-                TimeUtils.formatDuration(run.durationMs()),
                 run.slaStatus(),
                 run.subRunIds());
     }

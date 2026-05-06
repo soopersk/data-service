@@ -45,21 +45,11 @@ public record CalculatorDashboardResponse(
             String sectionKey,                // "REGIONAL", "PORTFOLIO", etc.
             String displayName,               // "Regional", "Portfolio", etc.
             int displayOrder,
-            SectionSla sla,
+            SlaIndicator sla,
             DependencyStatus dependency,
             SectionSummary summary,
             List<CalculatorEntry> calculators,
             List<String> displayLabels
-    ) {}
-
-    /**
-     * SLA deadline and breach status for a section.
-     * All timestamp values are UTC instants serialized as YYYY-MM-DDThh:mm:ss.sssZ.
-     */
-    public record SectionSla(
-            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX", timezone = "UTC")
-            Instant deadlineTime,
-            boolean breached
     ) {}
 
     /**

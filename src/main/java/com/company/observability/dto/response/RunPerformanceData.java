@@ -37,7 +37,9 @@ public record RunPerformanceData(
             String status,
             Boolean slaBreached,
             String slaStatus,
-            List<String> subRunIds   // non-null only when this point represents a collapsed split group
+            List<String> subRunIds,   // non-null only when this point represents a collapsed split group
+            Instant estimatedStartTime,
+            Instant slaTime
     ) implements Serializable {
         private static final long serialVersionUID = 1L;
     }

@@ -7,25 +7,23 @@ import java.util.List;
 public record PerformanceCardResponse(
         String calculatorId,
         String calculatorName,
-        ScheduleInfo schedule,
+        List<ScheduleEntry> schedule,
         int periodDays,
         long meanDurationMs,
-        String meanDurationFormatted,
         SlaSummaryPct slaSummary,
         List<RunBar> runs,
         ReferenceLines referenceLines
 ) {
-    public record ScheduleInfo(
-            Instant estimatedStartTime,
-            String frequency
+    public record ScheduleEntry(
+            String runKey,
+            String estimatedStartTime,
+            String sla
     ) {}
 
     public record SlaSummaryPct(
             int totalRuns,
             int slaMetCount,
-            double slaMetPct,
             int lateCount,
-            double latePct,
             int veryLateCount,
             double veryLatePct
     ) {}
@@ -33,17 +31,15 @@ public record PerformanceCardResponse(
     public record RunBar(
             String runId,
             LocalDate reportingDate,
-            String dateFormatted,
             Instant startTime,
             Instant endTime,
             long durationMs,
-            String durationFormatted,
             String slaStatus,
             List<String> subRunIds   // non-null only when this bar represents a collapsed split group
     ) {}
 
     public record ReferenceLines(
-            Instant slaStartTime,
-            Instant slaEndTime
+            double slaStartHourCet,
+            double slaEndHourCet
     ) {}
 }

@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
@@ -48,14 +48,13 @@ class ProjectionControllerTest {
         PerformanceCardResponse response = new PerformanceCardResponse(
                 "calc-1",
                 "Calculator One",
-                new PerformanceCardResponse.ScheduleInfo(Instant.parse("2026-02-20T05:00:00Z"), "DAILY"),
+                List.of(new PerformanceCardResponse.ScheduleEntry("run1", "06:00", "06:15")),
                 30,
                 180000L,
-                "3m 0s",
-                new PerformanceCardResponse.SlaSummaryPct(1, 1, 100.0, 0, 0.0, 0, 0.0),
-                List.of(),
-                new PerformanceCardResponse.ReferenceLines(
-                        Instant.parse("2026-02-20T05:00:00Z"), Instant.parse("2026-02-20T05:15:00Z")));
+                new PerformanceCardResponse.SlaSummaryPct(1, 1, 0, 0, 0.0),
+                List.of(new PerformanceCardResponse.RunBar(
+                        "run-1", LocalDate.of(2026, 2, 20), null, null, 180000L, "SLA_MET", null)),
+                new PerformanceCardResponse.ReferenceLines(6.0, 6.25));
 
         when(performanceCardProjection.getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
                 .thenReturn(response);
@@ -67,8 +66,8 @@ class ProjectionControllerTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=60")))
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("private")))
                 .andExpect(jsonPath("$.calculatorId").value("calc-1"))
-                .andExpect(jsonPath("$.meanDurationFormatted").value("3m 0s"))
-                .andExpect(jsonPath("$.schedule.frequency").value("DAILY"));
+                .andExpect(jsonPath("$.meanDurationMs").value(180000L))
+                .andExpect(jsonPath("$.schedule[0].runKey").value("run1"));
 
         verify(performanceCardProjection).getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
     }
@@ -76,8 +75,8 @@ class ProjectionControllerTest {
     @Test
     void getPerformanceCard_defaultsFrequencyToDaily() throws Exception {
         PerformanceCardResponse response = new PerformanceCardResponse(
-                "calc-2", null, null, 30, 0L, null,
-                new PerformanceCardResponse.SlaSummaryPct(0, 0, 0.0, 0, 0.0, 0, 0.0),
+                "calc-2", null, List.of(), 30, 0L,
+                new PerformanceCardResponse.SlaSummaryPct(0, 0, 0, 0, 0.0),
                 List.of(), null);
 
         when(performanceCardProjection.getPerformanceCard("calc-2", "tenant-b", 30, CalculatorFrequency.DAILY))

@@ -8,8 +8,8 @@ import com.company.observability.dto.response.CalculatorDashboardResponse.Calcul
 import com.company.observability.dto.response.CalculatorDashboardResponse.DashboardSection;
 import com.company.observability.dto.response.CalculatorDashboardResponse.DependencyStatus;
 import com.company.observability.dto.response.CalculatorDashboardResponse.LastRunIndicator;
-import com.company.observability.dto.response.CalculatorDashboardResponse.SectionSla;
 import com.company.observability.dto.response.CalculatorDashboardResponse.SectionSummary;
+import com.company.observability.dto.response.SlaIndicator;
 import com.company.observability.dto.response.CalculatorDashboardResponse.SubRunStatus;
 import com.company.observability.dto.response.TimeReference;
 import com.company.observability.repository.CalculatorRunRepository.HistoricalRunStatus;
@@ -63,7 +63,7 @@ public class DashboardProjection {
     }
 
     private DashboardSection toSection(SectionResult section) {
-        SectionSla sla = new SectionSla(section.slaDeadline(), section.slaBreached());
+        SlaIndicator sla = new SlaIndicator(section.slaDeadline(), section.slaBreached());
 
         DependencyStatus dependency = null;
         if (section.dependency() != null) {

@@ -2,7 +2,11 @@ package com.company.observability.service.projection;
 
 import com.company.observability.cache.RegionalBatchCacheService;
 import com.company.observability.dto.response.RegionalBatchStatusResponse;
+import com.company.observability.dto.response.SlaIndicator;
 import com.company.observability.service.RegionalBatchService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -65,15 +69,29 @@ class RegionalBatchProjectionTest {
         RegionalBatchStatusResponse response = projection.getRegionalBatchStatus("tenant-1", date);
 
         assertThat(response).isNotNull();
+        assertThat(response.overallSla()).isEqualTo(
+                new SlaIndicator(Instant.parse("2026-04-17T15:45:00Z"), false));
         assertThat(response.totalRegions()).isEqualTo(10);
         verify(regionalBatchCacheService).putStatusResponse(eq("tenant-1"), eq(date), any());
+    }
+
+    @Test
+    void regionalBatchResponse_serializesSharedSlaIndicatorWithoutChangingWireShape() throws Exception {
+        ObjectMapper mapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        LocalDate date = LocalDate.of(2026, 4, 17);
+
+        String json = mapper.writeValueAsString(minimalResponse(date, 10, 10, 0, 0));
+
+        assertThat(json).contains("\"overallSla\":{\"deadlineTime\":\"2026-04-17T15:45:00.000Z\",\"breached\":false}");
     }
 
     private RegionalBatchStatusResponse minimalResponse(
             LocalDate date, int total, int completed, int running, int failed) {
         return new RegionalBatchStatusResponse(
                 date, "Fri 17 Apr 2026",
-                new RegionalBatchStatusResponse.OverallSla(Instant.parse("2026-04-17T15:45:00Z"), false),
+                new SlaIndicator(Instant.parse("2026-04-17T15:45:00Z"), false),
                 null, null,
                 total, completed, running, failed,
                 List.of(), List.of()

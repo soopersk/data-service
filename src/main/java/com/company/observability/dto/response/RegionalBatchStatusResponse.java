@@ -8,7 +8,7 @@ import java.util.List;
 public record RegionalBatchStatusResponse(
         LocalDate reportingDate,
         String reportingDateFormatted,
-        OverallSla overallSla,
+        SlaIndicator overallSla,
         TimeReference estimatedStart,
         TimeReference estimatedEnd,
         int totalRegions,
@@ -18,11 +18,6 @@ public record RegionalBatchStatusResponse(
         List<RegionStatus> regions,
         List<String> slaBreachedRegions
 ) {
-
-    public record OverallSla(
-            Instant deadlineTime,
-            boolean breached
-    ) {}
 
     public record RegionStatus(
             String region,
