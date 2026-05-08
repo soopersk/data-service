@@ -752,6 +752,69 @@ public class CalculatorRunRepository {
     public record HistoricalRunStatus(String calculatorId, LocalDate reportingDate, String status, boolean slaBreached) {}
 
     /**
+     * For each calculator ID, returns the {@code estimated_start_time} from the
+     * earliest future-pending run row (later reporting date, or same date with
+     * higher run number). Scans at most 2 partition-days forward.
+     *
+     * <p>Used to populate {@code nextRunTime} on dashboard nodes.
+     *
+     * @return map of calculator_id → next estimated start time (only entries
+     *         that have a non-null estimated_start_time are included)
+     */
+    public Map<String, Instant> findNextRunEstimatedStarts(
+            String tenantId, LocalDate reportingDate, String frequency,
+            String runNumber, List<String> calculatorIds) {
+
+        if (calculatorIds == null || calculatorIds.isEmpty()) {
+            return Map.of();
+        }
+
+        String sql = """
+            SELECT calculator_id, estimated_start_time
+            FROM (
+                SELECT calculator_id, estimated_start_time,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY calculator_id
+                           ORDER BY reporting_date ASC,
+                                    CAST(run_parameters->>'run_number' AS INTEGER) ASC,
+                                    created_at ASC
+                       ) AS rn
+                FROM calculator_runs
+                WHERE tenant_id            = :tenantId
+                  AND frequency            = :frequency
+                  AND calculator_id        IN (:calculatorIds)
+                  AND estimated_start_time IS NOT NULL
+                  AND (
+                        reporting_date > :reportingDate
+                        OR (
+                            reporting_date = :reportingDate
+                            AND CAST(run_parameters->>'run_number' AS INTEGER)
+                                > CAST(:runNumber AS INTEGER)
+                        )
+                  )
+                  AND reporting_date <= :reportingDate + INTERVAL '2 days'
+            ) ranked
+            WHERE rn = 1
+            """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId)
+                .addValue("frequency", frequency)
+                .addValue("calculatorIds", calculatorIds)
+                .addValue("reportingDate", reportingDate)
+                .addValue("runNumber", runNumber);
+
+        return jdbcTemplate.query(sql, params, rs -> {
+            Map<String, Instant> result = new LinkedHashMap<>();
+            while (rs.next()) {
+                Timestamp ts = rs.getTimestamp("estimated_start_time");
+                if (ts != null) result.put(rs.getString("calculator_id"), ts.toInstant());
+            }
+            return result;
+        });
+    }
+
+    /**
      * Get partition statistics for monitoring
      */
     public List<Map<String, Object>> getPartitionStatistics() {

@@ -103,7 +103,7 @@ public class DashboardCacheService {
             return TTL_NOT_STARTED;
         }
 
-        int totalRunning = 0;
+        int totalInProgress = 0;
         int totalFailed = 0;
         int totalNotStarted = 0;
         int totalCompleted = 0;
@@ -111,22 +111,22 @@ public class DashboardCacheService {
         for (DashboardSection section : sections) {
             SectionSummary s = section.summary();
             if (s == null) continue;
-            totalRunning    += s.runningCount();
+            totalInProgress += s.inProgressCount();
             totalFailed     += s.failedCount();
             totalNotStarted += s.notStartedCount();
-            totalCompleted  += s.completedCount();
+            totalCompleted  += s.completedCount();   // LATE/VERY_LATE roll into completedCount
         }
 
-        if (totalRunning > 0) {
+        if (totalInProgress > 0) {
             return TTL_ANY_RUNNING;
         }
         if (totalCompleted == 0 && totalFailed == 0) {
             return TTL_NOT_STARTED;
         }
-        // All terminal (no running, no not-started... wait, not-started could still exist
+        // All terminal (no in-progress, no not-started... wait, not-started could still exist
         // for sections whose dependencies haven't been met yet — those count as terminal
         // for TTL purposes since the state won't change until upstream progresses)
-        if (totalRunning == 0 && totalNotStarted == 0) {
+        if (totalInProgress == 0 && totalNotStarted == 0) {
             return totalFailed > 0 ? TTL_TERMINAL_WITH_FAILURES : TTL_TERMINAL_CLEAN;
         }
         // Some not-started but nothing running → upstream dependency not yet met,

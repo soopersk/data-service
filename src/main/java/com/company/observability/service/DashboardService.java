@@ -1,11 +1,12 @@
 package com.company.observability.service;
 
 import com.company.observability.config.DashboardProperties;
-import com.company.observability.config.DashboardProperties.CalculatorConfig;
+import com.company.observability.config.DashboardProperties.MatrixColumnConfig;
+import com.company.observability.config.DashboardProperties.MatrixConfig;
+import com.company.observability.config.DashboardProperties.NodeConfig;
 import com.company.observability.config.DashboardProperties.SectionConfig;
-import com.company.observability.config.DashboardProperties.SubRunConfig;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.repository.CalculatorRunRepository.HistoricalRunStatus;
 import com.company.observability.service.RegionalBatchService.EstimatedTime;
@@ -21,21 +22,22 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Core orchestrator for the unified calculator dashboard.
  *
- * <p>One request → at most 4 DB queries (2 on cache hit):
+ * <p>Builds a domain-level {@link DashboardResult} from configuration plus a
+ * small set of DB queries:
  * <ol>
- *   <li>{@code findRegionalBatchRuns} — 1 partition</li>
- *   <li>{@code findDashboardCalculatorRuns} — 1 partition (all non-regional calcs)</li>
- *   <li>{@code findRegionalBatchHistory} — 7 partitions (only on cache miss)</li>
- *   <li>{@code findDashboardCalculatorHistory} — 5 partitions (only on cache miss)</li>
+ *   <li>{@code findRegionalBatchRuns} via {@link RegionalBatchService} — REGION matrix</li>
+ *   <li>{@code findDashboardCalculatorRuns} — all simple/TYPE-matrix calculators in one shot</li>
+ *   <li>{@code findDashboardCalculatorHistory} — last-run dots (5 partitions)</li>
+ *   <li>{@code findNextRunEstimatedStarts} — populates {@code nextRunTime}</li>
  * </ol>
  *
- * <p>Sections are built in {@code displayOrder}. Dependency resolution is done
- * inline: each section reads the already-built summary of its upstream section.
- * Returns domain-level {@link DashboardResult} records — no formatting here.
+ * <p>Sections are built in {@code displayOrder}; dependency resolution reads the
+ * already-built upstream summary inline.
  */
 @Service
 @RequiredArgsConstructor
@@ -43,7 +45,6 @@ import java.util.stream.Collectors;
 public class DashboardService {
 
     private static final int HISTORY_LOOKBACK_DAYS = 5;
-    private static final String REGIONAL_SECTION_KEY = "REGIONAL";
 
     private final DashboardProperties dashboardProperties;
     private final CalculatorRunRepository calculatorRunRepository;
@@ -54,238 +55,256 @@ public class DashboardService {
     public DashboardResult buildDashboard(
             String tenantId, LocalDate reportingDate, String frequency, int runNumber) {
 
+        long lateThreshold = dashboardProperties.getLateThresholdMs();
+        String frequencyStr = CalculatorFrequency.from(frequency).name();
         String runNumberStr = String.valueOf(runNumber);
 
-        // 1. Collect all non-regional calculator IDs for the batch DB query
-        List<String> nonRegionalCalcIds = collectNonRegionalCalculatorIds();
-
-        // 2. Single DB query for all non-regional runs (1 partition scan)
-        Map<String, CalculatorRun> runsByCalculatorId = nonRegionalCalcIds.isEmpty()
-                ? Map.of()
-                : calculatorRunRepository.findDashboardCalculatorRuns(
-                        tenantId, reportingDate, frequency, runNumberStr, nonRegionalCalcIds);
-
-        // 3. Regional section via existing service (uses its own cache internally)
-        RegionalBatchResult regionalResult =
-                regionalBatchService.getRegionalBatchStatus(tenantId, reportingDate, runNumberStr);
-
-        // 4. Historical run dots for non-regional calcs (1 query, ~5 partitions)
-        List<HistoricalRunStatus> nonRegionalHistory = nonRegionalCalcIds.isEmpty()
-                ? List.of()
-                : calculatorRunRepository.findDashboardCalculatorHistory(
-                        tenantId, reportingDate, HISTORY_LOOKBACK_DAYS,
-                        frequency, runNumberStr, nonRegionalCalcIds);
-
-        Map<String, List<HistoricalRunStatus>> historyByCalcId = nonRegionalHistory.stream()
-                .collect(Collectors.groupingBy(HistoricalRunStatus::calculatorId));
-
-        // 5. Build sections in order, accumulating summaries for dependency resolution
-        Map<String, SectionSummary> summaryByKey = new LinkedHashMap<>();
-        List<SectionResult> sections = new ArrayList<>();
-
-        List<SectionConfig> orderedSections = dashboardProperties.getSections().stream()
+        // 1. Filter sections by frequency
+        List<SectionConfig> applicableSections = dashboardProperties.getSections().stream()
+                .filter(s -> s.getFrequencyApplicable().isEmpty()
+                          || s.getFrequencyApplicable().contains(frequencyStr))
                 .sorted(Comparator.comparingInt(SectionConfig::getDisplayOrder))
                 .toList();
 
-        for (SectionConfig sectionConfig : orderedSections) {
-            SectionResult sectionResult;
-            if (REGIONAL_SECTION_KEY.equals(sectionConfig.getSectionKey())) {
-                sectionResult = buildRegionalSection(sectionConfig, regionalResult);
-            } else {
-                sectionResult = buildNonRegionalSection(
-                        sectionConfig, runsByCalculatorId, historyByCalcId,
-                        reportingDate, frequency, tenantId, runNumberStr, summaryByKey);
-            }
+        // 2. Collect non-regional calculator IDs (REGION matrix is served via RegionalBatchService)
+        List<String> allCalcIds = collectNonRegionalCalculatorIds(applicableSections);
+
+        // 3. Batched DB queries
+        Map<String, CalculatorRun> runsByCalcId = allCalcIds.isEmpty()
+                ? Map.of()
+                : calculatorRunRepository.findDashboardCalculatorRuns(
+                        tenantId, reportingDate, frequencyStr, runNumberStr, allCalcIds);
+
+        Map<String, List<HistoricalRunStatus>> historyByCalcId = allCalcIds.isEmpty()
+                ? Map.of()
+                : calculatorRunRepository.findDashboardCalculatorHistory(
+                            tenantId, reportingDate, HISTORY_LOOKBACK_DAYS,
+                            frequencyStr, runNumberStr, allCalcIds)
+                        .stream()
+                        .collect(Collectors.groupingBy(HistoricalRunStatus::calculatorId));
+
+        Map<String, Instant> nextRunByCalcId = allCalcIds.isEmpty()
+                ? Map.of()
+                : calculatorRunRepository.findNextRunEstimatedStarts(
+                        tenantId, reportingDate, frequencyStr, runNumberStr, allCalcIds);
+
+        // 4. Regional matrix data (uses its own cache internally)
+        boolean regionalNeeded = applicableSections.stream()
+                .flatMap(s -> s.getNodes().stream())
+                .anyMatch(this::isRegionMatrix);
+        RegionalBatchResult regional = regionalNeeded
+                ? regionalBatchService.getRegionalBatchStatus(tenantId, reportingDate, runNumberStr)
+                : null;
+
+        // 5. Build sections, accumulating summaries for dependency resolution
+        Map<String, SectionSummary> summaryByKey = new LinkedHashMap<>();
+        List<SectionResult> sections = new ArrayList<>();
+
+        for (SectionConfig sectionConfig : applicableSections) {
+            SectionResult sectionResult = buildSection(
+                    sectionConfig, regional, runsByCalcId, historyByCalcId,
+                    nextRunByCalcId, summaryByKey, reportingDate, lateThreshold);
             summaryByKey.put(sectionConfig.getSectionKey(), sectionResult.summary());
             sections.add(sectionResult);
         }
 
         log.debug("event=dashboard.build tenant_id={} reporting_date={} frequency={} run_number={} sections={}",
-                tenantId, reportingDate, frequency, runNumber, sections.size());
+                tenantId, reportingDate, frequencyStr, runNumber, sections.size());
 
-        return new DashboardResult(reportingDate, frequency, runNumber, sections);
+        return new DashboardResult(reportingDate, frequencyStr, runNumber, Instant.now(), sections);
     }
 
-    // ── Section builders ──────────────────────────────────────────────────────
+    // ── Section builder ───────────────────────────────────────────────────────
 
-    private SectionResult buildRegionalSection(SectionConfig config, RegionalBatchResult regional) {
-        Instant slaDeadline = TimeUtils.calculateSlaDeadline(
-                regional.reportingDate(), config.getSlaTimeCet());
-
-        // Convert RegionEntries to CalculatorEntryResult list
-        List<CalculatorEntryResult> entries = new ArrayList<>();
-        for (RegionEntry entry : regional.entries()) {
-            entries.add(new CalculatorEntryResult(
-                    entry.run() != null ? entry.run().getCalculatorId() : null,
-                    entry.region(),
-                    entry.run(),
-                    entry.status(),
-                    entry.slaBreached(),
-                    List.of(),   // no sub-runs for regional
-                    List.of()    // regional doesn't use last-run dots
-            ));
-        }
-
-        SectionSummary summary = new SectionSummary(
-                regional.totalRegions(),
-                regional.completedRegions(),
-                regional.runningRegions(),
-                regional.failedRegions(),
-                regional.totalRegions() - regional.completedRegions()
-                        - regional.runningRegions() - regional.failedRegions(),
-                regional.estimatedStart(),
-                regional.estimatedEnd()
-        );
-
-        return new SectionResult(
-                config.getSectionKey(),
-                config.getDisplayName(),
-                config.getDisplayOrder(),
-                slaDeadline,
-                regional.overallBreached(),
-                null,  // no dependency for REGIONAL
-                summary,
-                entries,
-                null   // no displayLabels for REGIONAL
-        );
-    }
-
-    private SectionResult buildNonRegionalSection(
+    private SectionResult buildSection(
             SectionConfig config,
-            Map<String, CalculatorRun> runsByCalculatorId,
+            RegionalBatchResult regional,
+            Map<String, CalculatorRun> runsByCalcId,
             Map<String, List<HistoricalRunStatus>> historyByCalcId,
-            LocalDate reportingDate, String frequency, String tenantId, String runNumber,
-            Map<String, SectionSummary> builtSummaries) {
+            Map<String, Instant> nextRunByCalcId,
+            Map<String, SectionSummary> builtSummaries,
+            LocalDate reportingDate,
+            long lateThreshold) {
 
         Instant slaDeadline = TimeUtils.calculateSlaDeadline(reportingDate, config.getSlaTimeCet());
-
-        // Dependency
         DependencyResult dependency = resolveDependency(config, builtSummaries);
 
-        // Build each calculator entry
-        List<CalculatorEntryResult> entries = new ArrayList<>();
-        int completedCount = 0, runningCount = 0, failedCount = 0, notStartedCount = 0;
-
-        for (CalculatorConfig calcConfig : config.getCalculators()) {
-            CalculatorEntryResult entry;
-            if (calcConfig.isHasSubRuns()) {
-                entry = buildSubRunEntry(calcConfig, runsByCalculatorId, historyByCalcId, slaDeadline);
-            } else {
-                CalculatorRun run = runsByCalculatorId.get(calcConfig.getCalculatorId());
-                List<HistoricalRunStatus> history =
-                        historyByCalcId.getOrDefault(calcConfig.getCalculatorId(), List.of());
-                String status = RunStatusClassifier.classify(run, slaDeadline);
-                boolean slaBreached = RunStatusClassifier.isSlaBreach(run, slaDeadline);
-                entry = new CalculatorEntryResult(
-                        calcConfig.getCalculatorId(),
-                        calcConfig.getDisplayName(),
-                        run,
-                        status,
-                        slaBreached,
-                        null,
-                        history
-                );
-            }
-            entries.add(entry);
-
-            switch (entry.status()) {
-                case RunStatusClassifier.FAILED      -> failedCount++;
-                case RunStatusClassifier.RUNNING     -> runningCount++;
-                case RunStatusClassifier.NOT_STARTED -> notStartedCount++;
-                default                              -> completedCount++;  // ON_TIME or DELAYED
-            }
-        }
-
-        // Section has no estimated start/end (unlike Regional which has median history)
-        // Derive from actual run times across all entries
-        EstimatedTime estStart = deriveSectionStart(entries);
-        EstimatedTime estEnd = deriveSectionEnd(entries, config.getCalculators().size(),
-                completedCount, failedCount);
-
-        boolean slaBreached = completedCount > 0 && entries.stream()
-                .anyMatch(CalculatorEntryResult::slaBreached);
-
-        SectionSummary summary = new SectionSummary(
-                config.getCalculators().size(),
-                completedCount, runningCount, failedCount, notStartedCount,
-                estStart, estEnd
-        );
-
-        List<String> displayLabels = config.getDisplayLabels().isEmpty() ? null : config.getDisplayLabels();
-        return new SectionResult(
-                config.getSectionKey(),
-                config.getDisplayName(),
-                config.getDisplayOrder(),
-                slaDeadline,
-                slaBreached,
-                dependency,
-                summary,
-                entries,
-                displayLabels
-        );
-    }
-
-    /**
-     * Builds a CalculatorEntry for Modelled Exposure (or similar): one parent entry
-     * with sub-run buttons. The parent status = worst status across all sub-runs.
-     */
-    private CalculatorEntryResult buildSubRunEntry(
-            CalculatorConfig calcConfig,
-            Map<String, CalculatorRun> runsByCalculatorId,
-            Map<String, List<HistoricalRunStatus>> historyByCalcId,
-            Instant slaDeadline) {
-
-        List<SubRunResult> subRuns = new ArrayList<>();
-        for (SubRunConfig subRunConfig : calcConfig.getSubRuns()) {
-            CalculatorRun run = runsByCalculatorId.get(subRunConfig.getCalculatorId());
-            String status = RunStatusClassifier.classify(run, slaDeadline);
-            boolean breach = RunStatusClassifier.isSlaBreach(run, slaDeadline);
-            subRuns.add(new SubRunResult(subRunConfig.getSubRunKey(), run, status, breach));
-        }
-
-        // Parent status = worst across sub-runs
-        String parentStatus = RunStatusClassifier.worstStatus(subRuns.stream().map(SubRunResult::status).toList());
-
-        // Parent run = the first sub-run's run for start/end time display
-        // (Modelled Exposure as a whole doesn't have a single run_id)
-        CalculatorRun representativeRun = subRuns.stream()
-                .map(SubRunResult::run)
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null);
-
-        // Aggregate history from all sub-run calculator IDs (parent ID is never in the map).
-        // Deduplicate by reporting date, keeping the worst status per date.
-        Map<LocalDate, HistoricalRunStatus> historyByDate = new LinkedHashMap<>();
-        for (SubRunConfig sub : calcConfig.getSubRuns()) {
-            for (HistoricalRunStatus h : historyByCalcId.getOrDefault(sub.getCalculatorId(), List.of())) {
-                historyByDate.merge(h.reportingDate(), h, (existing, candidate) -> {
-                    RunStatus cs = RunStatus.fromString(candidate.status());
-                    if (!cs.isSuccessful() && cs.isTerminal()) return candidate;
-                    if (candidate.slaBreached()) return candidate;
-                    return existing;
-                });
-            }
-        }
-        List<HistoricalRunStatus> history = historyByDate.values().stream()
-                .sorted(Comparator.comparing(HistoricalRunStatus::reportingDate).reversed())
-                .limit(HISTORY_LOOKBACK_DAYS)
+        List<NodeResult> nodes = config.getNodes().stream()
+                .sorted(Comparator.comparingInt(NodeConfig::getDisplayOrder))
+                .map(nc -> buildNode(nc, regional, runsByCalcId, historyByCalcId,
+                        nextRunByCalcId, slaDeadline, lateThreshold))
                 .toList();
 
-        boolean parentSlaBreached = subRuns.stream().anyMatch(SubRunResult::slaBreached);
+        SectionSummary summary = computeSectionSummary(nodes, slaDeadline);
 
-        return new CalculatorEntryResult(
-                calcConfig.getCalculatorId(),
-                calcConfig.getDisplayName(),
-                representativeRun,
-                parentStatus,
-                parentSlaBreached,
-                subRuns,
-                history
-        );
+        boolean slaBreached = summary.failedCount() > 0
+                || summary.latenessMs() != null
+                || (summary.inProgressCount() > 0 && Instant.now().isAfter(slaDeadline));
+
+        return new SectionResult(
+                config.getSectionKey(), config.getDisplayName(), config.getDisplayOrder(),
+                slaDeadline, slaBreached, dependency, summary, nodes);
     }
 
-    // ── Dependency resolution ─────────────────────────────────────────────────
+    // ── Node builders (simple / REGION matrix / TYPE matrix) ──────────────────
+
+    private NodeResult buildNode(
+            NodeConfig nodeConfig,
+            RegionalBatchResult regional,
+            Map<String, CalculatorRun> runsByCalcId,
+            Map<String, List<HistoricalRunStatus>> historyByCalcId,
+            Map<String, Instant> nextRunByCalcId,
+            Instant slaDeadline,
+            long lateThreshold) {
+
+        MatrixConfig mc = nodeConfig.getMatrixConfig();
+        if (mc == null) {
+            return buildSimpleNode(nodeConfig, runsByCalcId, historyByCalcId,
+                    nextRunByCalcId, slaDeadline, lateThreshold);
+        }
+        if ("REGION".equals(mc.getDimension())) {
+            return buildRegionMatrixNode(nodeConfig, regional, slaDeadline, lateThreshold);
+        }
+        return buildTypeMatrixNode(nodeConfig, runsByCalcId, slaDeadline, lateThreshold);
+    }
+
+    private NodeResult buildSimpleNode(
+            NodeConfig nodeConfig,
+            Map<String, CalculatorRun> runsByCalcId,
+            Map<String, List<HistoricalRunStatus>> historyByCalcId,
+            Map<String, Instant> nextRunByCalcId,
+            Instant slaDeadline, long lateThreshold) {
+
+        CalculatorRun run = runsByCalcId.get(nodeConfig.getCalculatorId());
+        String status = RunStatusClassifier.classify(run, slaDeadline, lateThreshold);
+        boolean breach = RunStatusClassifier.isSlaBreach(run, slaDeadline);
+        Long lateness = RunStatusClassifier.computeLatenessMs(
+                status, breach, run != null ? run.getEndTime() : null, slaDeadline);
+
+        List<String> labels = nodeConfig.getDisplayLabels().isEmpty()
+                ? null : nodeConfig.getDisplayLabels();
+        List<HistoricalRunStatus> hist =
+                historyByCalcId.getOrDefault(nodeConfig.getCalculatorId(), List.of());
+
+        return new NodeResult(
+                nodeConfig.getNodeKey(), nodeConfig.getDisplayName(), nodeConfig.getDisplayOrder(),
+                run, status, breach, lateness,
+                run != null ? run.getEstimatedStartTime() : null,
+                run != null ? run.getEstimatedEndTime()   : null,
+                nextRunByCalcId.get(nodeConfig.getCalculatorId()),
+                labels, null, hist);
+    }
+
+    private NodeResult buildRegionMatrixNode(
+            NodeConfig nodeConfig, RegionalBatchResult regional,
+            Instant slaDeadline, long lateThreshold) {
+
+        MatrixConfig mc = nodeConfig.getMatrixConfig();
+        List<String> colKeys = mc.getColumns().stream()
+                .map(MatrixColumnConfig::getKey).toList();
+
+        Map<String, RegionEntry> byRegion = regional == null ? Map.of()
+                : regional.entries().stream()
+                        .collect(Collectors.toMap(RegionEntry::region, e -> e, (a, b) -> a));
+
+        List<MatrixCellResult> cells = colKeys.stream().map(key -> {
+            RegionEntry entry = byRegion.get(key);
+            CalculatorRun run = entry != null ? entry.run() : null;
+            String status = RunStatusClassifier.classify(run, slaDeadline, lateThreshold);
+            boolean breach = RunStatusClassifier.isSlaBreach(run, slaDeadline);
+            Long lateness = RunStatusClassifier.computeLatenessMs(
+                    status, breach, run != null ? run.getEndTime() : null, slaDeadline);
+            return new MatrixCellResult(key, run, status, breach, lateness);
+        }).toList();
+
+        MatrixRowResult row = new MatrixRowResult(nodeConfig.getNodeKey(), mc.getRowLabel(), cells);
+        MatrixResult matrix = new MatrixResult("REGION", colKeys, List.of(row));
+
+        // Parent node carries no run/status — cells do.
+        return new NodeResult(
+                nodeConfig.getNodeKey(), nodeConfig.getDisplayName(), nodeConfig.getDisplayOrder(),
+                null, null, false, null, null, null, null, null, matrix, List.of());
+    }
+
+    private NodeResult buildTypeMatrixNode(
+            NodeConfig nodeConfig,
+            Map<String, CalculatorRun> runsByCalcId,
+            Instant slaDeadline, long lateThreshold) {
+
+        MatrixConfig mc = nodeConfig.getMatrixConfig();
+        List<String> colKeys = mc.getColumns().stream()
+                .map(MatrixColumnConfig::getKey).toList();
+
+        List<MatrixCellResult> cells = mc.getColumns().stream().map(col -> {
+            CalculatorRun run = runsByCalcId.get(col.getCalculatorId());
+            String status = RunStatusClassifier.classify(run, slaDeadline, lateThreshold);
+            boolean breach = RunStatusClassifier.isSlaBreach(run, slaDeadline);
+            Long lateness = RunStatusClassifier.computeLatenessMs(
+                    status, breach, run != null ? run.getEndTime() : null, slaDeadline);
+            return new MatrixCellResult(col.getKey(), run, status, breach, lateness);
+        }).toList();
+
+        MatrixRowResult row = new MatrixRowResult(nodeConfig.getNodeKey(), mc.getRowLabel(), cells);
+        MatrixResult matrix = new MatrixResult("TYPE", colKeys, List.of(row));
+
+        // Parent status = worst across cells; lateness = max lateness across cells
+        String worstStatus = RunStatusClassifier.worstStatus(
+                cells.stream().map(MatrixCellResult::status).toList());
+        Long worstLateness = cells.stream().map(MatrixCellResult::latenessMs)
+                .filter(Objects::nonNull).max(Long::compareTo).orElse(null);
+
+        return new NodeResult(
+                nodeConfig.getNodeKey(), nodeConfig.getDisplayName(), nodeConfig.getDisplayOrder(),
+                null, worstStatus, false, worstLateness, null, null, null, null, matrix, List.of());
+    }
+
+    // ── Section summary, dependency, time derivation ──────────────────────────
+
+    private SectionSummary computeSectionSummary(List<NodeResult> nodes, Instant slaDeadline) {
+        int total = 0, completed = 0, inProgress = 0, failed = 0, notStarted = 0;
+        List<String> allStatuses = new ArrayList<>();
+        List<Long> allLatenesses = new ArrayList<>();
+
+        for (NodeResult node : nodes) {
+            if (node.matrix() != null && "REGION".equals(node.matrix().columnDimension())) {
+                // REGION matrix: count cells
+                for (MatrixRowResult rowR : node.matrix().rows()) {
+                    for (MatrixCellResult cell : rowR.cells()) {
+                        total++;
+                        allStatuses.add(cell.status());
+                        if (cell.latenessMs() != null) allLatenesses.add(cell.latenessMs());
+                        switch (cell.status()) {
+                            case RunStatusClassifier.FAILED      -> failed++;
+                            case RunStatusClassifier.IN_PROGRESS -> inProgress++;
+                            case RunStatusClassifier.NOT_STARTED -> notStarted++;
+                            default                              -> completed++;
+                        }
+                    }
+                }
+            } else {
+                // TYPE matrix or simple node: count as 1 unit
+                total++;
+                String s = node.status() != null ? node.status() : RunStatusClassifier.NOT_STARTED;
+                allStatuses.add(s);
+                if (node.latenessMs() != null) allLatenesses.add(node.latenessMs());
+                switch (s) {
+                    case RunStatusClassifier.FAILED      -> failed++;
+                    case RunStatusClassifier.IN_PROGRESS -> inProgress++;
+                    case RunStatusClassifier.NOT_STARTED -> notStarted++;
+                    default                              -> completed++;
+                }
+            }
+        }
+
+        String sectionStatus = RunStatusClassifier.worstStatus(allStatuses);
+        Long worstLateness = allLatenesses.stream().max(Long::compareTo).orElse(null);
+
+        EstimatedTime estStart = deriveSectionStart(nodes);
+        EstimatedTime estEnd   = deriveSectionEnd(nodes, total, completed, failed);
+
+        return new SectionSummary(total, completed, inProgress, failed, notStarted,
+                sectionStatus, worstLateness, estStart, estEnd);
+    }
 
     private DependencyResult resolveDependency(
             SectionConfig config, Map<String, SectionSummary> builtSummaries) {
@@ -297,14 +316,13 @@ public class DashboardService {
         String upstreamName = friendlyName(upstreamKey);
 
         if (upstream == null) {
-            // upstream section not found in config — treat as not met
             return new DependencyResult(upstreamKey, false, "Waiting for " + upstreamName);
         }
 
-        boolean hasRunning = upstream.runningCount() > 0;
+        boolean hasInProgress = upstream.inProgressCount() > 0;
         boolean hasNotStarted = upstream.notStartedCount() > 0;
-        boolean hasFailed = upstream.failedCount() > 0;
-        boolean allTerminal = !hasRunning && !hasNotStarted;
+        boolean hasFailed     = upstream.failedCount() > 0;
+        boolean allTerminal   = !hasInProgress && !hasNotStarted;
 
         if (!allTerminal) {
             return new DependencyResult(upstreamKey, false, "Waiting for " + upstreamName);
@@ -323,79 +341,79 @@ public class DashboardService {
                 .orElse(sectionKey);
     }
 
-    // ── Section start/end estimation ──────────────────────────────────────────
-
-    /**
-     * Derives estimated section start from the earliest actual start across all entries.
-     * Returns null if no runs have started yet.
-     */
-    private EstimatedTime deriveSectionStart(List<CalculatorEntryResult> entries) {
+    /** Earliest actual run start across all nodes/cells, or null. */
+    private EstimatedTime deriveSectionStart(List<NodeResult> nodes) {
         Instant earliest = null;
-        String region = null;
-        for (CalculatorEntryResult e : entries) {
-            CalculatorRun run = effectiveRun(e);
-            if (run != null && run.getStartTime() != null) {
-                if (earliest == null || run.getStartTime().isBefore(earliest)) {
+        String label = null;
+        for (NodeResult node : nodes) {
+            for (CalculatorRun run : runsOf(node)) {
+                if (run != null && run.getStartTime() != null
+                        && (earliest == null || run.getStartTime().isBefore(earliest))) {
                     earliest = run.getStartTime();
-                    region = e.calculatorName();
+                    label = node.displayName();
                 }
             }
         }
-        return earliest != null ? new EstimatedTime(earliest, region, true) : null;
+        return earliest != null ? new EstimatedTime(earliest, label, true) : null;
     }
 
-    /**
-     * Derives estimated section end from the latest actual end across terminal entries.
-     * Only returns an actual end when ALL calculators are terminal (complete/failed).
-     */
-    private EstimatedTime deriveSectionEnd(
-            List<CalculatorEntryResult> entries, int total, int completed, int failed) {
-
-        boolean allTerminal = (completed + failed) == total;
-        if (!allTerminal) return null;
+    /** Latest actual run end across all nodes/cells, only when ALL units are terminal. */
+    private EstimatedTime deriveSectionEnd(List<NodeResult> nodes, int total, int completed, int failed) {
+        if ((completed + failed) != total) return null;
 
         Instant latest = null;
-        String region = null;
-        for (CalculatorEntryResult e : entries) {
-            CalculatorRun run = effectiveRun(e);
-            if (run != null && run.getEndTime() != null && run.getStatus().isTerminal()) {
-                if (latest == null || run.getEndTime().isAfter(latest)) {
+        String label = null;
+        for (NodeResult node : nodes) {
+            for (CalculatorRun run : runsOf(node)) {
+                if (run != null && run.getEndTime() != null && run.getStatus().isTerminal()
+                        && (latest == null || run.getEndTime().isAfter(latest))) {
                     latest = run.getEndTime();
-                    region = e.calculatorName();
+                    label = node.displayName();
                 }
             }
         }
-        return latest != null ? new EstimatedTime(latest, region, true) : null;
+        return latest != null ? new EstimatedTime(latest, label, true) : null;
     }
 
-    /** For sub-run entries, pick the first non-null sub-run's CalculatorRun. */
-    private CalculatorRun effectiveRun(CalculatorEntryResult entry) {
-        if (entry.subRuns() != null && !entry.subRuns().isEmpty()) {
-            return entry.subRuns().stream()
-                    .map(SubRunResult::run)
-                    .filter(Objects::nonNull)
-                    .findFirst()
-                    .orElse(null);
+    /** All CalculatorRun instances backing a node (1 for simple, N for matrix). */
+    private List<CalculatorRun> runsOf(NodeResult node) {
+        if (node.matrix() == null) {
+            return node.run() != null ? List.of(node.run()) : List.of();
         }
-        return entry.run();
+        return node.matrix().rows().stream()
+                .flatMap(r -> r.cells().stream())
+                .map(MatrixCellResult::run)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /** Collects all non-regional calculator IDs (including sub-run IDs). */
-    private List<String> collectNonRegionalCalculatorIds() {
-        List<String> ids = new ArrayList<>();
-        for (SectionConfig section : dashboardProperties.getSections()) {
-            if (REGIONAL_SECTION_KEY.equals(section.getSectionKey())) continue;
-            for (CalculatorConfig calc : section.getCalculators()) {
-                if (calc.isHasSubRuns()) {
-                    calc.getSubRuns().forEach(sub -> ids.add(sub.getCalculatorId()));
-                } else {
-                    ids.add(calc.getCalculatorId());
-                }
-            }
-        }
-        return ids;
+    private boolean isRegionMatrix(NodeConfig n) {
+        return n.getMatrixConfig() != null && "REGION".equals(n.getMatrixConfig().getDimension());
+    }
+
+    /**
+     * Collects calculator IDs for non-REGION nodes (REGION runs are loaded via
+     * {@link RegionalBatchService}).
+     */
+    private List<String> collectNonRegionalCalculatorIds(List<SectionConfig> sections) {
+        return sections.stream()
+                .flatMap(s -> s.getNodes().stream())
+                .flatMap(n -> {
+                    if (n.getMatrixConfig() == null) {
+                        return n.getCalculatorId() != null
+                                ? Stream.of(n.getCalculatorId()) : Stream.empty();
+                    }
+                    if ("REGION".equals(n.getMatrixConfig().getDimension())) {
+                        return Stream.empty();
+                    }
+                    return n.getMatrixConfig().getColumns().stream()
+                            .map(MatrixColumnConfig::getCalculatorId);
+                })
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
     }
 
     // ── Domain result records ─────────────────────────────────────────────────
@@ -404,6 +422,7 @@ public class DashboardService {
             LocalDate reportingDate,
             String frequency,
             int runNumber,
+            Instant generatedAt,
             List<SectionResult> sections
     ) {}
 
@@ -415,16 +434,17 @@ public class DashboardService {
             boolean slaBreached,
             DependencyResult dependency,
             SectionSummary summary,
-            List<CalculatorEntryResult> entries,
-            List<String> displayLabels
+            List<NodeResult> nodes
     ) {}
 
     public record SectionSummary(
-            int totalCalculators,
+            int totalCount,
             int completedCount,
-            int runningCount,
+            int inProgressCount,
             int failedCount,
             int notStartedCount,
+            String status,
+            Long latenessMs,
             EstimatedTime estimatedStart,
             EstimatedTime estimatedEnd
     ) {}
@@ -435,20 +455,39 @@ public class DashboardService {
             String label
     ) {}
 
-    public record CalculatorEntryResult(
-            String calculatorId,
-            String calculatorName,
+    public record NodeResult(
+            String nodeKey,
+            String displayName,
+            int displayOrder,
             CalculatorRun run,
             String status,
             boolean slaBreached,
-            List<SubRunResult> subRuns,
+            Long latenessMs,
+            Instant estimatedStartTime,
+            Instant estimatedEndTime,
+            Instant nextRunTime,
+            List<String> displayLabels,
+            MatrixResult matrix,
             List<HistoricalRunStatus> lastRuns
     ) {}
 
-    public record SubRunResult(
-            String subRunKey,
+    public record MatrixResult(
+            String columnDimension,
+            List<String> columns,
+            List<MatrixRowResult> rows
+    ) {}
+
+    public record MatrixRowResult(
+            String rowKey,
+            String label,
+            List<MatrixCellResult> cells
+    ) {}
+
+    public record MatrixCellResult(
+            String key,
             CalculatorRun run,
             String status,
-            boolean slaBreached
+            boolean slaBreached,
+            Long latenessMs
     ) {}
 }

@@ -4,21 +4,25 @@ import com.company.observability.cache.DashboardCacheService;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.response.CalculatorDashboardResponse;
-import com.company.observability.dto.response.CalculatorDashboardResponse.CalculatorEntry;
+import com.company.observability.dto.response.CalculatorDashboardResponse.DashboardNode;
 import com.company.observability.dto.response.CalculatorDashboardResponse.DashboardSection;
 import com.company.observability.dto.response.CalculatorDashboardResponse.DependencyStatus;
 import com.company.observability.dto.response.CalculatorDashboardResponse.LastRunIndicator;
+import com.company.observability.dto.response.CalculatorDashboardResponse.MatrixCell;
+import com.company.observability.dto.response.CalculatorDashboardResponse.MatrixRow;
 import com.company.observability.dto.response.CalculatorDashboardResponse.SectionSummary;
+import com.company.observability.dto.response.CalculatorDashboardResponse.StatusMatrix;
 import com.company.observability.dto.response.SlaIndicator;
-import com.company.observability.dto.response.CalculatorDashboardResponse.SubRunStatus;
 import com.company.observability.dto.response.TimeReference;
 import com.company.observability.repository.CalculatorRunRepository.HistoricalRunStatus;
 import com.company.observability.service.DashboardService;
-import com.company.observability.service.DashboardService.CalculatorEntryResult;
 import com.company.observability.service.DashboardService.DashboardResult;
+import com.company.observability.service.DashboardService.MatrixCellResult;
+import com.company.observability.service.DashboardService.MatrixResult;
+import com.company.observability.service.DashboardService.NodeResult;
 import com.company.observability.service.DashboardService.SectionResult;
-import com.company.observability.service.DashboardService.SubRunResult;
 import com.company.observability.service.RegionalBatchService.EstimatedTime;
+import com.company.observability.util.RunStatusClassifier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -50,15 +54,12 @@ public class DashboardProjection {
     }
 
     private CalculatorDashboardResponse toDashboardResponse(DashboardResult result) {
-        List<DashboardSection> sections = result.sections().stream()
-                .map(this::toSection)
-                .toList();
-
         return new CalculatorDashboardResponse(
                 result.reportingDate(),
                 result.frequency(),
                 result.runNumber(),
-                sections
+                result.generatedAt(),
+                result.sections().stream().map(this::toSection).toList()
         );
     }
 
@@ -71,35 +72,28 @@ public class DashboardProjection {
             dependency = new DependencyStatus(dep.dependsOnSection(), dep.met(), dep.label());
         }
 
-        SectionSummary summary = toSectionSummary(section.summary());
-
-        List<CalculatorEntry> calculators = section.entries().stream()
-                .map(this::toCalculatorEntry)
-                .toList();
-
         return new DashboardSection(
                 section.sectionKey(),
                 section.displayName(),
                 section.displayOrder(),
                 sla,
                 dependency,
-                summary,
-                calculators,
-                section.displayLabels()
+                toSectionSummary(section.summary()),
+                section.nodes().stream().map(this::toNode).toList()
         );
     }
 
     private SectionSummary toSectionSummary(DashboardService.SectionSummary s) {
-        TimeReference estStart = toTimeReference(s.estimatedStart());
-        TimeReference estEnd   = toTimeReference(s.estimatedEnd());
         return new SectionSummary(
-                s.totalCalculators(),
+                s.totalCount(),
                 s.completedCount(),
-                s.runningCount(),
+                s.inProgressCount(),
                 s.failedCount(),
                 s.notStartedCount(),
-                estStart,
-                estEnd
+                s.status(),
+                s.latenessMs(),
+                toTimeReference(s.estimatedStart()),
+                toTimeReference(s.estimatedEnd())
         );
     }
 
@@ -108,60 +102,76 @@ public class DashboardProjection {
         return new TimeReference(est.time(), est.basedOn(), est.actual());
     }
 
-    private CalculatorEntry toCalculatorEntry(CalculatorEntryResult entry) {
-        CalculatorRun run = entry.run();
+    private DashboardNode toNode(NodeResult node) {
+        CalculatorRun run = node.run();
+        StatusMatrix matrix = node.matrix() != null ? toMatrix(node.matrix()) : null;
 
-        Long durationMs = run != null ? run.getDurationMs() : null;
-
-        List<SubRunStatus> subRuns = null;
-        if (entry.subRuns() != null && !entry.subRuns().isEmpty()) {
-            subRuns = entry.subRuns().stream()
-                    .map(this::toSubRunStatus)
-                    .toList();
-        }
-
-        List<LastRunIndicator> lastRuns = entry.lastRuns() == null
+        List<LastRunIndicator> lastRuns = (node.lastRuns() == null || node.lastRuns().isEmpty())
                 ? List.of()
-                : entry.lastRuns().stream()
+                : node.lastRuns().stream()
                         .map(h -> new LastRunIndicator(h.reportingDate(), toDotStatus(h)))
                         .toList();
 
-        return new CalculatorEntry(
-                entry.calculatorId(),
-                entry.calculatorName(),
+        List<String> displayLabels = (node.displayLabels() == null || node.displayLabels().isEmpty())
+                ? null : node.displayLabels();
+
+        return new DashboardNode(
+                node.nodeKey(),
+                node.displayName(),
+                node.displayOrder(),
                 run != null ? run.getRunId() : null,
-                entry.status(),
+                node.status(),
                 run != null ? run.getStartTime() : null,
-                run != null ? run.getEndTime() : null,
-                durationMs,
-                entry.slaBreached(),
-                subRuns,
+                run != null ? run.getEndTime()   : null,
+                node.estimatedStartTime(),
+                node.estimatedEndTime(),
+                node.nextRunTime(),
+                run != null ? run.getDurationMs() : null,
+                node.latenessMs(),
+                node.slaBreached(),
+                displayLabels,
+                matrix,
                 lastRuns
         );
     }
 
-    private SubRunStatus toSubRunStatus(SubRunResult sub) {
-        CalculatorRun run = sub.run();
-        Long durationMs = run != null ? run.getDurationMs() : null;
-
-        return new SubRunStatus(
-                sub.subRunKey(),
-                run != null ? run.getRunId() : null,
-                sub.status(),
-                run != null ? run.getStartTime() : null,
-                run != null ? run.getEndTime() : null,
-                durationMs,
-                sub.slaBreached()
+    private StatusMatrix toMatrix(MatrixResult m) {
+        return new StatusMatrix(
+                m.columnDimension(),
+                m.columns(),
+                m.rows().stream().map(r ->
+                        new MatrixRow(r.rowKey(), r.label(),
+                                r.cells().stream().map(this::toMatrixCell).toList())
+                ).toList()
         );
     }
 
-    /** Maps a historical run record to a dot status: ON_TIME, DELAYED, or FAILED. */
+    private MatrixCell toMatrixCell(MatrixCellResult cell) {
+        CalculatorRun run = cell.run();
+        return new MatrixCell(
+                cell.key(),
+                run != null ? run.getRunId()              : null,
+                cell.status(),
+                run != null ? run.getStartTime()          : null,
+                run != null ? run.getEndTime()            : null,
+                run != null ? run.getEstimatedStartTime() : null,
+                run != null ? run.getEstimatedEndTime()   : null,
+                run != null ? run.getDurationMs()         : null,
+                cell.latenessMs(),
+                cell.slaBreached()
+        );
+    }
+
+    /**
+     * Maps a historical run record to a dot status: ON_TIME, LATE, or FAILED.
+     * (Last-run dots use the simplified three-value vocabulary.)
+     */
     private String toDotStatus(HistoricalRunStatus h) {
         RunStatus runStatus = RunStatus.fromString(h.status());
         if (!runStatus.isTerminal() || runStatus == RunStatus.FAILED
                 || runStatus == RunStatus.TIMEOUT || runStatus == RunStatus.CANCELLED) {
-            return "FAILED";
+            return RunStatusClassifier.FAILED;
         }
-        return h.slaBreached() ? "DELAYED" : "ON_TIME";
+        return h.slaBreached() ? RunStatusClassifier.LATE : RunStatusClassifier.ON_TIME;
     }
 }

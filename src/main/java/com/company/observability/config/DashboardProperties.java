@@ -15,14 +15,26 @@ import java.util.stream.Collectors;
 
 /**
  * Configuration for the unified calculator dashboard endpoint.
- * Defines the display order, SLA deadlines, dependency chain, and calculator IDs
- * for each section shown on the Capital Calculation Insight dashboard.
+ *
+ * <p>Models the section → node → (matrix-column | calculator) hierarchy that
+ * drives the redesigned UI. A {@link NodeConfig} is either:
+ * <ul>
+ *   <li><b>Simple</b> — has a single {@code calculatorId}, optionally with
+ *       {@code displayLabels} for Portfolio-style multi-row rendering.</li>
+ *   <li><b>Matrix</b> — has a {@link MatrixConfig} carrying either a REGION
+ *       dimension (10 columns, runs come from {@code RegionalBatchService})
+ *       or a TYPE dimension (e.g. OTC/ETD/SFT, runs come from
+ *       {@code calculator_runs}).</li>
+ * </ul>
  */
 @Component
 @ConfigurationProperties(prefix = "observability.dashboard")
 @Getter
 @Setter
 public class DashboardProperties {
+
+    /** Milliseconds past SLA deadline that separates LATE from VERY_LATE. Default: 1 hour. */
+    private long lateThresholdMs = 3_600_000L;
 
     private List<SectionConfig> sections = List.of();
 
@@ -74,62 +86,79 @@ public class DashboardProperties {
     @Setter
     public static class SectionConfig {
 
-        /** Unique key for this section, e.g. REGIONAL, PORTFOLIO, GROUP_PORTFOLIO, RISK_GOVERNED, CONSOLIDATION. */
+        /** Unique key, e.g. REGIONAL, PORTFOLIO, GROUP_PORTFOLIO, RISK_GOVERNED, CONSOLIDATION. */
         private String sectionKey;
 
         /** Human-readable label shown in the UI accordion header. */
         private String displayName;
 
-        /** Controls the order sections appear top-to-bottom in the dashboard. */
+        /** Controls the order sections appear top-to-bottom. */
         private int displayOrder;
 
         /** SLA deadline as a CET time-of-day (e.g. 17:45). */
         private LocalTime slaTimeCet;
 
-        /**
-         * sectionKey of the upstream section this one depends on, or null if independent.
-         * Example: PORTFOLIO depends on REGIONAL.
-         */
+        /** sectionKey of the upstream section this one depends on, or null if independent. */
         private String dependsOn;
 
+        /** Empty list = applicable to all frequencies; otherwise filter by frequency name. */
+        private List<String> frequencyApplicable = List.of();
+
+        /** Nodes shown in this section. Each node is either simple or matrix. */
+        private List<NodeConfig> nodes = List.of();
+    }
+
+    @Getter
+    @Setter
+    public static class NodeConfig {
+
+        /** Stable identifier within the section, e.g. "REGIONAL_MATRIX", "PORTFOLIO". */
+        private String nodeKey;
+
+        /** Label rendered as the node header. */
+        private String displayName;
+
+        /** Controls the order nodes appear within a section. */
+        private int displayOrder;
+
         /**
-         * Display labels rendered by the frontend as separate rows, all backed by the
-         * same single calculator run. Used by Portfolio to show 5 CAP rows.
+         * Non-empty for Portfolio-style nodes where one calculator run drives
+         * multiple display rows in the UI (e.g. CAP 8, CAP 10, …).
          */
         private List<String> displayLabels = List.of();
 
-        /** Calculator definitions for this section. Empty for REGIONAL (uses region-order config). */
-        private List<CalculatorConfig> calculators = List.of();
-    }
-
-    @Getter
-    @Setter
-    public static class CalculatorConfig {
-
-        /** Matches the calculator_id column in calculator_runs. */
-        private String calculatorId;
-
-        /** Label shown in the UI for this calculator row. */
-        private String displayName;
-
         /**
-         * True for calculators that have multiple sub-runs (e.g. Modelled Exposure
-         * with OTC, ETD, SFT). Drives the sub-run button rendering in the UI.
+         * Non-null = matrix node. Null = simple node (single-calculator);
+         * in that case {@link #calculatorId} must be set.
          */
-        private boolean hasSubRuns = false;
+        private MatrixConfig matrixConfig;
 
-        /** Sub-run definitions when hasSubRuns = true. */
-        private List<SubRunConfig> subRuns = List.of();
+        /** Used only when {@link #matrixConfig} is null. */
+        private String calculatorId;
     }
 
     @Getter
     @Setter
-    public static class SubRunConfig {
+    public static class MatrixConfig {
 
-        /** Short key displayed as the button label, e.g. "OTC", "ETD", "SFT". */
-        private String subRunKey;
+        /** "REGION" or "TYPE". */
+        private String dimension;
 
-        /** Matches the calculator_id column for this specific sub-run. */
+        /** Label rendered for the (single) matrix row, e.g. "Run status". */
+        private String rowLabel;
+
+        /** Column definitions, in the order they should be rendered. */
+        private List<MatrixColumnConfig> columns = List.of();
+    }
+
+    @Getter
+    @Setter
+    public static class MatrixColumnConfig {
+
+        /** Column key rendered as header, e.g. "WMAP" or "OTC". */
+        private String key;
+
+        /** calculator_id that backs runs for this cell. */
         private String calculatorId;
     }
 }
