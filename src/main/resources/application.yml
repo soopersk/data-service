@@ -87,6 +87,9 @@ observability:
       username: ${OBS_BASIC_USER:admin}
       password: ${OBS_BASIC_PASSWORD:admin}
       role: ${OBS_BASIC_ROLE:USER}
+    admin:
+      username: ${OBS_ADMIN_USER:ops}
+      password: ${OBS_ADMIN_PASSWORD:ops}
   sla:
     live-tracking:
       enabled: true
@@ -231,7 +234,6 @@ observability:
   partitions:
     management:
       enabled: true
-      create-cron: "0 0 1 * * *"  # Daily at 1 AM
 
 # Logging
 logging:

@@ -27,6 +27,7 @@ public class BasicSecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"
                         ).permitAll()
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .httpBasic(Customizer.withDefaults());
@@ -38,13 +39,20 @@ public class BasicSecurityConfig {
     public UserDetailsService userDetailsService(
             @Value("${observability.security.basic.username:admin}") String username,
             @Value("${observability.security.basic.password:admin}") String password,
-            @Value("${observability.security.basic.role:USER}") String role) {
+            @Value("${observability.security.basic.role:USER}") String role,
+            @Value("${observability.security.admin.username:ops}") String adminUsername,
+            @Value("${observability.security.admin.password:ops}") String adminPassword) {
 
-        UserDetails user = User.withUsername(username)
+        UserDetails appUser = User.withUsername(username)
                 .password("{noop}" + password)
                 .roles(role)
                 .build();
 
-        return new InMemoryUserDetailsManager(user);
+        UserDetails adminUser = User.withUsername(adminUsername)
+                .password("{noop}" + adminPassword)
+                .roles("ADMIN")
+                .build();
+
+        return new InMemoryUserDetailsManager(appUser, adminUser);
     }
 }
