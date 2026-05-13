@@ -68,15 +68,15 @@ class PerformanceCardProjectionTest {
                         new RunPerformanceData.RunDataPoint(
                                 "run-1", LocalDate.of(2026, 2, 21),
                                 start, end, 180000L, "SUCCESS", false, "SLA_MET", null,
-                                estStart, slaTime),
+                                estStart, slaTime, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.of(2026, 2, 22),
                                 start, end, 180000L, "SUCCESS", true, "LATE", null,
-                                estStart, slaTime),
+                                estStart, slaTime, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-3", LocalDate.of(2026, 2, 23),
                                 start, null, null, "RUNNING", false, "RUNNING", null,
-                                estStart, slaTime)
+                                estStart, slaTime, null, null)
                 ),
                 estStart, slaTime);
 
@@ -128,11 +128,11 @@ class PerformanceCardProjectionTest {
                         new RunPerformanceData.RunDataPoint(
                                 "run-a", LocalDate.of(2026, 2, 21),
                                 estStart1, slaTime1, 2700000L, "SUCCESS", false, "SLA_MET", null,
-                                estStart1, slaTime1),
+                                estStart1, slaTime1, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-b", LocalDate.of(2026, 2, 21),
                                 estStart2, slaTime2, 900000L, "SUCCESS", false, "SLA_MET", null,
-                                estStart2, slaTime2)
+                                estStart2, slaTime2, null, null)
                 ),
                 estStart1, slaTime1);
 
@@ -158,7 +158,7 @@ class PerformanceCardProjectionTest {
                 1, 0, 1, 0, 0,
                 List.of(new RunPerformanceData.RunDataPoint(
                         "run-1", null, null, null, null, "SUCCESS", false, "SLA_MET", null,
-                        null, null)),
+                        null, null, null, null)),
                 null, null);
 
         when(analyticsService.getRunPerformanceData("calc-1", "t1", 7, CalculatorFrequency.DAILY))
@@ -189,12 +189,12 @@ class PerformanceCardProjectionTest {
                                 "run-1", LocalDate.of(2026, 2, 21),
                                 Instant.parse("2026-02-21T04:00:00Z"),
                                 null, null, "RUNNING", false, "RUNNING", null,
-                                estStart, slaTime),
+                                estStart, slaTime, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.of(2026, 2, 22),
                                 Instant.parse("2026-02-22T04:00:00Z"),
                                 null, null, "RUNNING", false, "RUNNING", null,
-                                estStart, slaTime)
+                                estStart, slaTime, null, null)
                 ),
                 estStart, slaTime);
 
