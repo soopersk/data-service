@@ -59,6 +59,9 @@ public class CalculatorRun implements Serializable {
     private String runType;
     private String region;
 
+    // Transient — set by CalculatorStateService, not persisted
+    private boolean isRerun;
+
     // Split-run correlation: Airflow sets the same value on every physical split of one logical run.
     // NULL = standalone run (not part of a split group).
     private String correlationId;
