@@ -2,8 +2,10 @@ package com.company.observability.controller;
 
 import com.company.observability.config.TestMetricsConfig;
 import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
+import com.company.observability.service.CalculatorStateService;
 import com.company.observability.service.RunQueryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -17,11 +19,13 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -45,6 +49,9 @@ class RunQueryControllerTest {
 
     @MockitoBean
     private RunQueryService queryService;
+
+    @MockitoBean
+    private CalculatorStateService calculatorStateService;
 
     @Test
     void getCalculatorStatus_returnsCacheableResponse_whenBypassCacheFalse() throws Exception {
@@ -151,6 +158,50 @@ class RunQueryControllerTest {
                         .param("historyLimit", "5")
                         .content(objectMapper.writeValueAsString(List.of("calc-1"))))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void batchRuns_returns200WithMapKeyedByCalculatorId() throws Exception {
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
+        when(calculatorStateService.getState(eq("t1"), eq(LocalDate.of(2026, 3, 6)),
+                eq(CalculatorFrequency.DAILY), eq(1), eq(List.of("capital"))))
+                .thenReturn(Map.of("capital", entry));
+
+        mockMvc.perform(get("/api/v1/calculators/batch/runs")
+                        .param("reporting_date", "2026-03-06")
+                        .param("frequency", "DAILY")
+                        .param("run_number", "1")
+                        .param("keys", "capital")
+                        .header(TENANT_HEADER, "t1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportingDate").value("2026-03-06"))
+                .andExpect(jsonPath("$.runNumber").value(1))
+                .andExpect(jsonPath("$.calculators.capital.calculatorId").value("capital"))
+                .andExpect(jsonPath("$.calculators.capital.runs").isArray());
+    }
+
+    @Test
+    void batchRuns_returns400WhenReportingDateMissing() throws Exception {
+        mockMvc.perform(get("/api/v1/calculators/batch/runs")
+                        .param("keys", "capital")
+                        .header(TENANT_HEADER, "t1"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void batchRuns_pipeSeparatedKeysParsedToList() throws Exception {
+        when(calculatorStateService.getState(any(), any(), any(), anyInt(),
+                eq(List.of("capital", "modelled-exposure", "portfolio"))))
+                .thenReturn(Map.of());
+
+        mockMvc.perform(get("/api/v1/calculators/batch/runs")
+                        .param("reporting_date", "2026-03-06")
+                        .param("keys", "capital|modelled-exposure|portfolio")
+                        .header(TENANT_HEADER, "t1"))
+                .andExpect(status().isOk());
+
+        verify(calculatorStateService).getState(any(), any(), any(), anyInt(),
+                eq(List.of("capital", "modelled-exposure", "portfolio")));
     }
 
     private static CalculatorStatusResponse sampleStatusResponse(String calculatorName) {

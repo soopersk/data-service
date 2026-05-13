@@ -1,7 +1,9 @@
 package com.company.observability.controller;
 
 import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
+import com.company.observability.service.CalculatorStateService;
 import com.company.observability.service.RunQueryService;
 import com.company.observability.util.ObservabilityConstants;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -12,11 +14,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -30,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 public class RunQueryController {
 
     private final RunQueryService queryService;
+    private final CalculatorStateService calculatorStateService;
     private final MeterRegistry meterRegistry;
 
     @GetMapping("/{calculatorId}/status")
@@ -114,6 +122,45 @@ public class RunQueryController {
             sample.stop(meterRegistry.timer(ObservabilityConstants.API_QUERY_DURATION,
                     "endpoint", "/api/v1/calculators/batch/status",
                     "frequency", freq.name()));
+        }
+    }
+
+    @GetMapping("/batch/runs")
+    @Operation(
+            summary = "Batch calculator runs by reporting date",
+            description = "Returns all dimensional run instances per logical calculator for a specific reporting date. " +
+                    "Regional calculators return one RunEntry per region; typed calculators return one per runType. " +
+                    "Empty runs list = no run found. isRerun=true = a re-trigger was fired for that dimension."
+    )
+    public ResponseEntity<CalculatorBatchRunsResponse> getBatchRuns(
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestParam("reporting_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate,
+            @RequestParam(defaultValue = "DAILY") String frequency,
+            @RequestParam(value = "run_number", defaultValue = "1") @Min(1) @Max(2) int runNumber,
+            @RequestParam @NotBlank String keys) {
+
+        List<String> calculatorIds = Arrays.stream(keys.split("\\|"))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        if (calculatorIds.isEmpty()) {
+            throw new IllegalArgumentException("keys must contain at least one non-blank calculator ID");
+        }
+
+        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            Map<String, CalculatorBatchRunsResponse.CalculatorEntry> calculators =
+                    calculatorStateService.getState(tenantId, reportingDate, freq, runNumber, calculatorIds);
+
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())
+                    .body(new CalculatorBatchRunsResponse(
+                            reportingDate, freq.name(), runNumber, Instant.now(), calculators));
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
+                    "endpoint", "/calculators/batch/runs"));
         }
     }
 }
