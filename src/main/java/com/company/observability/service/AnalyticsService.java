@@ -349,6 +349,109 @@ public class AnalyticsService {
     }
 
     // ================================================================
+    // Run Executions (raw, no grouping)
+    // ================================================================
+
+    public RunPerformanceData getRunExecutions(
+            String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
+
+        List<RunWithSlaStatus> rawRuns = calculatorRunRepository
+                .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days);
+
+        if (rawRuns.isEmpty()) {
+            return new RunPerformanceData(
+                    calculatorId, null, frequency.name(), days, 0L,
+                    0, 0, 0, 0, 0,
+                    Collections.emptyList(), null, null);
+        }
+
+        List<RunPerformanceData.RunDataPoint> dataPoints = rawRuns.stream()
+                .map(run -> {
+                    String slaStatus = classifySlaStatusForRun(run);
+                    boolean isRunning = run.status() == RunStatus.RUNNING;
+                    return new RunPerformanceData.RunDataPoint(
+                            run.runId(),
+                            run.reportingDate(),
+                            run.startTime(),
+                            isRunning ? null : run.endTime(),
+                            isRunning ? null : run.durationMs(),
+                            run.status().name(),
+                            run.slaBreached(),
+                            slaStatus,
+                            null,
+                            run.estimatedStartTime(),
+                            run.slaTime(),
+                            run.runNumber(),
+                            run.expectedDurationMs()
+                    );
+                })
+                .toList();
+
+        return buildRunPerformanceDataEnvelope(calculatorId, rawRuns, dataPoints, days, frequency);
+    }
+
+    private RunPerformanceData buildRunPerformanceDataEnvelope(
+            String calculatorId,
+            List<RunWithSlaStatus> rawRuns,
+            List<RunPerformanceData.RunDataPoint> dataPoints,
+            int days,
+            CalculatorFrequency frequency) {
+
+        RunWithSlaStatus latestRaw = rawRuns.get(rawRuns.size() - 1);
+
+        long totalDuration = 0;
+        int completedCount = 0;
+        int terminalRuns = 0;
+        int runningRuns = 0;
+        int slaMetCount = 0, lateCount = 0, veryLateCount = 0;
+
+        for (RunPerformanceData.RunDataPoint dp : dataPoints) {
+            boolean isRunning = RunStatus.RUNNING.name().equals(dp.status());
+            if (isRunning) {
+                runningRuns++;
+            } else {
+                terminalRuns++;
+            }
+            if (!isRunning && dp.durationMs() != null && dp.durationMs() > 0) {
+                totalDuration += dp.durationMs();
+                completedCount++;
+            }
+            if (!isRunning) {
+                if (SlaStatus.SLA_MET.name().equals(dp.slaStatus())) slaMetCount++;
+                else if (SlaStatus.LATE.name().equals(dp.slaStatus())) lateCount++;
+                else if (SlaStatus.VERY_LATE.name().equals(dp.slaStatus())) veryLateCount++;
+            }
+        }
+
+        long meanDuration = completedCount > 0 ? totalDuration / completedCount : 0;
+
+        return new RunPerformanceData(
+                calculatorId,
+                latestRaw.calculatorName(),
+                frequency.name(),
+                days,
+                meanDuration,
+                terminalRuns,
+                runningRuns,
+                slaMetCount,
+                lateCount,
+                veryLateCount,
+                dataPoints,
+                latestRaw.estimatedStartTime(),
+                latestRaw.slaTime());
+    }
+
+    private String classifySlaStatusForRun(RunWithSlaStatus run) {
+        if (run.status() == RunStatus.RUNNING) return SlaStatus.RUNNING.name();
+        if (!Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.SLA_MET.name();
+        if (run.severity() == null) return SlaStatus.LATE.name();
+        return switch (run.severity()) {
+            case CRITICAL, HIGH -> SlaStatus.VERY_LATE.name();
+            default -> SlaStatus.LATE.name();
+        };
+    }
+
+    // ================================================================
     // SLA classification helpers
     // ================================================================
 

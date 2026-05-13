@@ -227,6 +227,62 @@ class AnalyticsServiceTest {
         assertNull(result.slaTime());
     }
 
+    @Test
+    void getRunExecutions_splitRunsAppearAsIndependentRows() {
+        LocalDate day = LocalDate.of(2026, 5, 11);
+        Instant start1 = Instant.parse("2026-05-11T03:59:50Z");
+        Instant end1 = Instant.parse("2026-05-11T04:08:10Z");
+        Instant start2 = Instant.parse("2026-05-11T04:00:05Z");
+        Instant end2 = Instant.parse("2026-05-11T04:15:45Z");
+        Instant slaTime = Instant.parse("2026-05-11T06:30:00Z");
+
+        RunWithSlaStatus split1 = new RunWithSlaStatus(
+                "run-split-1", "calc-1", "Portfolio", day,
+                start1, end1, 500000L,
+                slaTime, start1, CalculatorFrequency.DAILY,
+                RunStatus.SUCCESS, false, null, null, "corr-1", "1", 300000L);
+
+        RunWithSlaStatus split2 = new RunWithSlaStatus(
+                "run-split-2", "calc-1", "Portfolio", day,
+                start2, end2, 940000L,
+                slaTime, start2, CalculatorFrequency.DAILY,
+                RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH, "corr-1", "1", 300000L);
+
+        when(calculatorRunRepository.findRunsWithSlaStatus(
+                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30))
+                .thenReturn(List.of(split1, split2));
+
+        RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
+
+        assertEquals(2, result.runs().size());
+        assertNull(result.runs().get(0).subRunIds());
+        assertNull(result.runs().get(1).subRunIds());
+        assertEquals("run-split-1", result.runs().get(0).runId());
+        assertEquals("run-split-2", result.runs().get(1).runId());
+        assertEquals("SLA_MET", result.runs().get(0).slaStatus());
+        assertEquals("VERY_LATE", result.runs().get(1).slaStatus());
+        assertEquals((500000L + 940000L) / 2, result.meanDurationMs());
+        assertEquals(1, result.slaMetCount());
+        assertEquals(1, result.veryLateCount());
+        assertEquals(0, result.runningRuns());
+    }
+
+    @Test
+    void getRunExecutions_emptyRuns_returnsZeroedResponse() {
+        when(calculatorRunRepository.findRunsWithSlaStatus(
+                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 7))
+                .thenReturn(List.of());
+
+        RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 7, CalculatorFrequency.DAILY);
+
+        assertEquals("calc-1", result.calculatorId());
+        assertNull(result.calculatorName());
+        assertEquals(0, result.totalRuns());
+        assertTrue(result.runs().isEmpty());
+        assertNull(result.estimatedStartTime());
+        assertNull(result.slaTime());
+    }
+
     private SlaBreachEvent breach(long breachId, Instant createdAt) {
         return SlaBreachEvent.builder()
                 .breachId(breachId)

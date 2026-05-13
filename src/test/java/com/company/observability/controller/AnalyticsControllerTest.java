@@ -161,6 +161,56 @@ class AnalyticsControllerTest {
     }
 
     @Test
+    void getRunExecutions_returns200WithRawRunRows() throws Exception {
+        RunPerformanceData response = new RunPerformanceData(
+                "calc-1", "Calculator One", "DAILY", 30, 720000L,
+                2, 0, 1, 0, 1,
+                List.of(
+                        new RunPerformanceData.RunDataPoint(
+                                "run-split-1", LocalDate.parse("2026-05-11"),
+                                Instant.parse("2026-05-11T03:59:50Z"),
+                                Instant.parse("2026-05-11T04:08:10Z"),
+                                500000L, "SUCCESS", false, "SLA_MET", null,
+                                Instant.parse("2026-05-11T04:00:00Z"),
+                                Instant.parse("2026-05-11T06:30:00Z"), "1", 300000L),
+                        new RunPerformanceData.RunDataPoint(
+                                "run-split-2", LocalDate.parse("2026-05-11"),
+                                Instant.parse("2026-05-11T04:00:05Z"),
+                                Instant.parse("2026-05-11T04:15:45Z"),
+                                940000L, "SUCCESS", true, "VERY_LATE", null,
+                                Instant.parse("2026-05-11T04:00:00Z"),
+                                Instant.parse("2026-05-11T06:30:00Z"), "1", 300000L)
+                ),
+                Instant.parse("2026-05-11T04:00:00Z"),
+                Instant.parse("2026-05-11T06:30:00Z"));
+
+        when(analyticsService.getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
+                .thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/executions")
+                        .header(TENANT_HEADER, "tenant-a")
+                        .param("days", "30"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=60")))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("private")))
+                .andExpect(jsonPath("$.calculatorId").value("calc-1"))
+                .andExpect(jsonPath("$.runs").isArray())
+                .andExpect(jsonPath("$.runs.length()").value(2))
+                .andExpect(jsonPath("$.runs[0].runId").value("run-split-1"))
+                .andExpect(jsonPath("$.runs[1].runId").value("run-split-2"))
+                .andExpect(jsonPath("$.runs[0].subRunIds").doesNotExist());
+
+        verify(analyticsService).getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
+    }
+
+    @Test
+    void getRunExecutions_missingTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/executions")
+                        .param("days", "30"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void missingTenantIdHeader_returnsBadRequest() throws Exception {
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/runtime")
                         .param("days", "30"))

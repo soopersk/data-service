@@ -143,6 +143,38 @@ public class AnalyticsController {
         }
     }
 
+    @GetMapping("/calculators/{calculatorId}/executions")
+    @Operation(
+            summary = "Run execution history (raw)",
+            description = "Returns all physical runs over the lookback window as independent entries. " +
+                    "Split runs sharing a correlationId appear as separate rows — no grouping. " +
+                    "Each entry includes durationMs (actual) and expectedDurationMs (configured) for comparison. " +
+                    "For grouped/logical view, use GET /run-performance."
+    )
+    public ResponseEntity<RunPerformanceData> getRunExecutions(
+            @PathVariable String calculatorId,
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @Parameter(description = "Lookback period in days (1-365)")
+            @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days,
+            @Parameter(description = "Frequency: DAILY or MONTHLY")
+            @RequestParam(defaultValue = "DAILY") String frequency) {
+
+        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            RunPerformanceData response = analyticsService
+                    .getRunExecutions(calculatorId, tenantId, days, freq);
+
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
+                    .body(response);
+        } finally {
+            sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
+                    "endpoint", "/executions"));
+        }
+    }
+
     @GetMapping("/calculators/{calculatorId}/run-performance")
     @Operation(
             summary = "Run-level performance data",
