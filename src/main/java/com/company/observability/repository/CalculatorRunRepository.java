@@ -695,6 +695,46 @@ public class CalculatorRunRepository {
     }
 
     /**
+     * Returns ALL rows for the given date/frequency/runNumber/calculatorIds — no SQL deduplication.
+     * Deduplication (splits, reruns) is handled in CalculatorStateService.
+     */
+    public List<CalculatorRun> findAllRunsByDateAndDimension(
+            String tenantId,
+            LocalDate reportingDate,
+            CalculatorFrequency frequency,
+            String runNumber,
+            List<String> calculatorIds) {
+
+        if (calculatorIds.isEmpty()) {
+            return List.of();
+        }
+
+        String sql = """
+                SELECT *
+                FROM calculator_runs
+                WHERE tenant_id      = :tenantId
+                  AND reporting_date = :reportingDate
+                  AND frequency      = :frequency
+                  AND run_number     = :runNumber
+                  AND calculator_id  IN (:calculatorIds)
+                ORDER BY calculator_id,
+                         COALESCE(correlation_id, ''),
+                         COALESCE(region, ''),
+                         COALESCE(run_type, ''),
+                         created_at ASC
+                """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId)
+                .addValue("reportingDate", reportingDate)
+                .addValue("frequency", frequency.name())
+                .addValue("runNumber", runNumber)
+                .addValue("calculatorIds", calculatorIds);
+
+        return jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(false));
+    }
+
+    /**
      * Fetches the last {@code lookbackDays} reporting dates' terminal run status
      * for each calculator, used to populate the "Last runs" dot strip in the UI.
      * Returns the latest run per (calculator_id, reporting_date) — excludes RUNNING.
