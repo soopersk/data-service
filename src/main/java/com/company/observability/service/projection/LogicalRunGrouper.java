@@ -42,7 +42,9 @@ public final class LogicalRunGrouper {
             String slaStatus,
             Instant slaTime,
             Instant estimatedStartTime,
-            List<String> subRunIds  // all physical runIds in this logical group; null/empty for singletons
+            List<String> subRunIds,  // all physical runIds in this logical group; null/empty for singletons
+            String runNumber,
+            Long expectedDurationMs
     ) {}
 
     /**
@@ -134,7 +136,9 @@ public final class LogicalRunGrouper {
                 slaStatus,
                 first.slaTime(),
                 first.estimatedStartTime(),
-                subRunIds
+                subRunIds,
+                splits.get(0).runNumber(),
+                splits.get(0).expectedDurationMs()
         );
     }
 
@@ -157,7 +161,9 @@ public final class LogicalRunGrouper {
                 slaStatus,
                 run.slaTime(),
                 run.estimatedStartTime(),
-                null
+                null,
+                run.runNumber(),
+                run.expectedDurationMs()
         );
     }
 

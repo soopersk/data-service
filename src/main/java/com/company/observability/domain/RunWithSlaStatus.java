@@ -26,5 +26,7 @@ public record RunWithSlaStatus(
         Boolean slaBreached,
         String slaBreachReason,
         Severity severity,
-        String correlationId
+        String correlationId,
+        String runNumber,
+        Long expectedDurationMs
 ) {}

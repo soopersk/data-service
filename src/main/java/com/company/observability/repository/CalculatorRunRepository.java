@@ -458,6 +458,7 @@ public class CalculatorRunRepository {
                    cr.start_time, cr.end_time, cr.duration_ms,
                    cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
                    cr.sla_breached, cr.sla_breach_reason, cr.correlation_id,
+                   cr.run_number, cr.expected_duration_ms,
                    sbe.severity
             FROM calculator_runs cr
             LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id AND sbe.tenant_id = cr.tenant_id
@@ -491,7 +492,9 @@ public class CalculatorRunRepository {
                     rs.getObject("sla_breached", Boolean.class),
                     rs.getString("sla_breach_reason"),
                     severityStr != null ? Severity.fromString(severityStr) : null,
-                    rs.getString("correlation_id")
+                    rs.getString("correlation_id"),
+                    rs.getString("run_number"),
+                    rs.getObject("expected_duration_ms", Long.class)
             );
         });
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_with_sla").register(meterRegistry));

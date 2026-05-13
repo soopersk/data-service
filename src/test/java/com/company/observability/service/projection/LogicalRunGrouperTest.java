@@ -29,7 +29,7 @@ class LogicalRunGrouperTest {
                 end != null ? end.toEpochMilli() - start.toEpochMilli() : null,
                 SLA, T0, CalculatorFrequency.DAILY, status,
                 slaBreached, slaBreached ? "breached" : null,
-                severity, correlationId);
+                severity, correlationId, null, null);
     }
 
     @Test
@@ -124,11 +124,11 @@ class LogicalRunGrouperTest {
         RunWithSlaStatus a = new RunWithSlaStatus(
                 "run-A", "calc-1", "Calc One", day1, T0, T1, 600_000L,
                 SLA, T0, CalculatorFrequency.DAILY, RunStatus.SUCCESS,
-                false, null, null, "corr-1");
+                false, null, null, "corr-1", null, null);
         RunWithSlaStatus b = new RunWithSlaStatus(
                 "run-B", "calc-1", "Calc One", day2, T2, T3, 600_000L,
                 SLA, T0, CalculatorFrequency.DAILY, RunStatus.SUCCESS,
-                false, null, null, "corr-1");
+                false, null, null, "corr-1", null, null);
 
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(a, b));
 
