@@ -31,7 +31,7 @@ consolidation     —                 1                          single row
 
 **Re-run signalling:** `isRerun: true` on a run entry means a re-trigger was fired for that specific region or type. UI renders the dimension column label with `*` suffix (LDNL*) and failed icon.
 
-**`runNumber` query param (`"1"` or `"2"`):** DB column is `VARCHAR(10)`. Selects early-cut vs late-cut bucket. Within a bucket, a dimension (e.g. AMER capital) can fail and be re-triggered — both original and retry share `run_number="1"`. Re-run detection is based on multiple DB rows for the same (calculatorId, region, runType) dimension, not on `run_number` value.
+**`runNumber` query param (`"1"` or `"2"`):** DB column is `VARCHAR(10)` — typed as **`String` end-to-end** (query param, service, DTO, response). The width allows non-numeric buckets in the future (e.g. `"EARLY"`, `"ADHOC"`) without an API break. Selects early-cut vs late-cut bucket. Within a bucket, a dimension (e.g. AMER capital) can fail and be re-triggered — both original and retry share `run_number="1"`. Re-run detection is based on multiple DB rows for the same (calculatorId, region, runType) dimension, not on `run_number` value.
 
 ---
 
@@ -100,7 +100,7 @@ Header: X-Tenant-Id: tenant1
 {
   "reportingDate": "2026-03-06",
   "frequency": "DAILY",
-  "runNumber": 1,
+  "runNumber": "1",
   "generatedAt": "2026-03-06T17:00:00Z",
   "calculators": {
     "capital": {
@@ -134,7 +134,6 @@ Header: X-Tenant-Id: tenant1
           "durationMs": 6960000,
           "slaBreached": true,
           "slaBreachReason": "Run status: FAILED",
-          "latenessMs": null,
           "isRerun": true
         }
       ]
@@ -416,7 +415,7 @@ class CalculatorBatchRunsResponseTest {
     void emptyRunsSerializesWithEmptyArray() throws Exception {
         var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
         var response = new CalculatorBatchRunsResponse(
-                LocalDate.of(2026, 3, 6), "DAILY", 1, Instant.now(), Map.of("capital", entry));
+                LocalDate.of(2026, 3, 6), "DAILY", "1", Instant.now(), Map.of("capital", entry));
         String json = mapper.writeValueAsString(response);
         assertThat(json).contains("\"runs\":[]");
         assertThat(json).contains("\"calculatorId\":\"capital\"");
@@ -480,7 +479,7 @@ import java.util.Map;
 public record CalculatorBatchRunsResponse(
         LocalDate reportingDate,
         String frequency,
-        int runNumber,
+        String runNumber,
         Instant generatedAt,
         Map<String, CalculatorEntry> calculators
 ) {
@@ -506,7 +505,6 @@ public record CalculatorBatchRunsResponse(
             Long durationMs,
             Boolean slaBreached,
             String slaBreachReason,
-            Long latenessMs,
             boolean isRerun
     ) {}
 }
@@ -631,7 +629,7 @@ Two-phase grouping:
 - **Phase 1** — collapses parallel splits (non-null `correlationId`) into one `RunEntry` using worst-status wins
 - **Phase 2** — deduplicates sequential reruns (null `correlationId`) by (region, runType) → picks latest `createdAt`, sets `isRerun = true` when group size > 1
 
-`int requestedRunNumber` → converted to `String` at the service boundary before the repository call.
+`String runNumber` is threaded straight through — DB column is `VARCHAR(10)`, so no type conversion at any boundary.
 
 **Step 1: Write the service tests**
 
@@ -656,7 +654,7 @@ class CalculatorStateServiceTest {
                 .thenReturn(List.of());
 
         Map<String, CalculatorBatchRunsResponse.CalculatorEntry> result =
-                service.getState("t1", DATE, FREQ, 1, List.of("missing-calc"));
+                service.getState("t1", DATE, FREQ, "1", List.of("missing-calc"));
 
         assertThat(result).containsKey("missing-calc");
         assertThat(result.get("missing-calc").runs()).isEmpty();
@@ -671,7 +669,7 @@ class CalculatorStateServiceTest {
         when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(s1, s2, s3));
 
-        var result = service.getState("t1", DATE, FREQ, 1, List.of("cap"));
+        var result = service.getState("t1", DATE, FREQ, "1", List.of("cap"));
         var entries = result.get("cap").runs();
 
         assertThat(entries).hasSize(1);
@@ -687,7 +685,7 @@ class CalculatorStateServiceTest {
         when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(attempt1, attempt2));
 
-        var result = service.getState("t1", DATE, FREQ, 1, List.of("cap"));
+        var result = service.getState("t1", DATE, FREQ, "1", List.of("cap"));
         var entries = result.get("cap").runs();
 
         assertThat(entries).hasSize(1);
@@ -704,7 +702,7 @@ class CalculatorStateServiceTest {
         when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(dbRuns);
 
-        var result = service.getState("t1", DATE, FREQ, 1, List.of("capital"));
+        var result = service.getState("t1", DATE, FREQ, "1", List.of("capital"));
         var entry = result.get("capital");
 
         assertThat(entry.runs()).hasSize(2);
@@ -775,13 +773,11 @@ public class CalculatorStateService {
             String tenantId,
             LocalDate reportingDate,
             CalculatorFrequency frequency,
-            int requestedRunNumber,
+            String runNumber,
             List<String> calculatorIds) {
 
-        String runNumberStr = String.valueOf(requestedRunNumber);
-
         Map<String, List<CalculatorRun>> runsByCalcId = runRepository
-                .findAllRunsByDateAndDimension(tenantId, reportingDate, frequency, runNumberStr, calculatorIds)
+                .findAllRunsByDateAndDimension(tenantId, reportingDate, frequency, runNumber, calculatorIds)
                 .stream()
                 .collect(Collectors.groupingBy(CalculatorRun::getCalculatorId));
 
@@ -868,8 +864,6 @@ public class CalculatorStateService {
 
     private RunEntry toRunEntry(CalculatorRun run) {
         String slaStatus = RunStatusClassifier.classify(run, run.getSlaTime(), lateThresholdMs);
-        Long latenessMs = RunStatusClassifier.computeLatenessMs(
-                run.getStatus().name(), run.isSlaBreached(), run.getEndTime(), run.getSlaTime());
 
         return RunEntry.builder()
                 .runId(run.getRunId())
@@ -885,7 +879,6 @@ public class CalculatorStateService {
                 .durationMs(run.getDurationMs())
                 .slaBreached(run.isSlaBreached())
                 .slaBreachReason(run.getSlaBreachReason())
-                .latenessMs(latenessMs)
                 .isRerun(run.isRerun())
                 .build();
     }
@@ -917,7 +910,7 @@ git commit -m "feat: add CalculatorStateService — two-phase split collapse + r
 void batchRuns_returns200WithMapKeyedByCalculatorId() throws Exception {
     var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
     when(calculatorStateService.getState(eq("t1"), eq(LocalDate.of(2026, 3, 6)),
-            eq(CalculatorFrequency.DAILY), eq(1), eq(List.of("capital"))))
+            eq(CalculatorFrequency.DAILY), eq("1"), eq(List.of("capital"))))
             .thenReturn(Map.of("capital", entry));
 
     mockMvc.perform(get("/api/v1/calculators/batch/runs")
@@ -928,7 +921,7 @@ void batchRuns_returns200WithMapKeyedByCalculatorId() throws Exception {
                     .header("X-Tenant-Id", "t1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.reportingDate").value("2026-03-06"))
-            .andExpect(jsonPath("$.runNumber").value(1))
+            .andExpect(jsonPath("$.runNumber").value("1"))
             .andExpect(jsonPath("$.calculators.capital.calculatorId").value("capital"))
             .andExpect(jsonPath("$.calculators.capital.runs").isArray());
 }
@@ -943,7 +936,7 @@ void batchRuns_returns400WhenReportingDateMissing() throws Exception {
 
 @Test
 void batchRuns_pipeSeparatedKeysParsedToList() throws Exception {
-    when(calculatorStateService.getState(any(), any(), any(), anyInt(),
+    when(calculatorStateService.getState(any(), any(), any(), anyString(),
             eq(List.of("capital", "modelled-exposure", "portfolio"))))
             .thenReturn(Map.of());
 
@@ -953,7 +946,7 @@ void batchRuns_pipeSeparatedKeysParsedToList() throws Exception {
                     .header("X-Tenant-Id", "t1"))
             .andExpect(status().isOk());
 
-    verify(calculatorStateService).getState(any(), any(), any(), anyInt(),
+    verify(calculatorStateService).getState(any(), any(), any(), anyString(),
             eq(List.of("capital", "modelled-exposure", "portfolio")));
 }
 ```
@@ -979,7 +972,8 @@ public ResponseEntity<CalculatorBatchRunsResponse> getBatchRuns(
         @RequestHeader("X-Tenant-Id") String tenantId,
         @RequestParam("reporting_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate,
         @RequestParam(defaultValue = "DAILY") String frequency,
-        @RequestParam(value = "run_number", defaultValue = "1") @Min(1) @Max(2) int runNumber,
+        @RequestParam(value = "run_number", defaultValue = "1")
+        @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2") String runNumber,
         @RequestParam @NotBlank String keys) {
 
     List<String> calculatorIds = Arrays.stream(keys.split("\\|"))

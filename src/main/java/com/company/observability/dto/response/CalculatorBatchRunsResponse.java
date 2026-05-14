@@ -11,7 +11,7 @@ import java.util.Map;
 public record CalculatorBatchRunsResponse(
         LocalDate reportingDate,
         String frequency,
-        int runNumber,
+        String runNumber,
         Instant generatedAt,
         Map<String, CalculatorEntry> calculators
 ) {
@@ -37,7 +37,6 @@ public record CalculatorBatchRunsResponse(
             Long durationMs,
             Boolean slaBreached,
             String slaBreachReason,
-            Long latenessMs,
             boolean isRerun
     ) {}
 }

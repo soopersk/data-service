@@ -22,7 +22,7 @@ class CalculatorBatchRunsResponseTest {
     void emptyRunsSerializesWithEmptyArray() throws Exception {
         var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
         var response = new CalculatorBatchRunsResponse(
-                LocalDate.of(2026, 3, 6), "DAILY", 1, Instant.now(), Map.of("capital", entry));
+                LocalDate.of(2026, 3, 6), "DAILY", "1", Instant.now(), Map.of("capital", entry));
         String json = mapper.writeValueAsString(response);
         assertThat(json).contains("\"runs\":[]");
         assertThat(json).contains("\"calculatorId\":\"capital\"");
@@ -42,7 +42,6 @@ class CalculatorBatchRunsResponseTest {
         assertThat(json).doesNotContain("runId");
         assertThat(json).doesNotContain("runType");
         assertThat(json).doesNotContain("startTime");
-        assertThat(json).doesNotContain("latenessMs");
         assertThat(json).contains("\"region\":\"WMAP\"");
         assertThat(json).contains("\"slaStatus\":\"ON_TIME\"");
         assertThat(json).contains("\"isRerun\":false");

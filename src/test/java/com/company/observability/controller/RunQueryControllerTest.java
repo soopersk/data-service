@@ -164,7 +164,7 @@ class RunQueryControllerTest {
     void batchRuns_returns200WithMapKeyedByCalculatorId() throws Exception {
         var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
         when(calculatorStateService.getState(eq("t1"), eq(LocalDate.of(2026, 3, 6)),
-                eq(CalculatorFrequency.DAILY), eq(1), eq(List.of("capital"))))
+                eq(CalculatorFrequency.DAILY), eq("1"), eq(List.of("capital"))))
                 .thenReturn(Map.of("capital", entry));
 
         mockMvc.perform(get("/api/v1/calculators/batch/runs")
@@ -175,7 +175,7 @@ class RunQueryControllerTest {
                         .header(TENANT_HEADER, "t1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reportingDate").value("2026-03-06"))
-                .andExpect(jsonPath("$.runNumber").value(1))
+                .andExpect(jsonPath("$.runNumber").value("1"))
                 .andExpect(jsonPath("$.calculators.capital.calculatorId").value("capital"))
                 .andExpect(jsonPath("$.calculators.capital.runs").isArray());
     }
@@ -190,7 +190,7 @@ class RunQueryControllerTest {
 
     @Test
     void batchRuns_pipeSeparatedKeysParsedToList() throws Exception {
-        when(calculatorStateService.getState(any(), any(), any(), anyInt(),
+        when(calculatorStateService.getState(any(), any(), any(), anyString(),
                 eq(List.of("capital", "modelled-exposure", "portfolio"))))
                 .thenReturn(Map.of());
 
@@ -200,7 +200,7 @@ class RunQueryControllerTest {
                         .header(TENANT_HEADER, "t1"))
                 .andExpect(status().isOk());
 
-        verify(calculatorStateService).getState(any(), any(), any(), anyInt(),
+        verify(calculatorStateService).getState(any(), any(), any(), anyString(),
                 eq(List.of("capital", "modelled-exposure", "portfolio")));
     }
 

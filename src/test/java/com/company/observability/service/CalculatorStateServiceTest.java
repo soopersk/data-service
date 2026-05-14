@@ -43,7 +43,7 @@ class CalculatorStateServiceTest {
                 .thenReturn(List.of());
 
         Map<String, CalculatorBatchRunsResponse.CalculatorEntry> result =
-                service.getState("t1", DATE, FREQ, 1, List.of("missing-calc"));
+                service.getState("t1", DATE, FREQ, "1", List.of("missing-calc"));
 
         assertThat(result).containsKey("missing-calc");
         assertThat(result.get("missing-calc").runs()).isEmpty();
@@ -58,7 +58,7 @@ class CalculatorStateServiceTest {
         when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(s1, s2, s3));
 
-        var result = service.getState("t1", DATE, FREQ, 1, List.of("cap"));
+        var result = service.getState("t1", DATE, FREQ, "1", List.of("cap"));
         var entries = result.get("cap").runs();
 
         assertThat(entries).hasSize(1);
@@ -74,7 +74,7 @@ class CalculatorStateServiceTest {
         when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(attempt1, attempt2));
 
-        var result = service.getState("t1", DATE, FREQ, 1, List.of("cap"));
+        var result = service.getState("t1", DATE, FREQ, "1", List.of("cap"));
         var entries = result.get("cap").runs();
 
         assertThat(entries).hasSize(1);
@@ -91,7 +91,7 @@ class CalculatorStateServiceTest {
         when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(dbRuns);
 
-        var result = service.getState("t1", DATE, FREQ, 1, List.of("capital"));
+        var result = service.getState("t1", DATE, FREQ, "1", List.of("capital"));
         var entry = result.get("capital");
 
         assertThat(entry.runs()).hasSize(2);

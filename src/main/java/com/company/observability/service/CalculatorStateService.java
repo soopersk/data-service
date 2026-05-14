@@ -34,13 +34,11 @@ public class CalculatorStateService {
             String tenantId,
             LocalDate reportingDate,
             CalculatorFrequency frequency,
-            int requestedRunNumber,
+            String runNumber,
             List<String> calculatorIds) {
 
-        String runNumberStr = String.valueOf(requestedRunNumber);
-
         Map<String, List<CalculatorRun>> runsByCalcId = runRepository
-                .findAllRunsByDateAndDimension(tenantId, reportingDate, frequency, runNumberStr, calculatorIds)
+                .findAllRunsByDateAndDimension(tenantId, reportingDate, frequency, runNumber, calculatorIds)
                 .stream()
                 .collect(Collectors.groupingBy(CalculatorRun::getCalculatorId));
 
@@ -127,11 +125,6 @@ public class CalculatorStateService {
 
     private RunEntry toRunEntry(CalculatorRun run) {
         String slaStatus = RunStatusClassifier.classify(run, run.getSlaTime(), lateThresholdMs);
-        Long latenessMs = RunStatusClassifier.computeLatenessMs(
-                run.getStatus().name(),
-                Boolean.TRUE.equals(run.getSlaBreached()),
-                run.getEndTime(),
-                run.getSlaTime());
 
         return RunEntry.builder()
                 .runId(run.getRunId())
@@ -147,7 +140,6 @@ public class CalculatorStateService {
                 .durationMs(run.getDurationMs())
                 .slaBreached(run.getSlaBreached())
                 .slaBreachReason(run.getSlaBreachReason())
-                .latenessMs(latenessMs)
                 .isRerun(run.isRerun())
                 .build();
     }

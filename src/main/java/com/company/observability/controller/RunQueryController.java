@@ -136,7 +136,8 @@ public class RunQueryController {
             @RequestHeader("X-Tenant-Id") String tenantId,
             @RequestParam("reporting_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate,
             @RequestParam(defaultValue = "DAILY") String frequency,
-            @RequestParam(value = "run_number", defaultValue = "1") @Min(1) @Max(2) int runNumber,
+            @RequestParam(value = "run_number", defaultValue = "1")
+            @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2") String runNumber,
             @RequestParam @NotBlank String keys) {
 
         List<String> calculatorIds = Arrays.stream(keys.split("\\|"))
