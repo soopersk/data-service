@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -33,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/api/v1/calculators")
 @Tag(name = "Calculator Status", description = "Query calculator runtime status and history")
 @RequiredArgsConstructor
+@Validated
 @Slf4j
 public class RunQueryController {
 
@@ -136,8 +138,8 @@ public class RunQueryController {
             @RequestHeader("X-Tenant-Id") String tenantId,
             @RequestParam("reporting_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate,
             @RequestParam(defaultValue = "DAILY") String frequency,
-            @RequestParam(value = "run_number", defaultValue = "1")
-            @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2") String runNumber,
+            @RequestParam(value = "run_number", required = false)
+            @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2 when provided") String runNumber,
             @RequestParam @NotBlank String keys) {
 
         List<String> calculatorIds = Arrays.stream(keys.split("\\|"))

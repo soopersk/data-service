@@ -184,7 +184,7 @@ class AnalyticsControllerTest {
                 Instant.parse("2026-05-11T04:00:00Z"),
                 Instant.parse("2026-05-11T06:30:00Z"));
 
-        when(analyticsService.getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, null))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/executions")
@@ -200,7 +200,22 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.runs[1].runId").value("run-split-2"))
                 .andExpect(jsonPath("$.runs[0].subRunIds").doesNotExist());
 
-        verify(analyticsService).getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
+        verify(analyticsService).getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, null);
+    }
+
+    @Test
+    void getRunExecutions_withRunNumber_passesRunNumberToService() throws Exception {
+        when(analyticsService.getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, "1"))
+                .thenReturn(new RunPerformanceData("calc-1", null, "DAILY", 30, 0L,
+                        0, 0, 0, 0, 0, List.of(), null, null));
+
+        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/executions")
+                        .header(TENANT_HEADER, "tenant-a")
+                        .param("days", "30")
+                        .param("run_number", "1"))
+                .andExpect(status().isOk());
+
+        verify(analyticsService).getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, "1");
     }
 
     @Test

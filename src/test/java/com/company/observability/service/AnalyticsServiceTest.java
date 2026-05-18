@@ -249,7 +249,7 @@ class AnalyticsServiceTest {
                 RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH, "corr-1", "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30))
+                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30, null))
                 .thenReturn(List.of(split1, split2));
 
         RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
@@ -270,7 +270,7 @@ class AnalyticsServiceTest {
     @Test
     void getRunExecutions_emptyRuns_returnsZeroedResponse() {
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 7))
+                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 7, null))
                 .thenReturn(List.of());
 
         RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 7, CalculatorFrequency.DAILY);

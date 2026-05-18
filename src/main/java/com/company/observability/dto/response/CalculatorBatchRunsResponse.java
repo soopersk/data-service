@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record CalculatorBatchRunsResponse(
         LocalDate reportingDate,
         String frequency,

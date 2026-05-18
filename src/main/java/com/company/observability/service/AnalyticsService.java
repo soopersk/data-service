@@ -354,9 +354,14 @@ public class AnalyticsService {
 
     public RunPerformanceData getRunExecutions(
             String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
+        return getRunExecutions(calculatorId, tenantId, days, frequency, null);
+    }
+
+    public RunPerformanceData getRunExecutions(
+            String calculatorId, String tenantId, int days, CalculatorFrequency frequency, String runNumber) {
 
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
-                .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days);
+                .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days, runNumber);
 
         if (rawRuns.isEmpty()) {
             return new RunPerformanceData(

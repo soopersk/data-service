@@ -11,10 +11,12 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.concurrent.TimeUnit;
@@ -23,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/api/v1/analytics")
 @Tag(name = "Analytics", description = "Calculator analytics, trends, and SLA reporting")
 @RequiredArgsConstructor
+@Validated
 @Slf4j
 public class AnalyticsController {
 
@@ -157,14 +160,17 @@ public class AnalyticsController {
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days,
             @Parameter(description = "Frequency: DAILY or MONTHLY")
-            @RequestParam(defaultValue = "DAILY") String frequency) {
+            @RequestParam(defaultValue = "DAILY") String frequency,
+            @Parameter(description = "Run number bucket: 1 or 2. Omit to return all buckets.")
+            @RequestParam(value = "run_number", required = false)
+            @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2 when provided") String runNumber) {
 
         CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RunPerformanceData response = analyticsService
-                    .getRunExecutions(calculatorId, tenantId, days, freq);
+                    .getRunExecutions(calculatorId, tenantId, days, freq, runNumber);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())

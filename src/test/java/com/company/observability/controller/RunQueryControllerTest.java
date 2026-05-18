@@ -190,7 +190,7 @@ class RunQueryControllerTest {
 
     @Test
     void batchRuns_pipeSeparatedKeysParsedToList() throws Exception {
-        when(calculatorStateService.getState(any(), any(), any(), anyString(),
+        when(calculatorStateService.getState(any(), any(), any(), isNull(),
                 eq(List.of("capital", "modelled-exposure", "portfolio"))))
                 .thenReturn(Map.of());
 
@@ -200,8 +200,35 @@ class RunQueryControllerTest {
                         .header(TENANT_HEADER, "t1"))
                 .andExpect(status().isOk());
 
-        verify(calculatorStateService).getState(any(), any(), any(), anyString(),
+        verify(calculatorStateService).getState(any(), any(), any(), isNull(),
                 eq(List.of("capital", "modelled-exposure", "portfolio")));
+    }
+
+    @Test
+    void batchRuns_omittedRunNumberPassesNullToService() throws Exception {
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
+        when(calculatorStateService.getState(eq("t1"), eq(LocalDate.of(2026, 3, 6)),
+                eq(CalculatorFrequency.DAILY), isNull(), eq(List.of("capital"))))
+                .thenReturn(Map.of("capital", entry));
+
+        mockMvc.perform(get("/api/v1/calculators/batch/runs")
+                        .param("reporting_date", "2026-03-06")
+                        .param("keys", "capital")
+                        .header(TENANT_HEADER, "t1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runNumber").doesNotExist());
+
+        verify(calculatorStateService).getState(any(), any(), any(), isNull(), any());
+    }
+
+    @Test
+    void batchRuns_rejectsInvalidRunNumberWhenProvided() throws Exception {
+        mockMvc.perform(get("/api/v1/calculators/batch/runs")
+                        .param("reporting_date", "2026-03-06")
+                        .param("run_number", "3")
+                        .param("keys", "capital")
+                        .header(TENANT_HEADER, "t1"))
+                .andExpect(status().isBadRequest());
     }
 
     private static CalculatorStatusResponse sampleStatusResponse(String calculatorName) {

@@ -452,8 +452,16 @@ public class CalculatorRunRepository {
      */
     public List<RunWithSlaStatus> findRunsWithSlaStatus(
             String calculatorId, String tenantId, CalculatorFrequency frequency, int days) {
+        return findRunsWithSlaStatus(calculatorId, tenantId, frequency, days, null);
+    }
 
-        String sql = """
+    /**
+     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
+     */
+    public List<RunWithSlaStatus> findRunsWithSlaStatus(
+            String calculatorId, String tenantId, CalculatorFrequency frequency, int days, String runNumber) {
+
+        StringBuilder sql = new StringBuilder("""
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
                    cr.start_time, cr.end_time, cr.duration_ms,
                    cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
@@ -465,17 +473,23 @@ public class CalculatorRunRepository {
             WHERE cr.calculator_id = :calculatorId AND cr.tenant_id = :tenantId AND cr.frequency = :frequency
             AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             AND cr.reporting_date <= CURRENT_DATE
-            ORDER BY cr.reporting_date ASC, cr.created_at ASC
-            """;
+            """);
+        if (runNumber != null) {
+            sql.append("AND cr.run_number = :runNumber\n");
+        }
+        sql.append("ORDER BY cr.reporting_date ASC, cr.created_at ASC");
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
                 .addValue("tenantId", tenantId)
                 .addValue("frequency", frequency.name())
                 .addValue("days", days);
+        if (runNumber != null) {
+            params.addValue("runNumber", runNumber);
+        }
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<RunWithSlaStatus> results = jdbcTemplate.query(sql, params, (rs, rowNum) -> {
+        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, (rs, rowNum) -> {
             String severityStr = rs.getString("severity"); // nullable from LEFT JOIN
             return new RunWithSlaStatus(
                     rs.getString("run_id"),
@@ -695,8 +709,10 @@ public class CalculatorRunRepository {
     }
 
     /**
-     * Returns ALL rows for the given date/frequency/runNumber/calculatorIds — no SQL deduplication.
+     * Returns ALL rows for the given date/frequency/calculatorIds — no SQL deduplication.
      * Deduplication (splits, reruns) is handled in CalculatorStateService.
+     *
+     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
     public List<CalculatorRun> findAllRunsByDateAndDimension(
             String tenantId,
@@ -709,29 +725,35 @@ public class CalculatorRunRepository {
             return List.of();
         }
 
-        String sql = """
+        StringBuilder sql = new StringBuilder("""
                 SELECT *
                 FROM calculator_runs
                 WHERE tenant_id      = :tenantId
                   AND reporting_date = :reportingDate
                   AND frequency      = :frequency
-                  AND run_number     = :runNumber
                   AND calculator_id  IN (:calculatorIds)
+                """);
+        if (runNumber != null) {
+            sql.append("  AND run_number = :runNumber\n");
+        }
+        sql.append("""
                 ORDER BY calculator_id,
                          COALESCE(correlation_id, ''),
                          COALESCE(region, ''),
                          COALESCE(run_type, ''),
                          created_at ASC
-                """;
+                """);
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("tenantId", tenantId)
                 .addValue("reportingDate", reportingDate)
                 .addValue("frequency", frequency.name())
-                .addValue("runNumber", runNumber)
                 .addValue("calculatorIds", calculatorIds);
+        if (runNumber != null) {
+            params.addValue("runNumber", runNumber);
+        }
 
-        return jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(false));
+        return jdbcTemplate.query(sql.toString(), params, new CalculatorRunRowMapper(false));
     }
 
     /**
