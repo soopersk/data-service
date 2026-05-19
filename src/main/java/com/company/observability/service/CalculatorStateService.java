@@ -35,23 +35,20 @@ public class CalculatorStateService {
             LocalDate reportingDate,
             CalculatorFrequency frequency,
             String runNumber,
-            List<String> calculatorIds) {
+            List<String> calculatorNames) {
 
-        Map<String, List<CalculatorRun>> runsByCalcId = runRepository
-                .findAllRunsByDateAndDimension(tenantId, reportingDate, frequency, runNumber, calculatorIds)
+        Map<String, List<CalculatorRun>> runsByName = runRepository
+                .findAllRunsByDateAndDimension(tenantId, reportingDate, frequency, runNumber, calculatorNames)
                 .stream()
-                .collect(Collectors.groupingBy(CalculatorRun::getCalculatorId));
+                .collect(Collectors.groupingBy(CalculatorRun::getCalculatorName));
 
-        return calculatorIds.stream().collect(Collectors.toMap(
-                id -> id,
-                id -> buildEntry(id, runsByCalcId.getOrDefault(id, List.of()))
+        return calculatorNames.stream().collect(Collectors.toMap(
+                name -> name,
+                name -> buildEntry(name, runsByName.getOrDefault(name, List.of()))
         ));
     }
 
-    private CalculatorEntry buildEntry(String calculatorId, List<CalculatorRun> runs) {
-        String name = runs.stream().map(CalculatorRun::getCalculatorName)
-                .filter(Objects::nonNull).findFirst().orElse(calculatorId);
-
+    private CalculatorEntry buildEntry(String calculatorName, List<CalculatorRun> runs) {
         // Phase 1: collapse parallel splits (shared correlationId) into one RunEntry each
         Map<String, List<CalculatorRun>> splitGroups = runs.stream()
                 .filter(r -> r.getCorrelationId() != null)
@@ -77,7 +74,7 @@ public class CalculatorStateService {
                 .toList();
 
         List<RunEntry> allEntries = Stream.concat(splitEntries.stream(), standaloneEntries.stream()).toList();
-        return new CalculatorEntry(calculatorId, name, allEntries);
+        return new CalculatorEntry(calculatorName, allEntries);
     }
 
     private RunEntry collapseSplitGroup(List<CalculatorRun> splits) {

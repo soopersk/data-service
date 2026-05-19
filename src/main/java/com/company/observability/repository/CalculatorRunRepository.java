@@ -517,6 +517,71 @@ public class CalculatorRunRepository {
     }
 
     /**
+     * Name-keyed variant of {@link #findRunsWithSlaStatus(String, String, CalculatorFrequency, int, String)}.
+     * Filters by calculator_name (readable, unique-per-tenant) instead of the upstream UUID
+     * calculator_id. Used by GET /executions where the path variable is the readable name.
+     *
+     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
+     */
+    public List<RunWithSlaStatus> findRunsWithSlaStatusByName(
+            String calculatorName, String tenantId, CalculatorFrequency frequency, int days, String runNumber) {
+
+        StringBuilder sql = new StringBuilder("""
+            SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
+                   cr.start_time, cr.end_time, cr.duration_ms,
+                   cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
+                   cr.sla_breached, cr.sla_breach_reason, cr.correlation_id,
+                   cr.run_number, cr.expected_duration_ms,
+                   sbe.severity
+            FROM calculator_runs cr
+            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id AND sbe.tenant_id = cr.tenant_id
+            WHERE cr.calculator_name = :calculatorName AND cr.tenant_id = :tenantId AND cr.frequency = :frequency
+            AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
+            AND cr.reporting_date <= CURRENT_DATE
+            """);
+        if (runNumber != null) {
+            sql.append("AND cr.run_number = :runNumber\n");
+        }
+        sql.append("ORDER BY cr.reporting_date ASC, cr.created_at ASC");
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorName", calculatorName)
+                .addValue("tenantId", tenantId)
+                .addValue("frequency", frequency.name())
+                .addValue("days", days);
+        if (runNumber != null) {
+            params.addValue("runNumber", runNumber);
+        }
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, (rs, rowNum) -> {
+            String severityStr = rs.getString("severity"); // nullable from LEFT JOIN
+            return new RunWithSlaStatus(
+                    rs.getString("run_id"),
+                    rs.getString("calculator_id"),
+                    rs.getString("calculator_name"),
+                    rs.getObject("reporting_date", LocalDate.class),
+                    fromTimestamp(rs.getTimestamp("start_time")),
+                    fromTimestamp(rs.getTimestamp("end_time")),
+                    rs.getObject("duration_ms", Long.class),
+                    fromTimestamp(rs.getTimestamp("sla_time")),
+                    fromTimestamp(rs.getTimestamp("estimated_start_time")),
+                    CalculatorFrequency.from(rs.getString("frequency")),
+                    RunStatus.fromString(rs.getString("status")),
+                    rs.getObject("sla_breached", Boolean.class),
+                    rs.getString("sla_breach_reason"),
+                    severityStr != null ? Severity.fromString(severityStr) : null,
+                    rs.getString("correlation_id"),
+                    rs.getString("run_number"),
+                    rs.getObject("expected_duration_ms", Long.class)
+            );
+        });
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_with_sla_by_name").register(meterRegistry));
+
+        return results;
+    }
+
+    /**
      * Find latest regional batch run per region for a given reporting date.
      * Backward-compatible overload — delegates with no run_number filter.
      */
@@ -709,8 +774,9 @@ public class CalculatorRunRepository {
     }
 
     /**
-     * Returns ALL rows for the given date/frequency/calculatorIds — no SQL deduplication.
-     * Deduplication (splits, reruns) is handled in CalculatorStateService.
+     * Returns ALL rows for the given date/frequency/calculatorNames — no SQL deduplication.
+     * Filters by calculator_name (human-readable, unique per tenant), not the upstream UUID
+     * stored in calculator_id. Deduplication (splits, reruns) is handled in CalculatorStateService.
      *
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
@@ -719,25 +785,25 @@ public class CalculatorRunRepository {
             LocalDate reportingDate,
             CalculatorFrequency frequency,
             String runNumber,
-            List<String> calculatorIds) {
+            List<String> calculatorNames) {
 
-        if (calculatorIds.isEmpty()) {
+        if (calculatorNames.isEmpty()) {
             return List.of();
         }
 
         StringBuilder sql = new StringBuilder("""
                 SELECT *
                 FROM calculator_runs
-                WHERE tenant_id      = :tenantId
-                  AND reporting_date = :reportingDate
-                  AND frequency      = :frequency
-                  AND calculator_id  IN (:calculatorIds)
+                WHERE tenant_id       = :tenantId
+                  AND reporting_date  = :reportingDate
+                  AND frequency       = :frequency
+                  AND calculator_name IN (:calculatorNames)
                 """);
         if (runNumber != null) {
             sql.append("  AND run_number = :runNumber\n");
         }
         sql.append("""
-                ORDER BY calculator_id,
+                ORDER BY calculator_name,
                          COALESCE(correlation_id, ''),
                          COALESCE(region, ''),
                          COALESCE(run_type, ''),
@@ -748,7 +814,7 @@ public class CalculatorRunRepository {
                 .addValue("tenantId", tenantId)
                 .addValue("reportingDate", reportingDate)
                 .addValue("frequency", frequency.name())
-                .addValue("calculatorIds", calculatorIds);
+                .addValue("calculatorNames", calculatorNames);
         if (runNumber != null) {
             params.addValue("runNumber", runNumber);
         }

@@ -161,23 +161,24 @@ class RunQueryControllerTest {
     }
 
     @Test
-    void batchRuns_returns200WithMapKeyedByCalculatorId() throws Exception {
-        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
+    void batchRuns_returns200WithMapKeyedByCalculatorName() throws Exception {
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capitalcalc", List.of());
         when(calculatorStateService.getState(eq("t1"), eq(LocalDate.of(2026, 3, 6)),
-                eq(CalculatorFrequency.DAILY), eq("1"), eq(List.of("capital"))))
-                .thenReturn(Map.of("capital", entry));
+                eq(CalculatorFrequency.DAILY), eq("1"), eq(List.of("capitalcalc"))))
+                .thenReturn(Map.of("capitalcalc", entry));
 
         mockMvc.perform(get("/api/v1/calculators/batch/runs")
                         .param("reporting_date", "2026-03-06")
                         .param("frequency", "DAILY")
                         .param("run_number", "1")
-                        .param("keys", "capital")
+                        .param("keys", "capitalcalc")
                         .header(TENANT_HEADER, "t1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reportingDate").value("2026-03-06"))
                 .andExpect(jsonPath("$.runNumber").value("1"))
-                .andExpect(jsonPath("$.calculators.capital.calculatorId").value("capital"))
-                .andExpect(jsonPath("$.calculators.capital.runs").isArray());
+                .andExpect(jsonPath("$.calculators.capitalcalc.calculatorName").value("capitalcalc"))
+                .andExpect(jsonPath("$.calculators.capitalcalc.calculatorId").doesNotExist())
+                .andExpect(jsonPath("$.calculators.capitalcalc.runs").isArray());
     }
 
     @Test
@@ -206,7 +207,7 @@ class RunQueryControllerTest {
 
     @Test
     void batchRuns_omittedRunNumberPassesNullToService() throws Exception {
-        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", List.of());
         when(calculatorStateService.getState(eq("t1"), eq(LocalDate.of(2026, 3, 6)),
                 eq(CalculatorFrequency.DAILY), isNull(), eq(List.of("capital"))))
                 .thenReturn(Map.of("capital", entry));

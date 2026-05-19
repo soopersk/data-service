@@ -363,9 +363,32 @@ public class AnalyticsService {
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
                 .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days, runNumber);
 
+        return buildExecutionsResponse(calculatorId, rawRuns, days, frequency);
+    }
+
+    /**
+     * Name-keyed variant of {@link #getRunExecutions(String, String, int, CalculatorFrequency, String)}.
+     * Queries by calculator_name; the envelope's calculatorId field carries the same name,
+     * so no upstream UUID appears in the response.
+     */
+    public RunPerformanceData getRunExecutionsByName(
+            String calculatorName, String tenantId, int days, CalculatorFrequency frequency, String runNumber) {
+
+        List<RunWithSlaStatus> rawRuns = calculatorRunRepository
+                .findRunsWithSlaStatusByName(calculatorName, tenantId, frequency, days, runNumber);
+
+        return buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
+    }
+
+    private RunPerformanceData buildExecutionsResponse(
+            String calculatorKey,
+            List<RunWithSlaStatus> rawRuns,
+            int days,
+            CalculatorFrequency frequency) {
+
         if (rawRuns.isEmpty()) {
             return new RunPerformanceData(
-                    calculatorId, null, frequency.name(), days, 0L,
+                    calculatorKey, null, frequency.name(), days, 0L,
                     0, 0, 0, 0, 0,
                     Collections.emptyList(), null, null);
         }
@@ -392,7 +415,7 @@ public class AnalyticsService {
                 })
                 .toList();
 
-        return buildRunPerformanceDataEnvelope(calculatorId, rawRuns, dataPoints, days, frequency);
+        return buildRunPerformanceDataEnvelope(calculatorKey, rawRuns, dataPoints, days, frequency);
     }
 
     private RunPerformanceData buildRunPerformanceDataEnvelope(

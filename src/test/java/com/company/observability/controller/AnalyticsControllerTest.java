@@ -184,43 +184,42 @@ class AnalyticsControllerTest {
                 Instant.parse("2026-05-11T04:00:00Z"),
                 Instant.parse("2026-05-11T06:30:00Z"));
 
-        when(analyticsService.getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, null))
+        when(analyticsService.getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, null))
                 .thenReturn(response);
 
-        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/executions")
+        mockMvc.perform(get("/api/v1/analytics/calculators/capitalcalc/executions")
                         .header(TENANT_HEADER, "tenant-a")
                         .param("days", "30"))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=60")))
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("private")))
-                .andExpect(jsonPath("$.calculatorId").value("calc-1"))
                 .andExpect(jsonPath("$.runs").isArray())
                 .andExpect(jsonPath("$.runs.length()").value(2))
                 .andExpect(jsonPath("$.runs[0].runId").value("run-split-1"))
                 .andExpect(jsonPath("$.runs[1].runId").value("run-split-2"))
                 .andExpect(jsonPath("$.runs[0].subRunIds").doesNotExist());
 
-        verify(analyticsService).getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, null);
+        verify(analyticsService).getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, null);
     }
 
     @Test
     void getRunExecutions_withRunNumber_passesRunNumberToService() throws Exception {
-        when(analyticsService.getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, "1"))
-                .thenReturn(new RunPerformanceData("calc-1", null, "DAILY", 30, 0L,
+        when(analyticsService.getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, "1"))
+                .thenReturn(new RunPerformanceData("capitalcalc", "capitalcalc", "DAILY", 30, 0L,
                         0, 0, 0, 0, 0, List.of(), null, null));
 
-        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/executions")
+        mockMvc.perform(get("/api/v1/analytics/calculators/capitalcalc/executions")
                         .header(TENANT_HEADER, "tenant-a")
                         .param("days", "30")
                         .param("run_number", "1"))
                 .andExpect(status().isOk());
 
-        verify(analyticsService).getRunExecutions("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY, "1");
+        verify(analyticsService).getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, "1");
     }
 
     @Test
     void getRunExecutions_missingTenantId_returnsBadRequest() throws Exception {
-        mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/executions")
+        mockMvc.perform(get("/api/v1/analytics/calculators/capitalcalc/executions")
                         .param("days", "30"))
                 .andExpect(status().isBadRequest());
     }

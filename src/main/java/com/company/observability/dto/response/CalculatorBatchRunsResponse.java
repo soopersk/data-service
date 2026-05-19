@@ -17,7 +17,6 @@ public record CalculatorBatchRunsResponse(
         Map<String, CalculatorEntry> calculators
 ) {
     public record CalculatorEntry(
-            String calculatorId,
             String calculatorName,
             List<RunEntry> runs
     ) {}

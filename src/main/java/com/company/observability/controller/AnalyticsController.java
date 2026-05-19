@@ -146,16 +146,18 @@ public class AnalyticsController {
         }
     }
 
-    @GetMapping("/calculators/{calculatorId}/executions")
+    @GetMapping("/calculators/{calculatorName}/executions")
     @Operation(
             summary = "Run execution history (raw)",
             description = "Returns all physical runs over the lookback window as independent entries. " +
+                    "The path variable is calculator_name (readable, unique-per-tenant); upstream UUIDs " +
+                    "are not accepted on this endpoint. " +
                     "Split runs sharing a correlationId appear as separate rows — no grouping. " +
                     "Each entry includes durationMs (actual) and expectedDurationMs (configured) for comparison. " +
                     "For grouped/logical view, use GET /run-performance."
     )
     public ResponseEntity<RunPerformanceData> getRunExecutions(
-            @PathVariable String calculatorId,
+            @PathVariable String calculatorName,
             @RequestHeader("X-Tenant-Id") String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days,
@@ -170,7 +172,7 @@ public class AnalyticsController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RunPerformanceData response = analyticsService
-                    .getRunExecutions(calculatorId, tenantId, days, freq, runNumber);
+                    .getRunExecutionsByName(calculatorName, tenantId, days, freq, runNumber);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())

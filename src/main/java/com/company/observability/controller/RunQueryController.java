@@ -131,6 +131,8 @@ public class RunQueryController {
     @Operation(
             summary = "Batch calculator runs by reporting date",
             description = "Returns all dimensional run instances per logical calculator for a specific reporting date. " +
+                    "The `keys` query param is a pipe-separated list of calculator_name values (readable, " +
+                    "unique-per-tenant); upstream UUIDs are not accepted on this endpoint. " +
                     "Regional calculators return one RunEntry per region; typed calculators return one per runType. " +
                     "Empty runs list = no run found. isRerun=true = a re-trigger was fired for that dimension."
     )
@@ -140,14 +142,15 @@ public class RunQueryController {
             @RequestParam(defaultValue = "DAILY") String frequency,
             @RequestParam(value = "run_number", required = false)
             @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2 when provided") String runNumber,
+            @Parameter(description = "Pipe-separated calculator_name values, e.g. capitalcalc|portfoliocalc")
             @RequestParam @NotBlank String keys) {
 
-        List<String> calculatorIds = Arrays.stream(keys.split("\\|"))
+        List<String> calculatorNames = Arrays.stream(keys.split("\\|"))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
-        if (calculatorIds.isEmpty()) {
-            throw new IllegalArgumentException("keys must contain at least one non-blank calculator ID");
+        if (calculatorNames.isEmpty()) {
+            throw new IllegalArgumentException("keys must contain at least one non-blank calculator_name");
         }
 
         CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
@@ -155,7 +158,7 @@ public class RunQueryController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             Map<String, CalculatorBatchRunsResponse.CalculatorEntry> calculators =
-                    calculatorStateService.getState(tenantId, reportingDate, freq, runNumber, calculatorIds);
+                    calculatorStateService.getState(tenantId, reportingDate, freq, runNumber, calculatorNames);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())

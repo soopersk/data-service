@@ -20,12 +20,13 @@ class CalculatorBatchRunsResponseTest {
 
     @Test
     void emptyRunsSerializesWithEmptyArray() throws Exception {
-        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", "Capital", List.of());
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capitalcalc", List.of());
         var response = new CalculatorBatchRunsResponse(
-                LocalDate.of(2026, 3, 6), "DAILY", "1", Instant.now(), Map.of("capital", entry));
+                LocalDate.of(2026, 3, 6), "DAILY", "1", Instant.now(), Map.of("capitalcalc", entry));
         String json = mapper.writeValueAsString(response);
         assertThat(json).contains("\"runs\":[]");
-        assertThat(json).contains("\"calculatorId\":\"capital\"");
+        assertThat(json).contains("\"calculatorName\":\"capitalcalc\"");
+        assertThat(json).doesNotContain("calculatorId");
     }
 
     @Test
