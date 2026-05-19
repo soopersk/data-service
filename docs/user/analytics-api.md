@@ -144,6 +144,37 @@ Counter semantics:
 
 ---
 
+## GET /api/v1/analytics/calculators/{calculatorName}/executions
+
+Raw run-by-run execution history for the performance card. Two key differences from `/run-performance`:
+
+1. The path variable is the **readable `calculator_name`** (unique per tenant), not the upstream UUID `calculator_id`.
+2. Split runs that share a `correlation_id` appear as **separate rows** — no logical grouping. `subRunIds` is always `null`. Use `/run-performance` for the grouped/logical view.
+
+Query params:
+- `days` (optional, 1-365, default `30`)
+- `frequency` (optional, `DAILY` or `MONTHLY`, default `DAILY`)
+- `run_number` (optional, `1` or `2`; omit for all buckets)
+
+Response shape is identical to `/run-performance` (same `RunPerformanceData` envelope). The envelope's `calculatorId` and `calculatorName` fields both carry the readable name; no UUID appears because the lookup is by name. Each `RunDataPoint` includes:
+
+- `durationMs` — actual wall-clock duration (null while RUNNING)
+- `expectedDurationMs` — configured expected duration (immutable, set at first INSERT); use for actual-vs-expected variance comparison
+- `runNumber` — `"1"` or `"2"` (string, matches the DB column type)
+- `subRunIds` — always `null` on this endpoint (no grouping)
+
+Cache: `max-age=60, private`.
+
+### cURL Example
+
+```bash
+curl -u admin:admin \
+  -H "X-Tenant-Id: tenant1" \
+  "http://localhost:8080/api/v1/analytics/calculators/portfoliocalc/executions?days=30"
+```
+
+---
+
 ## GET /api/v1/analytics/projections/calculators/{calculatorId}/performance-card
 
 Pre-formatted projection for dashboard consumers.

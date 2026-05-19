@@ -173,6 +173,97 @@ curl -u admin:admin \
 
 ---
 
+## GET /api/v1/calculators/batch/runs
+
+Returns the dimensional run state (one entry per region or run-type) for a set of calculators on a specific reporting date. Powers the multi-section dashboard.
+
+Unlike `/{calculatorId}/status` and `/batch/status`, this endpoint identifies calculators by their **readable `calculator_name`** — not the upstream UUID `calculator_id`. The UUID is internal and never appears in the request or response.
+
+### Request
+
+```
+GET /api/v1/calculators/batch/runs?reporting_date=2026-05-19&frequency=DAILY&run_number=1&keys=capitalcalc|portfoliocalc
+Authorization: Basic <base64>
+X-Tenant-Id: <tenant>
+```
+
+#### Query Parameters
+
+| Parameter | Type | Default | Constraints | Description |
+|-----------|------|---------|-------------|-------------|
+| `reporting_date` | Date | Required | ISO `YYYY-MM-DD` | Partition key |
+| `frequency` | String | `DAILY` | `DAILY` or `MONTHLY` | |
+| `run_number` | String | none | `1` or `2` when provided | Omit to return all buckets |
+| `keys` | String | Required | Non-blank | Pipe-separated `calculator_name` values (no wildcards, no UUIDs) |
+
+### Response
+
+**`200 OK`**, `Cache-Control: max-age=30, private`
+
+```json
+{
+  "reportingDate": "2026-05-19",
+  "frequency": "DAILY",
+  "runNumber": "1",
+  "generatedAt": "2026-05-19T17:00:00Z",
+  "calculators": {
+    "capitalcalc": {
+      "calculatorName": "capitalcalc",
+      "runs": [
+        {
+          "runId": "run-wmap-001",
+          "region": "WMAP",
+          "status": "SUCCESS",
+          "slaStatus": "ON_TIME",
+          "startTime": "2026-05-19T13:02:00Z",
+          "endTime": "2026-05-19T14:45:00Z",
+          "sla": "2026-05-19T15:00:00Z",
+          "durationMs": 6180000,
+          "slaBreached": false,
+          "isRerun": false
+        },
+        {
+          "runId": "run-ldnl-002",
+          "region": "LDNL",
+          "status": "FAILED",
+          "slaStatus": "FAILED",
+          "sla": "2026-05-19T15:00:00Z",
+          "slaBreached": true,
+          "slaBreachReason": "Run status: FAILED",
+          "isRerun": true
+        }
+      ]
+    },
+    "portfoliocalc": { "calculatorName": "portfoliocalc", "runs": [] }
+  }
+}
+```
+
+#### Notes
+
+- The `calculators` map key is the `calculator_name` you sent in `keys`.
+- `runs` is an empty list when no run exists for that calculator on the given date (the key is still present).
+- Each run entry exposes one of `region` or `runType` (regional calculators use `region`; typed calculators use `runType`) — never both.
+- `isRerun: true` indicates that dimensional run was re-triggered (the UI renders the dimension label with a `*` suffix and a failed icon).
+- Null fields on `RunEntry` are omitted from JSON.
+
+### Server-Side Behaviour
+
+The service two-phase-groups raw rows:
+
+1. **Phase 1** — Rows sharing a `correlation_id` (parallel splits) are collapsed into one entry using worst-status-wins precedence.
+2. **Phase 2** — Standalone rows (null `correlation_id`) are deduplicated by `(region, runType)`; the latest by `created_at` wins, and `isRerun=true` is set when more than one attempt exists for that dimension.
+
+### cURL Example
+
+```bash
+curl -u admin:admin \
+  -H "X-Tenant-Id: tenant1" \
+  "http://localhost:8080/api/v1/calculators/batch/runs?reporting_date=2026-05-19&frequency=DAILY&run_number=1&keys=capitalcalc|portfoliocalc|grportfoliocalc"
+```
+
+---
+
 ## Performance Notes
 
 ### DAILY vs MONTHLY Query Cost

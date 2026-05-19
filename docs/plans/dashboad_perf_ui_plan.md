@@ -1,5 +1,22 @@
 # Batch Runs + Executions Endpoints — Implementation Plan
 
+> ### Status: Implemented (with name-keyed delta, 2026-05-19)
+>
+> Tasks 1–7 of this plan were implemented as written. A follow-up adapter plan then switched both new endpoints from upstream-UUID `calculator_id` to readable `calculator_name`. See `analyze-the-plan-docs-plans-dashboad-per-agile-harbor.md` in `~/.claude/plans/` for the delta rationale, and the current shipped contract in:
+> - `docs/spec/api-reference.md` — `/api/v1/calculators/batch/runs`, `/api/v1/analytics/calculators/{calculatorName}/executions`
+> - `docs/user/query-api.md` — `/batch/runs` usage
+> - `docs/user/analytics-api.md` — `/executions` usage
+>
+> Key differences from this document below:
+> - `/batch/runs` `keys` param: pipe-separated **`calculator_name`** values (not UUIDs).
+> - `/batch/runs` response map: keyed by **`calculator_name`**; `CalculatorEntry` has **`calculatorName` only** (no `calculatorId` field).
+> - `/executions` path variable: **`{calculatorName}`**. Calls `findRunsWithSlaStatusByName(...)`. Existing `/run-performance` retained its UUID `{calculatorId}` path and the existing repo method.
+> - Index migration `V7__calculator_name_indexes.sql` added composite indexes on `(tenant_id, calculator_name, ...)`.
+>
+> The original UUID-keyed prose below is preserved for archaeological context; do not implement against it.
+
+---
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add two new domain-aligned endpoints — `GET /api/v1/calculators/batch/runs` (powers the dashboard) and `GET /api/v1/analytics/calculators/{id}/executions` (raw run history for the performance card). All existing endpoints including projection endpoints are left completely untouched.

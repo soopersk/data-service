@@ -193,6 +193,71 @@ Status for multiple calculators in a single request.
 
 ---
 
+### `GET /api/v1/calculators/batch/runs`
+
+Dimensional run state for a set of calculators on a specific reporting date. Powers the multi-section dashboard. Unlike `/batch/status`, calculators are identified by their **readable `calculator_name`** (unique per tenant) — not the upstream UUID `calculator_id`. UUIDs never appear in the request or response.
+
+**Query Parameters:**
+
+| Name | Type | Default | Constraints |
+|------|------|---------|-------------|
+| `reporting_date` | Date | Required | `YYYY-MM-DD` |
+| `frequency` | String | `DAILY` | `DAILY` or `MONTHLY` |
+| `run_number` | String | none | `1` or `2` when provided (omit for all buckets) |
+| `keys` | String | Required | Pipe-separated `calculator_name` values, e.g. `capitalcalc|portfoliocalc|grportfoliocalc` |
+
+**Response `200 OK`**, `Cache-Control: max-age=30, private`:
+
+```json
+{
+  "reportingDate": "2026-05-19",
+  "frequency": "DAILY",
+  "runNumber": "1",
+  "generatedAt": "2026-05-19T17:00:00Z",
+  "calculators": {
+    "capitalcalc": {
+      "calculatorName": "capitalcalc",
+      "runs": [
+        {
+          "runId": "run-wmap-001",
+          "region": "WMAP",
+          "status": "SUCCESS",
+          "slaStatus": "ON_TIME",
+          "startTime": "2026-05-19T13:02:00Z",
+          "endTime": "2026-05-19T14:45:00Z",
+          "estimatedStartTime": "2026-05-19T13:00:00Z",
+          "estimatedEndTime": "2026-05-19T14:50:00Z",
+          "sla": "2026-05-19T15:00:00Z",
+          "durationMs": 6180000,
+          "slaBreached": false,
+          "isRerun": false
+        },
+        {
+          "runId": "run-ldnl-002",
+          "region": "LDNL",
+          "status": "FAILED",
+          "slaStatus": "FAILED",
+          "sla": "2026-05-19T15:00:00Z",
+          "slaBreached": true,
+          "slaBreachReason": "Run status: FAILED",
+          "isRerun": true
+        }
+      ]
+    },
+    "portfoliocalc": { "calculatorName": "portfoliocalc", "runs": [] }
+  }
+}
+```
+
+**Notes:**
+- The response `calculators` map is keyed by `calculator_name`. `CalculatorEntry` exposes only `calculatorName` — there is no `calculatorId` field.
+- `runs` is an **empty list** when no run exists for that calculator on the given date.
+- `region` and `runType` are mutually exclusive per calculator (one or neither, never both).
+- `isRerun: true` means a re-trigger occurred for that specific dimensional run; UI typically renders the dimension label with a `*` suffix.
+- Null run-entry fields are omitted from JSON (`@JsonInclude(NON_NULL)`).
+
+---
+
 ## Analytics
 
 All analytics endpoints:
@@ -297,6 +362,28 @@ Raw run-level performance data.
 Run-level SLA status values: `SLA_MET`, `LATE`, `VERY_LATE`, `RUNNING`.
 
 Counters: `totalRuns` is terminal/evaluated only; `runningRuns` is tracked separately.
+
+---
+
+### `GET /api/v1/analytics/calculators/{calculatorName}/executions`
+
+Raw run-by-run execution history. Distinct from `/run-performance` in two ways:
+1. The path variable is the **readable `calculator_name`**, not the upstream UUID `calculator_id`.
+2. Split runs (rows sharing a `correlation_id`) are **not collapsed** — each physical row appears as its own entry. `subRunIds` is always `null`. For the grouped/logical view, use `/run-performance`.
+
+**Query Parameters:** `days` (default `30`, 1-365), `frequency` (default `DAILY`), `run_number` (`1` or `2`, optional)
+
+**Data source:** `calculator_runs` LEFT JOIN `sla_breach_events` (filtered by `calculator_name`)
+
+**Response `200 OK`**, `Cache-Control: max-age=60, private`:
+
+Same shape as `/run-performance` (`RunPerformanceData`). The envelope's `calculatorId` and `calculatorName` fields both carry the readable name — no UUID leak, because the lookup is by name. Each `RunDataPoint` includes `expectedDurationMs` (immutable, set at first INSERT) alongside actual `durationMs` for variance comparison.
+
+**Example:**
+```bash
+curl -u admin:admin -H "X-Tenant-Id: tenant1" \
+  "http://localhost:8080/api/v1/analytics/calculators/portfoliocalc/executions?days=30"
+```
 
 ---
 
@@ -413,7 +500,7 @@ Response headers on every call:
 | Tag | Endpoints |
 |-----|-----------|
 | `Run Ingestion` | `/api/v1/runs/start`, `/api/v1/runs/{runId}/complete` |
-| `Calculator Status` | `/api/v1/calculators/{calculatorId}/status`, `/api/v1/calculators/batch/status` |
+| `Calculator Status` | `/api/v1/calculators/{calculatorId}/status`, `/api/v1/calculators/batch/status`, `/api/v1/calculators/batch/runs` |
 | `Analytics` | All `/api/v1/analytics/**` endpoints |
 | `Analytics Projections` | `/api/v1/analytics/projections/**` endpoints |
 | `Health` | `/api/v1/health` |
