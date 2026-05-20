@@ -25,9 +25,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,7 +36,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -54,6 +50,8 @@ class RunIngestionServiceTest {
     @Mock
     private SlaEvaluationService slaEvaluationService;
     @Mock
+    private SlaBaselineResolver slaBaselineResolver;
+    @Mock
     private ApplicationEventPublisher eventPublisher;
     @Mock
     private SlaMonitoringCache slaMonitoringCache;
@@ -66,6 +64,7 @@ class RunIngestionServiceTest {
                 runRepository,
                 dailyAggregateRepository,
                 slaEvaluationService,
+                slaBaselineResolver,
                 eventPublisher,
                 new SimpleMeterRegistry(),
                 slaMonitoringCache,
@@ -93,62 +92,92 @@ class RunIngestionServiceTest {
     }
 
     @Test
-    void startRun_lateStartPublishesBreachEventEvenWhenLiveTrackingDisabled() {
-        ReflectionTestUtils.setField(service, "liveTrackingEnabled", false);
-
-        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
-        Instant lateStart = ZonedDateTime.of(
-                reportingDate, LocalTime.of(7, 0), ZoneId.of("CET")
-        ).toInstant();
-
-        StartRunRequest request = StartRunRequest.builder()
-                .runId("run-late")
-                .calculatorId("calc-1")
-                .calculatorName("Calculator 1")
-                .frequency(CalculatorFrequency.DAILY)
-                .reportingDate(reportingDate)
-                .startTime(lateStart)
-                .slaTime(Instant.parse("2026-02-20T05:15:00Z"))
-                .build();
-
-        when(runRepository.findById("run-late", reportingDate)).thenReturn(Optional.empty());
-        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        service.startRun(request, "tenant-1");
-
-        verify(eventPublisher).publishEvent(any(SlaBreachedEvent.class));
-    }
-
-    @Test
-    void startRun_lateStartPersistsImmediateBreachFlags() {
+    void startRun_derivedDeadline_freezesSlaTimeAndRegistersForMonitoring() {
         ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
 
         LocalDate reportingDate = LocalDate.of(2026, 2, 20);
-        Instant lateStart = ZonedDateTime.of(
-                reportingDate, LocalTime.of(7, 0), ZoneId.of("CET")
-        ).toInstant();
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+        Instant derivedDeadline = start.plusSeconds(3600);
 
         StartRunRequest request = StartRunRequest.builder()
-                .runId("run-late-persisted")
+                .runId("run-derived")
                 .calculatorId("calc-1")
                 .calculatorName("Calculator 1")
                 .frequency(CalculatorFrequency.DAILY)
                 .reportingDate(reportingDate)
-                .startTime(lateStart)
-                .slaTime(Instant.parse("2026-02-20T05:15:00Z"))
+                .startTime(start)
                 .build();
 
-        when(runRepository.findById("run-late-persisted", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.findById("run-derived", reportingDate)).thenReturn(Optional.empty());
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq("tenant-1"), eq(CalculatorFrequency.DAILY)))
+                .thenReturn(derivedDeadline);
 
         service.startRun(request, "tenant-1");
 
         verify(runRepository).upsert(argThat(run ->
-                Boolean.TRUE.equals(run.getSlaBreached())
-                        && run.getSlaBreachReason() != null
-                        && run.getSlaBreachReason().contains("after SLA deadline")));
+                derivedDeadline.equals(run.getSlaTime())
+                        && Boolean.FALSE.equals(run.getSlaBreached())));
+        verify(slaMonitoringCache).registerForSlaMonitoring(any(CalculatorRun.class));
+        verify(eventPublisher, never()).publishEvent(any(SlaBreachedEvent.class));
+    }
+
+    @Test
+    void startRun_monthlyWithDerivedDeadline_registersForMonitoring() {
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+
+        LocalDate eom = LocalDate.of(2026, 2, 28);
+        Instant start = Instant.parse("2026-02-28T05:00:00Z");
+        Instant derivedDeadline = start.plusSeconds(7200);
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-monthly-derived")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(CalculatorFrequency.MONTHLY)
+                .reportingDate(eom)
+                .startTime(start)
+                .build();
+
+        when(runRepository.findById("run-monthly-derived", eom)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq("tenant-1"), eq(CalculatorFrequency.MONTHLY)))
+                .thenReturn(derivedDeadline);
+
+        service.startRun(request, "tenant-1");
+
+        // MONTHLY now registers for live monitoring (previously DAILY-only).
+        verify(slaMonitoringCache).registerForSlaMonitoring(any(CalculatorRun.class));
+        verify(eventPublisher, never()).publishEvent(any(SlaBreachedEvent.class));
+    }
+
+    @Test
+    void startRun_noBaseline_skipsMonitoringAndDoesNotBreach() {
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+
+        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-ungraded")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(CalculatorFrequency.DAILY)
+                .reportingDate(reportingDate)
+                .startTime(start)
+                .build();
+
+        when(runRepository.findById("run-ungraded", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq("tenant-1"), eq(CalculatorFrequency.DAILY)))
+                .thenReturn(null);
+
+        service.startRun(request, "tenant-1");
+
         verify(slaMonitoringCache, never()).registerForSlaMonitoring(any(CalculatorRun.class));
-        verify(eventPublisher, atLeastOnce()).publishEvent(any(SlaBreachedEvent.class));
+        verify(runRepository).upsert(argThat(run -> run.getSlaTime() == null
+                && Boolean.FALSE.equals(run.getSlaBreached())));
+        verify(eventPublisher).publishEvent(any(com.company.observability.event.RunStartedEvent.class));
     }
 
     @Test
@@ -309,7 +338,7 @@ class RunIngestionServiceTest {
         when(slaEvaluationService.evaluateSla(any())).thenReturn(new SlaEvaluationResult(false, null, "LOW"));
         when(runRepository.upsert(any())).thenAnswer(inv -> inv.getArgument(0));
         org.mockito.Mockito.doThrow(new RuntimeException("DB unavailable"))
-                .when(dailyAggregateRepository).upsertDaily(any(), any(), any(), any(), anyBoolean(), anyLong(), anyInt(), anyInt());
+                .when(dailyAggregateRepository).upsertDaily(any(), any(), any(), any(), any(), anyBoolean(), anyLong(), anyInt(), anyInt());
 
         CompleteRunRequest request = CompleteRunRequest.builder()
                 .reportingDate(LocalDate.now())

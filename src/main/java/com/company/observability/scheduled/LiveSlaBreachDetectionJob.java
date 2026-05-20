@@ -1,6 +1,7 @@
 package com.company.observability.scheduled;
 
 import com.company.observability.cache.SlaMonitoringCache;
+import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.event.SlaBreachedEvent;
@@ -52,6 +53,7 @@ public class LiveSlaBreachDetectionJob {
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
     private final LifecycleLogger lifecycleLogger;
+    private final DurationBasedSlaProperties durationBasedSlaProperties;
     private final AtomicInteger approachingRunsGauge = new AtomicInteger(0);
     private final AtomicInteger lastBreachesGauge = new AtomicInteger(0);
     private final AtomicLong activeRunsGauge = new AtomicLong(0L);
@@ -217,13 +219,14 @@ public class LiveSlaBreachDetectionJob {
         );
     }
 
+    /**
+     * Grade a still-running breach by how far past the frozen LATE-edge deadline it is.
+     * slaTime is the LATE-band edge; within one band-gap past it the run is in the LATE
+     * band (MEDIUM), beyond that it is VERY_LATE (HIGH).
+     */
     private String determineSeverity(CalculatorRun run) {
-        long delayMinutes = Duration.between(run.getSlaTime(), Instant.now()).toMinutes();
-
-        if (delayMinutes > 120) return "CRITICAL";
-        if (delayMinutes > 60) return "HIGH";
-        if (delayMinutes > 30) return "MEDIUM";
-        return "LOW";
+        long delayMs = Duration.between(run.getSlaTime(), Instant.now()).toMillis();
+        return delayMs <= durationBasedSlaProperties.bandGapMs() ? "MEDIUM" : "HIGH";
     }
 
     private long calculateMinutesUntilSla(Map<String, Object> runInfo) {

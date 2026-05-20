@@ -5,6 +5,6 @@ package com.company.observability.dto.enums;
  * Distinct from domain Severity — maps multiple severity levels to display categories.
  */
 public enum SlaStatus {
-    GREEN, AMBER, RED,      // day-level classification (TrendDataPoint, SlaSummary)
-    SLA_MET, LATE, VERY_LATE, RUNNING // run-level classification (PerformanceCard RunBar)
+    GREEN, AMBER, RED,          // day-level classification (TrendDataPoint, SlaSummary)
+    ON_TIME, LATE, VERY_LATE    // run-level classification (batch/runs, executions)
 }

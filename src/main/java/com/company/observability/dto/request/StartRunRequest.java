@@ -41,13 +41,19 @@ public class StartRunRequest {
     @Schema(example = "2026-02-06T23:22:32Z")
     private Instant startTime;
 
-    @NotNull(message = "SLA deadline time (UTC) is required")
-    @Schema(description = "SLA deadline as UTC instant (ISO-8601, e.g. '2025-03-15T05:15:00Z')")
+    @Schema(description = "Optional. Legacy upstream SLA deadline (UTC instant, ISO-8601). " +
+            "No longer the primary SLA source — the deadline is derived from the calculator's " +
+            "average runtime. Used only as the weakest fallback when no history or " +
+            "expectedDurationMs is available.")
     private Instant slaTime;
 
     // Optional fields
     private Long expectedDurationMs;
+
+    // Optional. If Airflow supplies these, they win; otherwise they are derived from the
+    // calculator's cached historical profile, then from start + expectedDurationMs.
     private Instant estimatedStartTime;
+    private Instant estimatedEndTime;
 
     // Optional — promoted from run_parameters for query efficiency.
     // Top-level fields take precedence; fall back to runParameters map for backward compat.

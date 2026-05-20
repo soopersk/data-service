@@ -53,7 +53,7 @@ class ProjectionControllerTest {
                 180000L,
                 new PerformanceCardResponse.SlaSummaryPct(1, 1, 0, 0, 0.0),
                 List.of(new PerformanceCardResponse.RunBar(
-                        "run-1", LocalDate.of(2026, 2, 20), null, null, 180000L, "SLA_MET", null)),
+                        "run-1", LocalDate.of(2026, 2, 20), null, null, 180000L, "ON_TIME", null)),
                 new PerformanceCardResponse.ReferenceLines(6.0, 6.25));
 
         when(performanceCardProjection.getPerformanceCard("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))

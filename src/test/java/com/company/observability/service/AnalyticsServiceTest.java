@@ -190,7 +190,7 @@ class AnalyticsServiceTest {
         assertEquals(start, point1.startTime());
         assertEquals(end, point1.endTime());
         assertEquals("SUCCESS", point1.status());
-        assertEquals("SLA_MET", point1.slaStatus());
+        assertEquals("ON_TIME", point1.slaStatus());
         assertEquals(false, point1.slaBreached());
 
         RunPerformanceData.RunDataPoint point2 = result.runs().get(1);
@@ -200,7 +200,7 @@ class AnalyticsServiceTest {
 
         RunPerformanceData.RunDataPoint point3 = result.runs().get(2);
         assertEquals("RUNNING", point3.status());
-        assertEquals("RUNNING", point3.slaStatus());
+        assertEquals("ON_TIME", point3.slaStatus());
         assertNull(point3.endTime());
         assertNull(point3.durationMs());
 
@@ -259,7 +259,7 @@ class AnalyticsServiceTest {
         assertNull(result.runs().get(1).subRunIds());
         assertEquals("run-split-1", result.runs().get(0).runId());
         assertEquals("run-split-2", result.runs().get(1).runId());
-        assertEquals("SLA_MET", result.runs().get(0).slaStatus());
+        assertEquals("ON_TIME", result.runs().get(0).slaStatus());
         assertEquals("VERY_LATE", result.runs().get(1).slaStatus());
         assertEquals((500000L + 940000L) / 2, result.meanDurationMs());
         assertEquals(1, result.slaMetCount());

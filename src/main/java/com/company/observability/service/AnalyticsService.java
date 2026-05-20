@@ -309,7 +309,7 @@ public class AnalyticsService {
             }
 
             if (!isRunning) {
-                if (SlaStatus.SLA_MET.name().equals(lr.slaStatus())) slaMetCount++;
+                if (SlaStatus.ON_TIME.name().equals(lr.slaStatus())) slaMetCount++;
                 else if (SlaStatus.LATE.name().equals(lr.slaStatus())) lateCount++;
                 else if (SlaStatus.VERY_LATE.name().equals(lr.slaStatus())) veryLateCount++;
             }
@@ -445,7 +445,7 @@ public class AnalyticsService {
                 completedCount++;
             }
             if (!isRunning) {
-                if (SlaStatus.SLA_MET.name().equals(dp.slaStatus())) slaMetCount++;
+                if (SlaStatus.ON_TIME.name().equals(dp.slaStatus())) slaMetCount++;
                 else if (SlaStatus.LATE.name().equals(dp.slaStatus())) lateCount++;
                 else if (SlaStatus.VERY_LATE.name().equals(dp.slaStatus())) veryLateCount++;
             }
@@ -470,8 +470,7 @@ public class AnalyticsService {
     }
 
     private String classifySlaStatusForRun(RunWithSlaStatus run) {
-        if (run.status() == RunStatus.RUNNING) return SlaStatus.RUNNING.name();
-        if (!Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.SLA_MET.name();
+        if (run.status() == RunStatus.RUNNING || !Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.ON_TIME.name();
         if (run.severity() == null) return SlaStatus.LATE.name();
         return switch (run.severity()) {
             case CRITICAL, HIGH -> SlaStatus.VERY_LATE.name();

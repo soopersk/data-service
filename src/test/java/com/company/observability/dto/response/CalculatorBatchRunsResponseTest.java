@@ -54,7 +54,7 @@ class CalculatorBatchRunsResponseTest {
                 .region("LDNL")
                 .runId("run-ldnl-002")
                 .status("FAILED")
-                .slaStatus("FAILED")
+                .slaStatus("LATE")
                 .startTime(Instant.parse("2026-03-06T13:02:00Z"))
                 .endTime(Instant.parse("2026-03-06T14:58:00Z"))
                 .sla(Instant.parse("2026-03-06T15:00:00Z"))

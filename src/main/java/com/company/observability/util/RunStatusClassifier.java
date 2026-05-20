@@ -9,14 +9,12 @@ import java.util.List;
 /**
  * Single source of truth for run status classification across all domain services.
  *
- * <p>Produces one of six status strings (new vocabulary):
+ * <p>Produces one of three status strings (unified vocabulary):
  * <ul>
- *   <li>{@link #ON_TIME}     — completed on or before SLA deadline</li>
- *   <li>{@link #LATE}        — completed after SLA, within {@code lateThresholdMs}</li>
- *   <li>{@link #VERY_LATE}   — completed after SLA, beyond {@code lateThresholdMs}</li>
- *   <li>{@link #FAILED}      — terminated without success (FAILED, TIMEOUT, CANCELLED)</li>
- *   <li>{@link #IN_PROGRESS} — currently running</li>
- *   <li>{@link #NOT_STARTED} — no run found</li>
+ *   <li>{@link #ON_TIME}   — run is on track: not started, in progress, completed within SLA,
+ *                            or failed within SLA deadline</li>
+ *   <li>{@link #LATE}      — completed/failed after SLA deadline, within {@code lateThresholdMs}</li>
+ *   <li>{@link #VERY_LATE} — completed/failed after SLA deadline, beyond {@code lateThresholdMs}</li>
  * </ul>
  *
  * <p>Legacy vocabulary ({@link #RUNNING}, {@link #DELAYED}) is kept as deprecated
@@ -41,16 +39,18 @@ public final class RunStatusClassifier {
     private RunStatusClassifier() {}
 
     /**
-     * Classifies a single run using the new six-value vocabulary.
+     * Classifies a single run's SLA status using the three-value vocabulary.
      *
-     * @param run             the calculator run (null → NOT_STARTED)
-     * @param slaDeadline     the SLA deadline (null → no deadline check; treats any completed run as ON_TIME)
-     * @param lateThresholdMs ms above SLA deadline that separates LATE from VERY_LATE
+     * <p>Not-started (null) and in-progress (RUNNING) runs are {@link #ON_TIME} because no
+     * breach has occurred yet. FAILED runs that ended before the SLA deadline are also
+     * {@link #ON_TIME}; those that ended after it are {@link #LATE} or {@link #VERY_LATE}.
+     *
+     * @param run             the calculator run (null → ON_TIME)
+     * @param slaDeadline     the SLA deadline (null → no deadline check, always ON_TIME)
+     * @param lateThresholdMs ms above the SLA deadline that separates LATE from VERY_LATE
      */
     public static String classify(CalculatorRun run, Instant slaDeadline, long lateThresholdMs) {
-        if (run == null) return NOT_STARTED;
-        if (run.getStatus() == RunStatus.RUNNING) return IN_PROGRESS;
-        if (run.getStatus() != RunStatus.SUCCESS && run.getStatus().isTerminal()) return FAILED;
+        if (run == null || run.getStatus() == RunStatus.RUNNING) return ON_TIME;
         if (run.getEndTime() != null && slaDeadline != null && run.getEndTime().isAfter(slaDeadline)) {
             long overdueMs = run.getEndTime().toEpochMilli() - slaDeadline.toEpochMilli();
             return overdueMs > lateThresholdMs ? VERY_LATE : LATE;
@@ -90,7 +90,6 @@ public final class RunStatusClassifier {
      *
      * <ul>
      *   <li>LATE / VERY_LATE: {@code endTime - slaDeadline}</li>
-     *   <li>FAILED with slaBreached=true: {@code (endTime|now) - slaDeadline}, only if positive</li>
      *   <li>otherwise: null</li>
      * </ul>
      */
@@ -99,11 +98,6 @@ public final class RunStatusClassifier {
         if (slaDeadline == null) return null;
         if (LATE.equals(status) || VERY_LATE.equals(status) || DELAYED.equals(status)) {
             return endTime == null ? null : endTime.toEpochMilli() - slaDeadline.toEpochMilli();
-        }
-        if (FAILED.equals(status) && slaBreached) {
-            Instant ref = endTime != null ? endTime : Instant.now();
-            long diff = ref.toEpochMilli() - slaDeadline.toEpochMilli();
-            return diff > 0 ? diff : null;
         }
         return null;
     }

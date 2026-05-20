@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  *   <li>Status precedence (worst-wins): RUNNING > FAILED > TIMEOUT > CANCELLED > SUCCESS
  *   <li>Wall-clock duration: MAX(end_time) - MIN(start_time); null if any split is RUNNING
  *   <li>SLA breach: OR across splits (any breach = logical breach)
- *   <li>SLA status precedence: VERY_LATE > LATE > SLA_MET
+ *   <li>SLA status precedence: VERY_LATE > LATE > ON_TIME
  *   <li>reportingDate: MIN across splits (supports cross-midnight splits)
  * </ul>
  */
@@ -181,7 +181,7 @@ public final class LogicalRunGrouper {
     }
 
     private static final List<String> SLA_PRECEDENCE = List.of(
-            SlaStatus.VERY_LATE.name(), SlaStatus.LATE.name(), SlaStatus.SLA_MET.name(), SlaStatus.RUNNING.name()
+            SlaStatus.VERY_LATE.name(), SlaStatus.LATE.name(), SlaStatus.ON_TIME.name()
     );
 
     private static String worstSlaStatus(List<RunWithSlaStatus> splits) {
@@ -191,12 +191,11 @@ public final class LogicalRunGrouper {
                     int idx = SLA_PRECEDENCE.indexOf(s);
                     return idx < 0 ? SLA_PRECEDENCE.size() : idx;
                 }))
-                .orElse(SlaStatus.SLA_MET.name());
+                .orElse(SlaStatus.ON_TIME.name());
     }
 
     private static String classifySlaStatus(RunWithSlaStatus run) {
-        if (run.status() == RunStatus.RUNNING) return SlaStatus.RUNNING.name();
-        if (!Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.SLA_MET.name();
+        if (run.status() == RunStatus.RUNNING || !Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.ON_TIME.name();
         if (run.severity() == null) return SlaStatus.LATE.name();
         return switch (run.severity()) {
             case CRITICAL, HIGH -> SlaStatus.VERY_LATE.name();

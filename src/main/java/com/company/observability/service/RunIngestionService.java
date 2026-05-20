@@ -38,6 +38,7 @@ public class RunIngestionService {
     private final CalculatorRunRepository runRepository;
     private final DailyAggregateRepository dailyAggregateRepository;
     private final SlaEvaluationService slaEvaluationService;
+    private final SlaBaselineResolver slaBaselineResolver;
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
     private final SlaMonitoringCache slaMonitoringCache;
@@ -76,24 +77,10 @@ public class RunIngestionService {
         CalculatorFrequency frequency = Objects.requireNonNullElse(
                 request.getFrequency(), CalculatorFrequency.DAILY);
 
-        Instant slaDeadline = null;
-        if (frequency == CalculatorFrequency.DAILY) {
-            slaDeadline = request.getSlaTime();
-        }
-
-        boolean breachedAtStart = false;
-        String breachReasonAtStart = null;
-        if (slaDeadline != null && request.getStartTime() != null
-                && request.getStartTime().isAfter(slaDeadline)) {
-            breachedAtStart = true;
-            breachReasonAtStart = String.format(
-                    "Start time %s is after SLA deadline %s (reporting_date=%s)",
-                    request.getStartTime(),
-                    slaDeadline,
-                    request.getReportingDate()
-            );
-            log.warn("event=run.start.sla_check outcome=failure reason=start_after_deadline");
-        }
+        // Derive the SLA deadline from the calculator's average runtime and freeze it into
+        // slaTime. Applies to DAILY and MONTHLY. May be null when no baseline is available
+        // (no history, no expectedDurationMs, no usable slaTime) → run is left ungraded.
+        Instant slaDeadline = slaBaselineResolver.resolveDeadline(request, tenantId, frequency);
 
         Instant estimatedEndTime = null;
         if (request.getExpectedDurationMs() != null) {
@@ -120,27 +107,15 @@ public class RunIngestionService {
                 .correlationId(request.getCorrelationId())
                 .runParameters(request.getRunParameters())
                 .additionalAttributes(request.getAdditionalAttributes())
-                .slaBreached(breachedAtStart)
-                .slaBreachReason(breachedAtStart ? breachReasonAtStart : null)
+                .slaBreached(false)
+                .slaBreachReason(null)
                 .build();
 
         run = runRepository.upsert(run);
 
-        // Register for live SLA monitoring (daily only, feature toggle, not already breached)
-        if (liveTrackingEnabled
-                && frequency == CalculatorFrequency.DAILY
-                && slaDeadline != null
-                && !breachedAtStart) {
+        // Register for live SLA monitoring (DAILY and MONTHLY) whenever a deadline was derived.
+        if (liveTrackingEnabled && slaDeadline != null) {
             slaMonitoringCache.registerForSlaMonitoring(run);
-        }
-
-        if (breachedAtStart) {
-            SlaEvaluationResult result = new SlaEvaluationResult(
-                    true,
-                    breachReasonAtStart,
-                    "HIGH"
-            );
-            eventPublisher.publishEvent(new SlaBreachedEvent(run, result));
         }
 
         eventPublisher.publishEvent(new RunStartedEvent(run));
@@ -269,6 +244,7 @@ public class RunIngestionService {
             dailyAggregateRepository.upsertDaily(
                     run.getCalculatorId(),
                     run.getTenantId(),
+                    run.getFrequency().name(),
                     run.getReportingDate(),
                     run.getStatus().name(),
                     run.getSlaBreached(),

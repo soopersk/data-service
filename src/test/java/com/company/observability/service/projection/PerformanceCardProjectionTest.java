@@ -67,7 +67,7 @@ class PerformanceCardProjectionTest {
                 List.of(
                         new RunPerformanceData.RunDataPoint(
                                 "run-1", LocalDate.of(2026, 2, 21),
-                                start, end, 180000L, "SUCCESS", false, "SLA_MET", null,
+                                start, end, 180000L, "SUCCESS", false, "ON_TIME", null,
                                 estStart, slaTime, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.of(2026, 2, 22),
@@ -75,7 +75,7 @@ class PerformanceCardProjectionTest {
                                 estStart, slaTime, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-3", LocalDate.of(2026, 2, 23),
-                                start, null, null, "RUNNING", false, "RUNNING", null,
+                                start, null, null, "RUNNING", false, "ON_TIME", null,
                                 estStart, slaTime, null, null)
                 ),
                 estStart, slaTime);
@@ -101,11 +101,11 @@ class PerformanceCardProjectionTest {
         assertEquals(3, result.runs().size());
         PerformanceCardResponse.RunBar bar1 = result.runs().get(0);
         assertEquals("run-1", bar1.runId());
-        assertEquals("SLA_MET", bar1.slaStatus());
+        assertEquals("ON_TIME", bar1.slaStatus());
         assertEquals(180000L, bar1.durationMs());
         assertNotNull(bar1.startTime());
         assertNotNull(bar1.endTime());
-        assertEquals("RUNNING", result.runs().get(2).slaStatus());
+        assertEquals("ON_TIME", result.runs().get(2).slaStatus());
 
         assertNotNull(result.referenceLines());
         // estStart = 05:00 CET → 5.0; slaTime = 06:15 CET → 6.25
@@ -127,11 +127,11 @@ class PerformanceCardProjectionTest {
                 List.of(
                         new RunPerformanceData.RunDataPoint(
                                 "run-a", LocalDate.of(2026, 2, 21),
-                                estStart1, slaTime1, 2700000L, "SUCCESS", false, "SLA_MET", null,
+                                estStart1, slaTime1, 2700000L, "SUCCESS", false, "ON_TIME", null,
                                 estStart1, slaTime1, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-b", LocalDate.of(2026, 2, 21),
-                                estStart2, slaTime2, 900000L, "SUCCESS", false, "SLA_MET", null,
+                                estStart2, slaTime2, 900000L, "SUCCESS", false, "ON_TIME", null,
                                 estStart2, slaTime2, null, null)
                 ),
                 estStart1, slaTime1);
@@ -157,7 +157,7 @@ class PerformanceCardProjectionTest {
                 "calc-1", "Calc", "DAILY", 7, 0L,
                 1, 0, 1, 0, 0,
                 List.of(new RunPerformanceData.RunDataPoint(
-                        "run-1", null, null, null, null, "SUCCESS", false, "SLA_MET", null,
+                        "run-1", null, null, null, null, "SUCCESS", false, "ON_TIME", null,
                         null, null, null, null)),
                 null, null);
 
@@ -188,12 +188,12 @@ class PerformanceCardProjectionTest {
                         new RunPerformanceData.RunDataPoint(
                                 "run-1", LocalDate.of(2026, 2, 21),
                                 Instant.parse("2026-02-21T04:00:00Z"),
-                                null, null, "RUNNING", false, "RUNNING", null,
+                                null, null, "RUNNING", false, "ON_TIME", null,
                                 estStart, slaTime, null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.of(2026, 2, 22),
                                 Instant.parse("2026-02-22T04:00:00Z"),
-                                null, null, "RUNNING", false, "RUNNING", null,
+                                null, null, "RUNNING", false, "ON_TIME", null,
                                 estStart, slaTime, null, null)
                 ),
                 estStart, slaTime);
@@ -206,6 +206,6 @@ class PerformanceCardProjectionTest {
 
         assertEquals(0, result.slaSummary().totalRuns());
         assertEquals(0.0, result.slaSummary().veryLatePct());
-        assertEquals("RUNNING", result.runs().get(0).slaStatus());
+        assertEquals("ON_TIME", result.runs().get(0).slaStatus());
     }
 }

@@ -93,6 +93,20 @@ observability:
   sla:
     live-tracking:
       enabled: true
+
+    # Duration-based (average-runtime) SLA grading. The deadline is derived at run
+    # start from the calculator's own trailing-window average runtime and frozen into
+    # the run's slaTime.
+    duration-based:
+      enabled: true
+      threshold-percent: 20        # percentage buffer over the resolved baseline
+      late-band-minutes: 15        # ON_TIME upper edge beyond buffered baseline
+      very-late-band-minutes: 30   # LATE upper edge beyond buffered baseline
+      min-sample-size: 5           # runs required before trusting the average
+      lookback:
+        daily-days: 30
+        monthly-days: 395
+
     # OPTIMIZED: Live detection every 2 minutes (tolerance: few minutes)
     live-detection:
       enabled: true
@@ -104,6 +118,17 @@ observability:
       enabled: true
       interval-ms: 180000        # Every 3 minutes
       threshold-minutes: 10      # Warn if SLA within 10 minutes
+
+  # End-of-day aggregation + calculator-profile cache. calculator_sli_daily is populated
+  # nightly (not per completion); slowly-changing profiles (avg runtime, avg start/end)
+  # are cached in Redis and reused for SLA baselines and estimated start/end.
+  aggregation:
+    daily:
+      enabled: true
+      cron: "0 30 0 * * *"        # 00:30 every day
+    recompute-window-days: 3       # trailing reporting dates recomputed (late completions)
+    profile-cache-ttl-hours: 26
+    empty-profile-cache-ttl-minutes: 60
 
   alerts:
     channel: logging

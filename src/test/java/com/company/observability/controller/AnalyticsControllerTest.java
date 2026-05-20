@@ -95,14 +95,14 @@ class AnalyticsControllerTest {
                                 "run-1", LocalDate.parse("2026-02-21"),
                                 Instant.parse("2026-02-21T04:00:00Z"),
                                 Instant.parse("2026-02-21T04:03:00Z"),
-                                180000L, "SUCCESS", false, "SLA_MET", null,
+                                180000L, "SUCCESS", false, "ON_TIME", null,
                                 Instant.parse("2026-02-21T04:00:00Z"),
                                 Instant.parse("2026-02-21T06:15:00Z"), null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.parse("2026-02-22"),
                                 Instant.parse("2026-02-22T04:00:00Z"),
                                 null,
-                                null, "RUNNING", false, "RUNNING", null,
+                                null, "RUNNING", false, "ON_TIME", null,
                                 Instant.parse("2026-02-22T04:00:00Z"),
                                 Instant.parse("2026-02-22T06:15:00Z"), null, null)
                 ),
@@ -119,8 +119,8 @@ class AnalyticsControllerTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=60")))
                 .andExpect(jsonPath("$.calculatorId").value("calc-1"))
                 .andExpect(jsonPath("$.runningRuns").value(1))
-                .andExpect(jsonPath("$.runs[0].slaStatus").value("SLA_MET"))
-                .andExpect(jsonPath("$.runs[1].slaStatus").value("RUNNING"));
+                .andExpect(jsonPath("$.runs[0].slaStatus").value("ON_TIME"))
+                .andExpect(jsonPath("$.runs[1].slaStatus").value("ON_TIME"));
 
         verify(analyticsService).getRunPerformanceData("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
     }
@@ -170,7 +170,7 @@ class AnalyticsControllerTest {
                                 "run-split-1", LocalDate.parse("2026-05-11"),
                                 Instant.parse("2026-05-11T03:59:50Z"),
                                 Instant.parse("2026-05-11T04:08:10Z"),
-                                500000L, "SUCCESS", false, "SLA_MET", null,
+                                500000L, "SUCCESS", false, "ON_TIME", null,
                                 Instant.parse("2026-05-11T04:00:00Z"),
                                 Instant.parse("2026-05-11T06:30:00Z"), "1", 300000L),
                         new RunPerformanceData.RunDataPoint(

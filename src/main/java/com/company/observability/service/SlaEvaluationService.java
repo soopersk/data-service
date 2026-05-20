@@ -1,5 +1,6 @@
 package com.company.observability.service;
 
+import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.util.SlaEvaluationResult;
@@ -9,107 +10,67 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
-import java.util.*;
+import java.time.Duration;
 
 import static com.company.observability.util.ObservabilityConstants.SLA_EVALUATION_DURATION;
 
+/**
+ * Grades a completed run against its frozen, duration-derived SLA deadline.
+ *
+ * <p>{@code slaTime} is the ON_TIME upper edge (entry into LATE) that
+ * {@code SlaBaselineResolver} computed at run start. Because that edge already encodes
+ * {@code buffered + lateBand}, the bands are recovered purely from the run's actual duration:
+ * <pre>
+ *   lateEdgeMs     = slaTime - startTime          (= buffered + lateBand)
+ *   veryLateEdgeMs = lateEdgeMs + bandGap         (= buffered + veryLateBand)
+ *   actual <= lateEdgeMs       -> ON_TIME    (no breach,    severity null)
+ *   actual <= veryLateEdgeMs   -> LATE       (breach,       MEDIUM)
+ *   actual >  veryLateEdgeMs   -> VERY_LATE  (breach,       HIGH)
+ *   FAILED / TIMEOUT           -> breach,    CRITICAL  (regardless of duration)
+ * </pre>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class SlaEvaluationService {
 
     private final MeterRegistry meterRegistry;
+    private final DurationBasedSlaProperties props;
 
-    /**
-     * UPDATED: Evaluate SLA based on absolute time deadline (CET)
-     */
     public SlaEvaluationResult evaluateSla(CalculatorRun run) {
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<String> breachReasons = new ArrayList<>();
-
-        // Check 1: End time exceeded SLA deadline (absolute time in CET)
-        if (run.getSlaTime() != null && run.getEndTime() != null) {
-            if (run.getEndTime().isAfter(run.getSlaTime())) {
-                long delaySeconds = java.time.Duration.between(
-                        run.getSlaTime(),
-                        run.getEndTime()
-                ).getSeconds();
-
-                breachReasons.add(String.format(
-                        "Finished %d minutes late (SLA: %s, Actual: %s)",
-                        delaySeconds / 60,
-                        run.getSlaTime(),
-                        run.getEndTime()
-                ));
-            }
-        }
-
-        // Check 2: Still running past SLA deadline
-        if (run.getSlaTime() != null && run.getStatus() == RunStatus.RUNNING) {
-            Instant now = Instant.now();
-            if (now.isAfter(run.getSlaTime())) {
-                long delaySeconds = java.time.Duration.between(
-                        run.getSlaTime(),
-                        now
-                ).getSeconds();
-
-                breachReasons.add(String.format(
-                        "Still running %d minutes past SLA deadline",
-                        delaySeconds / 60
-                ));
-            }
-        }
-
-        // Check 3: Duration exceeded expected duration (separate from SLA)
-        if (run.getExpectedDurationMs() != null && run.getDurationMs() != null) {
-            if (run.getDurationMs() > run.getExpectedDurationMs() * 1.5) { // 50% over
-                breachReasons.add(String.format(
-                        "Duration significantly exceeded: %dms vs expected %dms",
-                        run.getDurationMs(),
-                        run.getExpectedDurationMs()
-                ));
-            }
-        }
-
-        // Check 4: Run failed
-        if (run.getStatus() == RunStatus.FAILED || run.getStatus() == RunStatus.TIMEOUT) {
-            breachReasons.add("Run status: " + run.getStatus());
-        }
-
-        boolean breached = !breachReasons.isEmpty();
-        String reason = breached ? String.join("; ", breachReasons) : null;
-        String resultTag = breached ? "breached" : "clear";
-
+        SlaEvaluationResult result = classify(run);
         sample.stop(Timer.builder(SLA_EVALUATION_DURATION)
-                .tag("result", resultTag)
+                .tag("result", result.isBreached() ? "breached" : "clear")
                 .register(meterRegistry));
-
-        return new SlaEvaluationResult(breached, reason, determineSeverity(run, breachReasons));
+        return result;
     }
 
-    private String determineSeverity(CalculatorRun run, List<String> breachReasons) {
-        if (breachReasons.isEmpty()) {
-            return null;
+    private SlaEvaluationResult classify(CalculatorRun run) {
+        // Terminal failure short-circuits the duration bands.
+        if (run.getStatus() == RunStatus.FAILED || run.getStatus() == RunStatus.TIMEOUT) {
+            return new SlaEvaluationResult(true, "Run status: " + run.getStatus(), "CRITICAL");
         }
 
-        if (run.getStatus() == RunStatus.FAILED) {
-            return "CRITICAL";
+        // Ungraded: no derived deadline (no history / no estimate) → treat as on-time.
+        if (run.getSlaTime() == null || run.getStartTime() == null || run.getDurationMs() == null) {
+            return new SlaEvaluationResult(false, null, null);
         }
 
-        // Check how late the run finished
-        if (run.getSlaTime() != null && run.getEndTime() != null) {
-            long delayMinutes = java.time.Duration.between(
-                    run.getSlaTime(),
-                    run.getEndTime()
-            ).toMinutes();
+        long lateEdgeMs = Duration.between(run.getStartTime(), run.getSlaTime()).toMillis();
+        long veryLateEdgeMs = lateEdgeMs + props.bandGapMs();
+        long actualMs = run.getDurationMs();
 
-            if (delayMinutes > 60) return "CRITICAL";  // More than 1 hour late
-            if (delayMinutes > 30) return "HIGH";      // 30-60 minutes late
-            if (delayMinutes > 15) return "MEDIUM";    // 15-30 minutes late
-            return "LOW";                               // Less than 15 minutes late
+        if (actualMs <= lateEdgeMs) {
+            return new SlaEvaluationResult(false, null, null);
         }
 
-        return "MEDIUM";
+        long minutesLate = (actualMs - lateEdgeMs) / 60_000L;
+        if (actualMs <= veryLateEdgeMs) {
+            return new SlaEvaluationResult(true,
+                    String.format("Finished %d minutes late (LATE band)", minutesLate), "MEDIUM");
+        }
+        return new SlaEvaluationResult(true,
+                String.format("Finished %d minutes late (VERY_LATE band)", minutesLate), "HIGH");
     }
 }

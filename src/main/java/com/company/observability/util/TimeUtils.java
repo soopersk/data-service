@@ -33,6 +33,16 @@ public class TimeUtils {
         return startTime.plusMillis(expectedDurationMs);
     }
 
+    /**
+     * Map an average minute-of-day (minutes since UTC midnight) onto a UTC date.
+     * Used to turn a calculator's historical average start/end minute into a concrete
+     * Instant for estimated start/end fallbacks.
+     */
+    public static Instant instantFromUtcMinuteOfDay(LocalDate dateUtc, int minuteOfDay) {
+        if (dateUtc == null) return null;
+        return dateUtc.atStartOfDay(ZoneOffset.UTC).toInstant().plus(Duration.ofMinutes(minuteOfDay));
+    }
+
     public static BigDecimal calculateCetHour(Instant instant) {
         if (instant == null) return null;
 
