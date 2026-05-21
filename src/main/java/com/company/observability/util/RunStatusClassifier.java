@@ -75,6 +75,40 @@ public final class RunStatusClassifier {
     }
 
     /**
+     * Duration-based dashboard classification (3-value).
+     *
+     * <p>A run is {@link #ON_TIME} only when it is neither flagged breached nor currently past its
+     * derived deadline. {@link #LATE} vs {@link #VERY_LATE} splits at one {@code bandGapMs} past
+     * {@code slaTime} — matching {@code SlaEvaluationService} and {@code LiveSlaBreachDetectionJob}'s
+     * MEDIUM/HIGH cutoff so the dashboard is always consistent with persisted breach state.
+     *
+     * <p>Covers all three previously-contradictory cases:
+     * <ul>
+     *   <li>RUNNING run whose live job has set {@code slaBreached=true} → LATE/VERY_LATE (was ON_TIME)</li>
+     *   <li>Completed run ending past {@code slaTime} → LATE/VERY_LATE at the correct {@code bandGap}
+     *       boundary (was always LATE under the old 60-min {@code dashboard.late-threshold-ms})</li>
+     *   <li>Fast FAILED/TIMEOUT run (CRITICAL breach) → LATE, never ON_TIME</li>
+     * </ul>
+     *
+     * @param run      the calculator run (null → ON_TIME)
+     * @param bandGapMs width of the LATE band (ms between the LATE edge and the VERY_LATE edge);
+     *                  comes from {@code DurationBasedSlaProperties.bandGapMs()}
+     * @param now      reference instant for in-flight (RUNNING) runs; ignored once {@code endTime} is set
+     */
+    public static String classifyDurationBased(CalculatorRun run, long bandGapMs, Instant now) {
+        if (run == null) return ON_TIME;
+        Instant deadline = run.getSlaTime();
+        Instant ref = run.getEndTime() != null ? run.getEndTime() : now;  // terminal → endTime, in-flight → now
+        boolean pastDeadline = deadline != null && ref != null && ref.isAfter(deadline);
+        boolean breached = Boolean.TRUE.equals(run.getSlaBreached());
+        if (!breached && !pastDeadline) return ON_TIME;
+        if (deadline == null || ref == null) return LATE;   // breached without measurable overdue (fast FAILED)
+        long overdueMs = ref.toEpochMilli() - deadline.toEpochMilli();
+        if (overdueMs <= 0) return LATE;                    // breached for a non-duration reason, still within deadline window
+        return overdueMs > bandGapMs ? VERY_LATE : LATE;
+    }
+
+    /**
      * Returns true when the run ended after the SLA deadline.
      *
      * @param run         the calculator run (null → false)

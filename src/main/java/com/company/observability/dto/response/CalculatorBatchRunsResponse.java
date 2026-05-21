@@ -35,6 +35,7 @@ public record CalculatorBatchRunsResponse(
             Instant estimatedEndTime,
             Instant sla,
             Long durationMs,
+            Long expectedDurationMs,
             Boolean slaBreached,
             String slaBreachReason,
             boolean isRerun

@@ -1,5 +1,6 @@
 package com.company.observability.service;
 
+import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.RunStatus;
@@ -8,7 +9,6 @@ import com.company.observability.dto.response.CalculatorBatchRunsResponse.RunEnt
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.util.RunStatusClassifier;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -22,9 +22,7 @@ import java.util.stream.Stream;
 public class CalculatorStateService {
 
     private final CalculatorRunRepository runRepository;
-
-    @Value("${observability.dashboard.late-threshold-ms:3600000}")
-    private long lateThresholdMs;
+    private final DurationBasedSlaProperties slaProps;
 
     // Lower index = worse status (worst-wins ordering mirrors LogicalRunGrouper)
     private static final List<RunStatus> STATUS_PRECEDENCE = List.of(
@@ -113,6 +111,7 @@ public class CalculatorStateService {
         rep.setSlaBreached(slaBreached);
         rep.setSlaBreachReason(breachReason.isBlank() ? null : breachReason);
         rep.setSlaTime(first.getSlaTime());
+        rep.setExpectedDurationMs(first.getExpectedDurationMs());
         rep.setEstimatedStartTime(first.getEstimatedStartTime());
         rep.setEstimatedEndTime(first.getEstimatedEndTime());
         rep.setRerun(false);  // parallel splits are not sequential reruns
@@ -121,7 +120,7 @@ public class CalculatorStateService {
     }
 
     private RunEntry toRunEntry(CalculatorRun run) {
-        String slaStatus = RunStatusClassifier.classify(run, run.getSlaTime(), lateThresholdMs);
+        String slaStatus = RunStatusClassifier.classifyDurationBased(run, slaProps.bandGapMs(), Instant.now());
 
         return RunEntry.builder()
                 .runId(run.getRunId())
@@ -135,6 +134,7 @@ public class CalculatorStateService {
                 .estimatedEndTime(run.getEstimatedEndTime())
                 .sla(run.getSlaTime())
                 .durationMs(run.getDurationMs())
+                .expectedDurationMs(run.getExpectedDurationMs())
                 .slaBreached(run.getSlaBreached())
                 .slaBreachReason(run.getSlaBreachReason())
                 .isRerun(run.isRerun())
