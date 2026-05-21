@@ -1,6 +1,7 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.SlaMonitoringCache;
+import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.CompletionStatus;
@@ -36,9 +37,9 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 public class RunIngestionService {
 
     private final CalculatorRunRepository runRepository;
-    private final DailyAggregateRepository dailyAggregateRepository;
     private final SlaEvaluationService slaEvaluationService;
     private final SlaBaselineResolver slaBaselineResolver;
+    private final CalculatorProfileService calculatorProfileService;
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
     private final SlaMonitoringCache slaMonitoringCache;
@@ -77,16 +78,18 @@ public class RunIngestionService {
         CalculatorFrequency frequency = Objects.requireNonNullElse(
                 request.getFrequency(), CalculatorFrequency.DAILY);
 
+        // Fetch the calculator's cached rolling profile once (Redis-backed, no DB on warm cache).
+        // It feeds both the SLA baseline and the estimated start/end fallbacks.
+        CalculatorProfile profile = calculatorProfileService.getProfile(
+                request.getCalculatorId(), tenantId, frequency);
+
         // Derive the SLA deadline from the calculator's average runtime and freeze it into
         // slaTime. Applies to DAILY and MONTHLY. May be null when no baseline is available
         // (no history, no expectedDurationMs, no usable slaTime) → run is left ungraded.
-        Instant slaDeadline = slaBaselineResolver.resolveDeadline(request, tenantId, frequency);
+        Instant slaDeadline = slaBaselineResolver.resolveDeadline(request, frequency, profile);
 
-        Instant estimatedEndTime = null;
-        if (request.getExpectedDurationMs() != null) {
-            estimatedEndTime = TimeUtils.calculateEstimatedEndTime(
-                    request.getStartTime(), request.getExpectedDurationMs());
-        }
+        Instant estimatedStartTime = resolveEstimatedStart(request, profile);
+        Instant estimatedEndTime = resolveEstimatedEnd(request, estimatedStartTime, profile);
 
         CalculatorRun run = CalculatorRun.builder()
                 .runId(request.getRunId())
@@ -99,7 +102,7 @@ public class RunIngestionService {
                 .status(RunStatus.RUNNING)
                 .slaTime(slaDeadline)
                 .expectedDurationMs(request.getExpectedDurationMs())
-                .estimatedStartTime(request.getStartTime())
+                .estimatedStartTime(estimatedStartTime)
                 .estimatedEndTime(estimatedEndTime)
                 .runNumber(resolveField(request.getRunNumber(), request.getRunParameters(), "run_number"))
                 .runType(resolveField(request.getRunType(), request.getRunParameters(), "run_type"))
@@ -186,7 +189,7 @@ public class RunIngestionService {
         // Deregister from SLA monitoring
         slaMonitoringCache.deregisterFromSlaMonitoring(run.getRunId(), run.getTenantId(), run.getReportingDate());
 
-        updateDailyAggregate(run);
+        // calculator_sli_daily is populated by the nightly DailyAggregationJob, not per completion.
 
         meterRegistry.counter(INGESTION_RUN_COMPLETED,
                 "frequency", run.getFrequency().name(),
@@ -233,28 +236,35 @@ public class RunIngestionService {
         return val != null ? val.toString() : null;
     }
 
-    private void updateDailyAggregate(CalculatorRun run) {
-        try {
-            int startMinUtc = run.getStartTime().atZone(java.time.ZoneOffset.UTC).getHour() * 60
-                    + run.getStartTime().atZone(java.time.ZoneOffset.UTC).getMinute();
-            int endMinUtc = (run.getEndTime() != null)
-                    ? run.getEndTime().atZone(java.time.ZoneOffset.UTC).getHour() * 60
-                      + run.getEndTime().atZone(java.time.ZoneOffset.UTC).getMinute()
-                    : 0;
-            dailyAggregateRepository.upsertDaily(
-                    run.getCalculatorId(),
-                    run.getTenantId(),
-                    run.getFrequency().name(),
-                    run.getReportingDate(),
-                    run.getStatus().name(),
-                    run.getSlaBreached(),
-                    run.getDurationMs(),
-                    startMinUtc,
-                    endMinUtc
-            );
-        } catch (Exception e) {
-            log.error("event=daily_aggregate.upsert outcome=failure reportingDate={}",
-                    run.getReportingDate(), e);
+    /**
+     * Estimated start precedence: request value (Airflow) → historical avg start (cached
+     * profile) → actual start time.
+     */
+    private Instant resolveEstimatedStart(StartRunRequest request, CalculatorProfile profile) {
+        if (request.getEstimatedStartTime() != null) {
+            return request.getEstimatedStartTime();
         }
+        if (profile != null && profile.totalRuns() > 0 && request.getStartTime() != null) {
+            LocalDate startDateUtc = request.getStartTime().atZone(ZoneOffset.UTC).toLocalDate();
+            return TimeUtils.instantFromUtcMinuteOfDay(startDateUtc, profile.avgStartMinUtc());
+        }
+        return request.getStartTime();
+    }
+
+    /**
+     * Estimated end precedence: request value (Airflow) → start + expectedDurationMs →
+     * estimatedStart + historical avg duration (cached profile) → null.
+     */
+    private Instant resolveEstimatedEnd(StartRunRequest request, Instant estimatedStart, CalculatorProfile profile) {
+        if (request.getEstimatedEndTime() != null) {
+            return request.getEstimatedEndTime();
+        }
+        if (request.getExpectedDurationMs() != null) {
+            return TimeUtils.calculateEstimatedEndTime(request.getStartTime(), request.getExpectedDurationMs());
+        }
+        if (profile != null && profile.avgDurationMs() > 0 && estimatedStart != null) {
+            return estimatedStart.plusMillis(profile.avgDurationMs());
+        }
+        return null;
     }
 }

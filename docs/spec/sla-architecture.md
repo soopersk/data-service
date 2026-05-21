@@ -4,48 +4,65 @@ SLA breach detection uses two independent mechanisms. Both ultimately publish `S
 
 ---
 
+## Duration-Based SLA Model
+
+The SLA deadline is **derived from each calculator's own average runtime**, not from an absolute instant supplied upstream. At run start (`SlaBaselineResolver`) a baseline duration is resolved and frozen into the run's `slaTime`:
+
+```
+baseline   = best available duration estimate (fallback chain below)
+buffered    = baseline × (1 + thresholdPercent)         # default 20%
+slaTime     = startTime + buffered + lateBand            # the ON_TIME upper edge (entry into LATE)
+```
+
+Baseline fallback chain (best first):
+
+1. **Average** — the cached `CalculatorProfile`'s avg duration (per `calculatorId/tenantId/frequency`), gated by `min-sample-size`.
+2. **`expectedDurationMs`** — request-supplied duration.
+3. **`slaTime` budget** — `request.slaTime − startTime`, if positive (last resort; `slaTime` is now an **optional** request field).
+4. **None** — no deadline; the run is left **ungraded** (treated ON_TIME) until history accrues.
+
+Grading at completion uses the frozen `slaTime` plus the band gap:
+
+| Actual duration vs frozen edges | Status | Breach | Severity |
+|---|---|---|---|
+| `≤ slaTime − startTime` (= buffered + lateBand) | ON_TIME | no | — |
+| `≤ buffered + veryLateBand` | LATE | yes | MEDIUM |
+| `> buffered + veryLateBand` | VERY_LATE | yes | HIGH |
+| `FAILED` / `TIMEOUT` | — | yes | CRITICAL |
+
+Defaults: `thresholdPercent=20`, `lateBand=15m`, `veryLateBand=30m`, `min-sample-size=5`. The baseline is resolved from a Redis-cached profile warmed nightly (see [Data Architecture](data-architecture.md)); the profile read does not hit the DB on a warm cache.
+
+---
+
 ## Overview
 
 | Mechanism | When it fires | What it catches |
 |-----------|--------------|-----------------|
-| **On-write evaluation** | During `completeRun()` | Runs that exceed SLA at the moment of completion reporting |
-| **Live detection job** | Every 2 minutes | Runs that never call `complete` (hung, Airflow failure) |
+| **On-write evaluation** | During `completeRun()` | Runs whose actual duration lands in the LATE/VERY_LATE band, or that FAILED/TIMED OUT |
+| **Live detection job** | Every 2 minutes | Runs that never call `complete` (hung, Airflow failure) — still RUNNING past the frozen deadline |
 
-Without the live detection job, a hung DAILY run that never calls `completeRun()` would have its SLA breach invisible to the system indefinitely.
+Without the live detection job, a hung run that never calls `completeRun()` would have its SLA breach invisible to the system indefinitely. Both DAILY and MONTHLY runs are monitored.
 
 ---
 
 ## On-Write Evaluation (`SlaEvaluationService`)
 
-Runs synchronously in the HTTP request thread during `completeRun()`.
+Runs synchronously in the HTTP request thread during `completeRun()`. Classifies the run's **actual duration** against the frozen `slaTime` edges (see the Duration-Based SLA Model above).
 
-### Checks Performed (in order, all evaluated)
+### Classification (single decision)
 
-| # | Condition | Breach Reason | Severity Logic |
-|---|-----------|---------------|---------------|
-| 1 | `endTime > slaTime` | `END_TIME_EXCEEDED` | Delay minutes: >60 → CRITICAL, >30 → HIGH, >15 → MEDIUM, ≤15 → LOW |
-| 2 | `durationMs > expectedDurationMs × 1.5` | `DURATION_EXCEEDED` | Default MEDIUM |
-| 3 | `status = FAILED or TIMEOUT` | `RUN_FAILED` | Always CRITICAL |
+| Order | Condition | Result | Severity | Breach reason |
+|---|---|---|---|---|
+| 1 | `status = FAILED or TIMEOUT` | breach | CRITICAL | `Run status: <status>` |
+| 2 | `durationMs ≤ slaTime − startTime` | ON_TIME | — | (none) |
+| 3 | `durationMs ≤ (slaTime − startTime) + bandGap` | LATE | MEDIUM | `Finished N minutes late (LATE band)` |
+| 4 | otherwise | VERY_LATE | HIGH | `Finished N minutes late (VERY_LATE band)` |
 
-Check #4 (`STILL_RUNNING_PAST_SLA`) is only emitted by the live detection job.
+`bandGap = veryLateBand − lateBand` (default 15m). When `slaTime` is `null` (ungraded run), the result is ON_TIME / no breach. The old absolute-time check and the `durationMs > expected × 1.5` check were **removed** — duration is graded once, against the derived deadline.
 
-**Multiple conditions:** All breach reasons are joined with `;`. Severity is the **highest** across all checks.
+### Deadline derivation at start (`startRun()`)
 
-Example — a run that is late AND failed:
-```
-slaBreachReason: "END_TIME_EXCEEDED;RUN_FAILED"
-severity: CRITICAL   (RUN_FAILED always wins)
-```
-
-### Start-Time Breach (during `startRun()`)
-
-For **DAILY** runs only, a 5th breach check occurs at run start:
-
-| Condition | Breach Reason |
-|-----------|---------------|
-| `startTime > slaDeadline` | `Start time exceeded SLA deadline` |
-
-The run is created in `RUNNING` status and immediately marked `slaBreached=true`. The SLA deadline is `TimeUtils.calculateSlaDeadline(reportingDate, slaTimeCet)`.
+There is **no start-time breach** in the duration model ("started late" is not a concept). At start, `SlaBaselineResolver` resolves the deadline (fallback chain above) and freezes it into `slaTime`. The run is created `RUNNING` with `slaBreached=false`.
 
 ---
 
@@ -71,9 +88,9 @@ Scheduled on the `scheduled-` thread pool.
    - run.slaBreached == true    → deregister, skip (already breached)
 
    If still RUNNING + not breached:
-   d. Calculate delay = nowEpochMs - slaEpochMs (in minutes)
-   e. runRepository.markSlaBreached(runId, "STILL_RUNNING_PAST_SLA;<delay>min", reportingDate)
-   f. Build SlaEvaluationResult with delay-based severity
+   d. Calculate delay = nowEpochMs - slaEpochMs (the frozen LATE edge)
+   e. runRepository.markSlaBreached(runId, "Still running N minutes past SLA deadline", reportingDate)
+   f. Build SlaEvaluationResult: within one bandGap past the edge → MEDIUM, beyond → HIGH
    g. eventPublisher.publishEvent(new SlaBreachedEvent(run, result))
    h. slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate)
    i. Increment counter: sla.breaches.live_detected (tagged by severity)
@@ -99,16 +116,16 @@ This is informational only — no breach event is fired for approaching runs.
 
 ## SLA Monitoring Registration
 
-Only DAILY runs with a non-null `slaTime` and no prior breach are registered:
+Any run (DAILY **or** MONTHLY) gets registered when a deadline was derived and live tracking is enabled:
 
 ```java
 // In RunIngestionService.startRun()
-if (frequency == DAILY && run.getSlaTime() != null && !run.isSlaBreached()) {
+if (liveTrackingEnabled && slaDeadline != null) {
     slaMonitoringCache.registerForSlaMonitoring(run);
 }
 ```
 
-MONTHLY runs are **never** registered. The live detection job has no frequency filter of its own — filtering is entirely upstream at registration time.
+A run with no resolvable baseline (`slaDeadline == null`) is not registered — it is ungraded until history accrues. MONTHLY monitoring is new behavior; monthly samples are sparse, so the baseline often falls back to `expectedDurationMs` (then `slaTime`) until ~13 months of history exist.
 
 ---
 
@@ -116,12 +133,11 @@ MONTHLY runs are **never** registered. The live detection job has no frequency f
 
 | Severity | Trigger Conditions |
 |----------|--------------------|
-| **LOW** | `END_TIME_EXCEEDED` with ≤ 15-minute delay |
-| **MEDIUM** | `END_TIME_EXCEEDED` 15–30 min delay; `DURATION_EXCEEDED` (always) |
-| **HIGH** | `END_TIME_EXCEEDED` 30–60 min delay |
-| **CRITICAL** | `END_TIME_EXCEEDED` > 60 min delay; `RUN_FAILED` (always) |
+| **MEDIUM** | LATE band — actual duration past the ON_TIME edge but within one band gap |
+| **HIGH** | VERY_LATE band — actual duration beyond the band gap |
+| **CRITICAL** | `FAILED` or `TIMEOUT` (always) |
 
-When multiple conditions trigger, the **highest severity wins**.
+(`LOW` is no longer produced by duration grading.) For live detection, severity is graded by minutes past the frozen deadline using the same band gap.
 
 ---
 
@@ -163,12 +179,14 @@ UPDATE sla_breach_events:
 
 ## Breach Type Enum
 
-| `BreachType` | Description |
+`AlertHandlerService` derives the persisted `breach_type` from the breach-reason string. Under the duration model the reasons are now band-based — `Run status: <status>` (FAILED/TIMEOUT), `Finished N minutes late (LATE|VERY_LATE band)` (on-write), and `Still running N minutes past SLA deadline` (live detection). The `BreachType` enum values themselves are unchanged:
+
+| `BreachType` | Meaning under the duration model |
 |-------------|-------------|
-| `END_TIME_EXCEEDED` | Run completed after SLA deadline |
-| `DURATION_EXCEEDED` | Run took > 150% of expected duration |
+| `END_TIME_EXCEEDED` | Completed in the LATE/VERY_LATE band (actual duration past the derived deadline) |
+| `DURATION_EXCEEDED` | (Legacy) — the explicit 150%-of-expected check was removed; duration is graded via the bands |
 | `RUN_FAILED` | Run completed with FAILED or TIMEOUT status |
-| `STILL_RUNNING_PAST_SLA` | Live detection: run still RUNNING after deadline |
+| `STILL_RUNNING_PAST_SLA` | Live detection: run still RUNNING after the derived deadline |
 
 ---
 
@@ -190,7 +208,14 @@ RETRYING → ?        (see TD-4: RETRYING is not retried by findUnalertedBreache
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `observability.sla.live-tracking.enabled` | `true` | Register DAILY runs in Redis SLA ZSET |
+| `observability.sla.duration-based.enabled` | `true` | Derive the deadline from avg runtime; `false` = pass request `slaTime` through unchanged |
+| `observability.sla.duration-based.threshold-percent` | `20` | Percentage buffer over the baseline |
+| `observability.sla.duration-based.late-band-minutes` | `15` | ON_TIME upper edge beyond buffered baseline (baked into `slaTime`) |
+| `observability.sla.duration-based.very-late-band-minutes` | `30` | LATE upper edge beyond buffered baseline |
+| `observability.sla.duration-based.min-sample-size` | `5` | Runs required before the historical average is trusted |
+| `observability.sla.duration-based.lookback.daily-days` | `30` | Trailing window for DAILY baselines |
+| `observability.sla.duration-based.lookback.monthly-days` | `395` | Trailing window for MONTHLY baselines |
+| `observability.sla.live-tracking.enabled` | `true` | Register runs (DAILY + MONTHLY) in the Redis SLA ZSET |
 | `observability.sla.live-detection.enabled` | `true` | Enable `LiveSlaBreachDetectionJob` |
 | `observability.sla.live-detection.interval-ms` | `120000` | Detection job interval (ms) |
 | `observability.sla.live-detection.initial-delay-ms` | `30000` | Startup delay (ms) |

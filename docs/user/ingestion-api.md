@@ -27,14 +27,17 @@ Content-Type: application/json
 | `frequency` | String | Yes | `DAILY`, `D`, `MONTHLY`, or `M` | Run frequency. Determines partition query windows and SLA behaviour. |
 | `reportingDate` | Date | Yes | `YYYY-MM-DD` | The reporting date for this run. This is the partition key — always provide it. |
 | `startTime` | Instant | Yes | ISO-8601 UTC | When the run started. Example: `2026-03-24T05:00:00Z` |
-| `slaTimeCet` | LocalTime | Yes | `HH:mm:ss` | SLA deadline expressed as a CET time-of-day. Example: `06:30:00` |
-| `expectedDurationMs` | Long | No | Positive | Expected run duration in milliseconds. Used for 150% duration breach detection. |
-| `estimatedStartTimeCet` | LocalTime | No | `HH:mm:ss` | Estimated start time in CET. Stored for display in performance cards. |
+| `slaTime` | Instant | No | ISO-8601 UTC | **Optional.** Legacy upstream deadline. The graded SLA deadline is derived from the calculator's average runtime; `slaTime` is only the weakest baseline fallback (no history, no `expectedDurationMs`). |
+| `expectedDurationMs` | Long | No | Positive | Expected run duration (ms). Used as a duration baseline when history is thin, and for the estimated-end fallback. |
+| `estimatedStartTime` | Instant | No | ISO-8601 UTC | Estimated start. If omitted, derived from the calculator's historical average start, else falls back to `startTime`. |
+| `estimatedEndTime` | Instant | No | ISO-8601 UTC | Estimated end. If omitted, derived from `start + expectedDurationMs`, else `estimatedStart + average duration`. |
+| `runNumber` / `runType` / `region` | String | No | | Promoted dimensional fields (also accepted inside `runParameters`). |
+| `correlationId` | String | No | | Marks physical splits of one logical run. |
 | `runParameters` | Object | No | Any JSON object | Arbitrary key-value metadata stored as JSONB. |
 | `additionalAttributes` | Object | No | Any JSON object | Additional run metadata stored as JSONB. |
 
 !!! info "Immutable fields"
-    `calculatorName`, `startTime`, `slaTimeCet`, `expectedDurationMs`, `estimatedStartTimeCet` are **immutable after the first insert**. Subsequent `start` calls with the same `runId` + `reportingDate` return the existing run (idempotency) — these fields are not updated.
+    `calculatorName`, `startTime`, `slaTime`, `expectedDurationMs`, `estimatedStartTime`, `estimatedEndTime` are **immutable after the first insert**. Subsequent `start` calls with the same `runId` + `reportingDate` return the existing run (idempotency) — these fields are not updated.
 
 ### Response
 
@@ -62,19 +65,9 @@ The `Location` response header is set to `/api/v1/runs/{runId}`.
 
 The start endpoint is fully idempotent. Submitting the same `(runId, reportingDate)` pair multiple times is safe — the second and subsequent calls return the existing run without modification. This handles Airflow retry scenarios transparently.
 
-### Start-Time SLA Breach Detection
+### SLA Deadline Derivation at Start
 
-For **DAILY** runs, if `startTime` is already past the computed SLA deadline, the run is immediately marked as SLA breached:
-
-```json
-{
-  "status": "RUNNING",
-  "slaBreached": true,
-  "slaBreachReason": "Start time exceeded SLA deadline"
-}
-```
-
-The run is still created and tracked; the breach is recorded in `sla_breach_events`.
+There is **no start-time breach** (duration-based model). At start the service derives the SLA deadline from the calculator's average runtime and freezes it into `slaTime`; the run is created `RUNNING` with `slaBreached=false`. Both DAILY and MONTHLY runs are registered for live monitoring when a deadline is derived. Grading happens at completion (and via live detection) against the frozen deadline. See [SLA Monitoring](sla-monitoring.md).
 
 ### cURL Example
 
@@ -90,9 +83,8 @@ curl -u admin:admin \
     "frequency": "DAILY",
     "reportingDate": "2026-03-24",
     "startTime": "2026-03-24T05:00:00Z",
-    "slaTimeCet": "06:30:00",
     "expectedDurationMs": 3600000,
-    "estimatedStartTimeCet": "05:00:00",
+    "estimatedStartTime": "2026-03-24T05:00:00Z",
     "runParameters": {
       "sourceSystem": "bloomberg",
       "assetClass": "FX"
@@ -155,7 +147,7 @@ When an SLA breach is detected:
   "endTime": "2026-03-24T07:00:00Z",
   "durationMs": 7200000,
   "slaBreached": true,
-  "slaBreachReason": "END_TIME_EXCEEDED"
+  "slaBreachReason": "Finished 22 minutes late (LATE band)"
 }
 ```
 
@@ -165,15 +157,14 @@ If the run is not in `RUNNING` status when `complete` is called, the existing ru
 
 ### SLA Evaluation
 
-SLA evaluation runs synchronously during this call. The following conditions are checked:
+SLA evaluation runs synchronously during this call. The run's **actual duration** is classified once against the frozen `slaTime` (derived at start from the calculator's average runtime):
 
-| Condition | Breach Reason | Severity Calculation |
-|-----------|---------------|---------------------|
-| `endTime > slaTime` | `END_TIME_EXCEEDED` | Delay minutes: >60 → CRITICAL, >30 → HIGH, >15 → MEDIUM, ≤15 → LOW |
-| `durationMs > expectedDurationMs × 1.5` | `DURATION_EXCEEDED` | MEDIUM |
-| `status = FAILED` or `TIMEOUT` | `RUN_FAILED` | CRITICAL |
-
-Multiple conditions can hold simultaneously. All breach reasons are joined with `;` and the highest severity wins.
+| Condition | Status | Severity |
+|-----------|--------|----------|
+| `status = FAILED` or `TIMEOUT` | breach | CRITICAL |
+| `duration ≤ slaTime − startTime` (buffered + lateBand) | ON_TIME | — |
+| `duration ≤ that + bandGap` (veryLateBand − lateBand) | LATE | MEDIUM |
+| beyond | VERY_LATE | HIGH |
 
 See [SLA Monitoring](sla-monitoring.md) for the full breach lifecycle.
 
@@ -220,7 +211,7 @@ def start_run(run_id: str, calc_id: str, reporting_date: str):
         "frequency": "DAILY",
         "reportingDate": reporting_date,
         "startTime": datetime.utcnow().isoformat() + "Z",
-        "slaTimeCet": "06:30:00"
+        "expectedDurationMs": 3600000
     }
     resp = requests.post(f"{BASE_URL}/api/v1/runs/start", json=payload, headers=HEADERS)
     resp.raise_for_status()

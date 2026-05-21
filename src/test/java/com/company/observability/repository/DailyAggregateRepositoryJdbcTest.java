@@ -1,5 +1,6 @@
 package com.company.observability.repository;
 
+import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.DailyAggregate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,7 +12,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDate;
-import java.util.Collections;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,83 +35,59 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    // Reporting dates must fall inside the partition range created by V2 (yesterday .. +60d).
+    private static final LocalDate DATE = LocalDate.now();
+
     @BeforeEach
     void clean() {
         jdbcTemplate.update("TRUNCATE TABLE calculator_sli_daily");
+        jdbcTemplate.update("TRUNCATE TABLE calculator_runs");
+    }
+
+    /** Insert one completed run into the partitioned source table. */
+    private void insertRun(String runId, String calcId, String tenant, String frequency,
+                           LocalDate reportingDate, int startMinUtc, long durationMs,
+                           String status, boolean slaBreached) {
+        OffsetDateTime start = reportingDate.atStartOfDay(ZoneOffset.UTC).toOffsetDateTime().plusMinutes(startMinUtc);
+        OffsetDateTime end = start.plusNanos(durationMs * 1_000_000L);
+        jdbcTemplate.update("""
+                INSERT INTO calculator_runs (
+                    run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
+                    start_time, end_time, duration_ms, status, sla_breached)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                runId, calcId, calcId, tenant, frequency, reportingDate,
+                start, end, durationMs, status, slaBreached);
     }
 
     // ---------------------------------------------------------------
-    // upsertDaily — insert and update
+    // recomputeForDateRange — build aggregate from source runs
     // ---------------------------------------------------------------
 
     @Test
-    void upsertDaily_insert_createsRowWithCorrectValues() {
-        LocalDate date = LocalDate.of(2026, 4, 10);
+    void recompute_buildsAggregateFromRuns() {
+        insertRun("r1", "calc-1", "tenant-1", "DAILY", DATE, 300, 100L, "SUCCESS", false);
+        insertRun("r2", "calc-1", "tenant-1", "DAILY", DATE, 360, 200L, "SUCCESS", false);
 
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", date, "SUCCESS", false, 60000L, 300, 360);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 365);
-
+        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 3);
         assertThat(results).hasSize(1);
-        DailyAggregate agg = results.get(0);
-        assertThat(agg.calculatorId()).isEqualTo("calc-1");
-        assertThat(agg.tenantId()).isEqualTo("tenant-1");
-        assertThat(agg.reportingDate()).isEqualTo(date);
-        assertThat(agg.totalRuns()).isEqualTo(1);
-        assertThat(agg.successRuns()).isEqualTo(1);
-        assertThat(agg.slaBreaches()).isZero();
-        assertThat(agg.avgDurationMs()).isEqualTo(60000L);
+        assertThat(results.get(0).totalRuns()).isEqualTo(2);
+        assertThat(results.get(0).sumDurationMs()).isEqualTo(300L);
+        assertThat(results.get(0).avgDurationMs()).isEqualTo(150L);
     }
 
     @Test
-    void upsertDaily_secondUpsert_accumulatesSumsAndComputesCorrectAverage() {
-        // TD-3 fixed: sums are accumulated atomically; average is computed at read time.
-        LocalDate date = LocalDate.of(2026, 4, 10);
+    void recompute_isIdempotent() {
+        insertRun("r1", "calc-1", "tenant-1", "DAILY", DATE, 300, 100L, "SUCCESS", false);
 
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", date, "SUCCESS", false, 100L, 300, 360);
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", date, "SUCCESS", false, 200L, 300, 360);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 365);
-
+        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 3);
         assertThat(results).hasSize(1);
-        DailyAggregate agg = results.get(0);
-        assertThat(agg.totalRuns()).isEqualTo(2);
-        assertThat(agg.successRuns()).isEqualTo(2);
-        // sumDurationMs = 100 + 200 = 300; avgDurationMs() = 300 / 2 = 150
-        assertThat(agg.avgDurationMs()).isEqualTo(150L);
-    }
-
-    // ---------------------------------------------------------------
-    // findRecentAggregates — day-window filtering
-    // ---------------------------------------------------------------
-
-    @Test
-    void findRecentAggregates_filtersByDayWindow() {
-        LocalDate today = LocalDate.now();
-        // day-1 and day-5 fall within a 7-day window; day-10 is outside it
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", today.minusDays(1), "SUCCESS", false, 1000L, 300, 360);
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", today.minusDays(5), "SUCCESS", false, 2000L, 300, 360);
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", today.minusDays(10), "SUCCESS", false, 3000L, 300, 360);
-
-        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 7);
-
-        assertThat(results).hasSize(2);
-        // Results are ordered descending — most recent first
-        assertThat(results.get(0).reportingDate()).isEqualTo(today.minusDays(1));
-        assertThat(results.get(1).reportingDate()).isEqualTo(today.minusDays(5));
-    }
-
-    // ---------------------------------------------------------------
-    // findByReportingDates — empty-input guard
-    // ---------------------------------------------------------------
-
-    @Test
-    void findByReportingDates_emptyInput_returnsEmptyListWithoutException() {
-        // Guard clause in the repository returns early — no SQL issued, no exception thrown
-        List<DailyAggregate> result = repository.findByReportingDates(
-                "calc-1", "tenant-1", Collections.emptyList());
-
-        assertThat(result).isEmpty();
+        assertThat(results.get(0).totalRuns()).isEqualTo(1);
     }
 
     // ---------------------------------------------------------------
@@ -117,32 +95,27 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     // ---------------------------------------------------------------
 
     @Test
-    void upsertDaily_separatesByFrequency_evenOnSharedMonthEndDate() {
-        // A DAILY run and a MONTHLY run can both land on a month-end reporting date.
-        LocalDate monthEnd = LocalDate.of(2026, 4, 30);
+    void findProfile_separatesByFrequency_evenOnSharedDate() {
+        insertRun("d1", "calc-1", "tenant-1", "DAILY", DATE, 300, 100L, "SUCCESS", false);
+        insertRun("m1", "calc-1", "tenant-1", "MONTHLY", DATE, 300, 500L, "SUCCESS", false);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", monthEnd, "SUCCESS", false, 100L, 300, 360);
-        repository.upsertDaily("calc-1", "tenant-1", "MONTHLY", monthEnd, "SUCCESS", false, 500L, 300, 360);
-
-        DailyAggregateRepository.AverageDuration daily =
-                repository.findAverageDuration("calc-1", "tenant-1", "DAILY", 3650);
-        DailyAggregateRepository.AverageDuration monthly =
-                repository.findAverageDuration("calc-1", "tenant-1", "MONTHLY", 3650);
+        CalculatorProfile daily = repository.findProfile("calc-1", "tenant-1", "DAILY", 3);
+        CalculatorProfile monthly = repository.findProfile("calc-1", "tenant-1", "MONTHLY", 3);
 
         assertThat(daily.totalRuns()).isEqualTo(1);
-        assertThat(daily.sumDurationMs()).isEqualTo(100L);
+        assertThat(daily.avgDurationMs()).isEqualTo(100L);
         assertThat(monthly.totalRuns()).isEqualTo(1);
-        assertThat(monthly.sumDurationMs()).isEqualTo(500L);
+        assertThat(monthly.avgDurationMs()).isEqualTo(500L);
     }
 
     @Test
-    void findRecentAggregates_collapsesAcrossFrequencyIntoOneRowPerDate() {
-        LocalDate date = LocalDate.now().minusDays(1);
+    void findRecentAggregates_collapsesAcrossFrequency() {
+        insertRun("d1", "calc-1", "tenant-1", "DAILY", DATE, 300, 100L, "SUCCESS", false);
+        insertRun("m1", "calc-1", "tenant-1", "MONTHLY", DATE, 300, 500L, "SUCCESS", false);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        repository.upsertDaily("calc-1", "tenant-1", "DAILY", date, "SUCCESS", false, 100L, 300, 360);
-        repository.upsertDaily("calc-1", "tenant-1", "MONTHLY", date, "SUCCESS", false, 500L, 300, 360);
-
-        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 7);
+        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 3);
 
         assertThat(results).hasSize(1);
         assertThat(results.get(0).totalRuns()).isEqualTo(2);
@@ -150,11 +123,24 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     }
 
     @Test
-    void findAverageDuration_noRows_returnsZeroes() {
-        DailyAggregateRepository.AverageDuration result =
-                repository.findAverageDuration("missing", "tenant-1", "DAILY", 30);
+    void findAllProfiles_returnsOneProfilePerCalculatorForFrequency() {
+        insertRun("a1", "calc-A", "tenant-1", "DAILY", DATE, 300, 100L, "SUCCESS", false);
+        insertRun("a2", "calc-A", "tenant-1", "DAILY", DATE, 360, 300L, "SUCCESS", false);
+        insertRun("b1", "calc-B", "tenant-1", "DAILY", DATE, 300, 50L, "SUCCESS", false);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
+
+        List<CalculatorProfile> profiles = repository.findAllProfiles("DAILY", 3);
+
+        assertThat(profiles).hasSize(2);
+        assertThat(profiles).extracting(CalculatorProfile::calculatorId)
+                .containsExactlyInAnyOrder("calc-A", "calc-B");
+    }
+
+    @Test
+    void findProfile_noRows_returnsZeroSampleProfile() {
+        CalculatorProfile result = repository.findProfile("missing", "tenant-1", "DAILY", 30);
 
         assertThat(result.totalRuns()).isZero();
-        assertThat(result.sumDurationMs()).isZero();
+        assertThat(result.avgDurationMs()).isZero();
     }
 }

@@ -29,6 +29,7 @@ On any Redis failure, all reads fall back to PostgreSQL transparently. Redis wri
 | `obs:analytics:{prefix}:{calcId}:{tenantId}:{days}` | String (JSON) | 5m | Analytics responses without frequency dimension |
 | `obs:analytics:{prefix}:{calcId}:{tenantId}:{freq}:{days}` | String (JSON) | 5m | Analytics responses with frequency dimension |
 | `obs:analytics:index:{calcId}:{tenantId}` | Set | 1h | Tracks all analytics keys for bulk invalidation |
+| `obs:profile:{calcId}:{tenantId}:{frequency}` | String (JSON) | 26h / 60m | Cached `CalculatorProfile` (avg duration + avg start/end minute). 26h when samples exist; 60m "empty" sentinel otherwise |
 | `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` | String (JSON) | 24h | 7-day regional batch timing history — immutable once written |
 | `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 24h | Run-number-scoped history variant |
 | `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` | String (JSON) | 30s–4h | Full `RegionalBatchStatusResponse` — smart TTL |
@@ -90,7 +91,7 @@ On any Redis failure, all reads fall back to PostgreSQL transparently. Redis wri
 
 **Purpose:** Enables `LiveSlaBreachDetectionJob` to efficiently find runs whose SLA deadline has passed without querying the DB on every poll cycle.
 
-**Write path (on `startRun()`):** Condition: `frequency == DAILY AND slaTime != null AND not already breached`
+**Write path (on `startRun()`):** Condition: `liveTrackingEnabled AND slaDeadline != null` (DAILY **and** MONTHLY; `slaDeadline` is the duration-derived deadline frozen into `slaTime`)
 ```
 ZADD obs:sla:deadlines slaEpochMs {tenantId}:{runId}:{reportingDate}
 HSET obs:sla:run_info {runKey} {json}
@@ -143,6 +144,20 @@ Both keys have a 24-hour TTL.
 | `/sla-summary` | `obs:analytics:sla-summary:` |
 | `/trends` | `obs:analytics:trends:` |
 | `/run-performance` | `obs:analytics:run-perf:` |
+
+---
+
+### `obs:profile:*` — Calculator Profile Cache
+
+**Purpose:** Serves slowly-changing per-calculator rolling profiles (avg duration + avg start/end minute) so the run-start hot path resolves the SLA baseline and estimated start/end from Redis instead of querying the DB on every `/runs/start`.
+
+**Managed by:** `CalculatorProfileService` (cache-aside).
+- **Read:** `getProfile(calcId, tenantId, frequency)` → `GET obs:profile:{calcId}:{tenantId}:{freq}`; on miss, reads `calculator_sli_daily` once via `findProfile(...)` and caches the result.
+- **Warm:** the nightly `DailyAggregationJob` recomputes the aggregate and calls `warm(profile)` for every active calculator (one `findAllProfiles` query per frequency).
+- **TTL:** `profile-cache-ttl-hours` (default 26h) for profiles with samples; `empty-profile-cache-ttl-minutes` (default 60m) for the zero-sample sentinel so newly-active calculators are picked up sooner.
+- **Resilience:** Redis errors degrade to a DB read and never throw (same posture as the analytics cache).
+
+Consumers: `SlaBaselineResolver` (avg duration → baseline), `RunIngestionService` (estimated start/end fallback), `AnalyticsService` (`/executions` envelope reference lines).
 
 ---
 

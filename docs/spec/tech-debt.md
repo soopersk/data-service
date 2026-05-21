@@ -10,7 +10,7 @@ This page documents known limitations and technical debt items. Each item includ
 |----|---------|------|--------|
 | [TD-1](#td-1-findbyidstring-full-partition-scan) | `findById(String)` — no `reporting_date`, full scan ~455 partitions | 🔴 High perf | Open |
 | [TD-2](#td-2-orphaned-postgresql-function) | `cleanup_expired_idempotency_keys()` references dropped table | 🟡 Runtime error if called | Open |
-| [TD-3](#td-3-daily-aggregate-running-average-concurrency-unsafe) | `upsertDaily()` running average not concurrency-safe | 🟡 Inaccurate analytics under parallelism | Open |
+| [TD-3](#td-3-daily-aggregate-running-average-concurrency-unsafe) | `upsertDaily()` running average not concurrency-safe | 🟡 Inaccurate analytics under parallelism | ✅ Resolved (sum-based + nightly recompute) |
 | [TD-4](#td-4-retrying-alert-status-not-retried) | `RETRYING` alert status excluded from retry query | 🟡 Silent alert loss | Open |
 | [TD-5](#td-5-slabreachevent-fields-are-untyped-strings) | `SlaBreachEvent` breach_type/severity/alertStatus stored as raw String | 🟡 No Java type safety | Open |
 | [TD-6](#td-6-calculatorfrequencylookbackdays-is-dead-code) | `CalculatorFrequency.lookbackDays` is dead code (never used in queries) | 🟡 Latent bug if ever used | Open |
@@ -68,27 +68,16 @@ The function is not called by any Java code, but its presence is misleading and 
 
 ---
 
-## TD-3: Daily Aggregate Running Average — Concurrency Unsafe
+## TD-3: Daily Aggregate Running Average — Concurrency Unsafe ✅ RESOLVED
 
-**Risk:** 🟡 Inaccurate analytics under parallelism
+**Status:** Resolved.
 
-**Affected files:** `DailyAggregateRepository.upsertDaily()`
+**Resolution:** Two changes removed the hazard entirely:
 
-**Description:**
+1. `calculator_sli_daily` stores **sums** (`sum_duration_ms`, `sum_start_min_utc`, `sum_end_min_utc`, `total_runs`); averages are computed at read time (`sum / total`) — the recommended option B.
+2. The aggregate is no longer written per completion. `RunIngestionService.updateDailyAggregate()` and `DailyAggregateRepository.upsertDaily()` were removed; the table is rebuilt by the nightly `DailyAggregationJob` via an idempotent single-writer `recomputeForDateRange()` (DELETE + `INSERT … SELECT … GROUP BY`). With one writer and wholesale recompute, there is no concurrent running-average update.
 
-The running-average upsert uses:
-
-```sql
-avg_duration_ms = (avg_duration_ms * total_runs + EXCLUDED.avg_duration_ms) / (total_runs + 1)
-```
-
-Under concurrent upserts for the same `(calculatorId, tenantId, day_cet)`, `total_runs` in the denominator is the pre-increment value read at the start of the SQL execution. Two concurrent completions for the same calculator on the same day will both use the same `total_runs` value, producing a slightly wrong average.
-
-**Impact:** Non-critical (analytics data, not financial). Inaccuracy is bounded and proportional to degree of parallelism.
-
-**Recommended fix (option A):** Use PostgreSQL advisory locks to serialize upserts for the same key.
-
-**Recommended fix (option B):** Store `sum_duration_ms` and `total_runs` separately. Compute the average at read time: `avg = sum / total`. This is naturally concurrent-safe.
+See [data-architecture.md](data-architecture.md#daily-aggregate-build-flow-end-of-day-batch).
 
 ---
 

@@ -84,9 +84,12 @@ Records a calculator run start. Returns `201 Created` for new runs, `200 OK` for
 | `frequency` | String | Yes | `DAILY`/`D` or `MONTHLY`/`M` |
 | `reportingDate` | Date | Yes | `YYYY-MM-DD` — partition key |
 | `startTime` | Instant | Yes | UTC. Example: `2026-03-24T05:00:00Z` |
-| `slaTimeCet` | LocalTime | Yes | CET time-of-day. Example: `06:30:00` |
-| `expectedDurationMs` | Long | No | For 150% duration breach detection |
-| `estimatedStartTimeCet` | LocalTime | No | CET estimated start for display |
+| `slaTime` | Instant | No | UTC. **Optional** — only used as the weakest baseline fallback (no history, no `expectedDurationMs`). The graded deadline is derived from avg runtime |
+| `expectedDurationMs` | Long | No | Duration baseline used when history is thin; also drives the estimated-end fallback |
+| `estimatedStartTime` | Instant | No | UTC. If omitted, derived from the calculator's historical avg start, else falls back to `startTime` |
+| `estimatedEndTime` | Instant | No | UTC. If omitted, derived from `start + expectedDurationMs`, else `estimatedStart + avg duration` |
+| `runNumber` / `runType` / `region` | String | No | Promoted dimensional fields (also accepted inside `runParameters`) |
+| `correlationId` | String | No | Marks physical splits of one logical run |
 | `runParameters` | Object | No | Stored as JSONB |
 | `additionalAttributes` | Object | No | Stored as JSONB |
 
@@ -254,6 +257,7 @@ Dimensional run state for a set of calculators on a specific reporting date. Pow
 - `runs` is an **empty list** when no run exists for that calculator on the given date.
 - `region` and `runType` are mutually exclusive per calculator (one or neither, never both).
 - `isRerun: true` means a re-trigger occurred for that specific dimensional run; UI typically renders the dimension label with a `*` suffix.
+- `estimatedStartTime` / `estimatedEndTime` / `sla` are the run's stored values, set at start by precedence **request → cached profile (avg start / avg duration) → computed**. `sla` is the duration-derived deadline, not an upstream wall-clock time.
 - Null run-entry fields are omitted from JSON (`@JsonInclude(NON_NULL)`).
 
 ---
@@ -377,7 +381,9 @@ Raw run-by-run execution history. Distinct from `/run-performance` in two ways:
 
 **Response `200 OK`**, `Cache-Control: max-age=60, private`:
 
-Same shape as `/run-performance` (`RunPerformanceData`). The envelope's `calculatorId` and `calculatorName` fields both carry the readable name — no UUID leak, because the lookup is by name. Each `RunDataPoint` includes `expectedDurationMs` (immutable, set at first INSERT) alongside actual `durationMs` for variance comparison.
+Same shape as `/run-performance` (`RunPerformanceData`). The envelope's `calculatorId` and `calculatorName` fields both carry the readable name — no UUID leak, because the lookup is by name. Each `RunDataPoint` includes `expectedDurationMs` (immutable, set at first INSERT) alongside actual `durationMs` for variance comparison, plus its own `estimatedStartTime` / `slaTime`.
+
+**Envelope reference lines (`estimatedStartTime`, `slaTime`):** the two top-level fields are chart reference lines sourced from the calculator's cached **profile** — the typical (historical-average) start and a typical buffered deadline (`avgDuration × (1 + thresholdPercent) + lateBand`) — so they stay stable across the window. When the calculator has fewer than `min-sample-size` runs, they fall back to the most recent run's stored values. Per-run rows are live from `calculator_runs`; the envelope reference lines come from the profile cache (warmed nightly).
 
 **Example:**
 ```bash

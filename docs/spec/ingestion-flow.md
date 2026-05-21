@@ -16,35 +16,33 @@ Called by `RunIngestionService.startRun()` from `POST /api/v1/runs/start`.
 2. MONTHLY validation:
    → Warn (non-blocking) if reportingDate is not the last day of the month
 
-3. Compute SLA deadline (DAILY only):
-   slaDeadline = TimeUtils.calculateSlaDeadline(reportingDate, slaTimeCet)
-   → CET time-of-day + reporting date + DST offset = UTC TIMESTAMPTZ
+3. Fetch the cached calculator profile (Redis cache-aside, no DB on warm cache):
+   profile = calculatorProfileService.getProfile(calculatorId, tenantId, frequency)
 
-4. Start-time breach check (DAILY only):
-   IF startTime > slaDeadline:
-     run.slaBreached = true
-     run.slaBreachReason = "Start time exceeded SLA deadline"
+4. Resolve & freeze the SLA deadline (DAILY and MONTHLY):
+   slaDeadline = slaBaselineResolver.resolveDeadline(request, frequency, profile)
+   → baseline (avg duration | expectedDurationMs | slaTime budget | none)
+   → slaDeadline = startTime + baseline×(1+thresholdPercent) + lateBand, or null (ungraded)
+   There is NO start-time breach in the duration model.
 
-5. Build CalculatorRun domain object (status = RUNNING)
+5. Resolve estimated start/end (precedence: request → profile → computed):
+   estimatedStartTime = request.estimatedStartTime
+                        ?? profile avg start (anchored to start date) ?? startTime
+   estimatedEndTime   = request.estimatedEndTime
+                        ?? (start + expectedDurationMs) ?? (estimatedStart + profile avg duration) ?? null
 
-6. DB write: runRepository.upsert(run)
+6. Build CalculatorRun domain object (status = RUNNING, slaBreached = false)
+
+7. DB write: runRepository.upsert(run)
    → INSERT ... ON CONFLICT (run_id, reporting_date) DO UPDATE
-   → Only mutable fields updated on conflict (start/sla/name are immutable)
+   → Only mutable fields updated on conflict (start/sla/name/estimated* are immutable)
 
-7. SLA monitoring registration:
-   Condition: frequency == DAILY AND slaTime != null AND not breached
+8. SLA monitoring registration:
+   Condition: liveTrackingEnabled AND slaDeadline != null   (DAILY and MONTHLY)
    slaMonitoringCache.registerForSlaMonitoring(run)
    → ZADD obs:sla:deadlines <slaEpochMs> {tenantId}:{runId}:{reportingDate}
    → HSET obs:sla:run_info {runKey} {json metadata}
    (both keys: 24h TTL)
-
-8. If breached at start → publish SlaBreachedEvent(run, result)
-   (async AFTER_COMMIT — steps 8a–8d run after the DB transaction commits)
-   8a. AlertHandlerService: build SlaBreachEvent record
-   8b. INSERT into sla_breach_events (DuplicateKeyException → logged, skipped)
-   8c. Log WARN alert message
-   8d. UPDATE sla_breach_events: alerted=true, alerted_at=now, alert_status='SENT'
-   8e. AnalyticsCacheService: invalidate obs:analytics:* keys for this calculator
 
 9. publish RunStartedEvent(run)
    (async AFTER_COMMIT)
@@ -84,12 +82,13 @@ Called by `RunIngestionService.completeRun()` from `POST /api/v1/runs/{runId}/co
 6. Resolve completion status:
    RunStatus.fromCompletionStatus(request.status) → defaults to SUCCESS if null/blank
 
-7. SLA evaluation: SlaEvaluationService.evaluateSla(run, endTime, status)
-   Checks (in order, ALL conditions evaluated):
-   a. endTime > slaTime             → END_TIME_EXCEEDED    (delay-based severity)
-   b. durationMs > expected * 1.5  → DURATION_EXCEEDED     (MEDIUM)
-   c. status = FAILED or TIMEOUT    → RUN_FAILED           (CRITICAL)
-   Returns SlaEvaluationResult(breached, combinedReason, highestSeverity)
+7. SLA evaluation: SlaEvaluationService.evaluateSla(run)
+   Duration-band classification against the frozen slaTime:
+   a. status = FAILED or TIMEOUT                       → CRITICAL breach
+   b. durationMs ≤ (slaTime − startTime)               → ON_TIME (no breach)
+   c. durationMs ≤ (slaTime − startTime) + bandGap     → LATE  (MEDIUM breach)
+   d. otherwise                                        → VERY_LATE (HIGH breach)
+   (slaTime null → ungraded → ON_TIME). Returns SlaEvaluationResult(breached, reason, severity)
 
 8. Apply SLA result to run object:
    run.slaBreached = result.breached
@@ -107,10 +106,8 @@ Called by `RunIngestionService.completeRun()` from `POST /api/v1/runs/{runId}/co
     → ZREM obs:sla:deadlines {runKey}
     → HDEL obs:sla:run_info {runKey}
 
-11. Update daily aggregate:
-    dailyAggregateRepository.upsertDaily(run)
-    → Increments total_runs, success_runs (if SUCCESS), sla_breaches (if breached)
-    → Recalculates running averages: avg_duration_ms, avg_start_min_cet, avg_end_min_cet
+11. (No daily-aggregate write here.) calculator_sli_daily is rebuilt by the nightly
+    DailyAggregationJob, not on each completion. See Data Architecture.
 
 12. Publish event (async AFTER_COMMIT):
     IF sla_breached:
@@ -148,10 +145,10 @@ sequenceDiagram
         Repositories-->>RunIngestionService: existing run
         RunIngestionService-->>Airflow: 200 OK (existing)
     else New run
+        RunIngestionService->>Redis: getProfile (cache-aside)
         RunIngestionService->>Repositories: upsert(run)
-        RunIngestionService->>Redis: ZADD sla:deadlines
-        alt Start-time breach
-            RunIngestionService-->>AlertHandler: publish SlaBreachedEvent (async)
+        alt slaDeadline derived
+            RunIngestionService->>Redis: ZADD sla:deadlines
         end
         RunIngestionService-->>AlertHandler: publish RunStartedEvent (async)
         AlertHandler->>Redis: evict + warm cache
@@ -165,7 +162,6 @@ sequenceDiagram
     SlaEvaluationService-->>RunIngestionService: SlaEvaluationResult
     RunIngestionService->>Repositories: upsert(run)
     RunIngestionService->>Redis: ZREM sla:deadlines
-    RunIngestionService->>Repositories: upsertDaily()
     alt SLA Breached
         RunIngestionService-->>AlertHandler: publish SlaBreachedEvent (async)
         AlertHandler->>Repositories: INSERT sla_breach_events

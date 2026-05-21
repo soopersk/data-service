@@ -20,6 +20,9 @@ Cache invalidation:
 - Run completed: evict all analytics cache keys for calculator+tenant
 - SLA breached: evict all analytics cache keys for calculator+tenant
 
+!!! note "End-of-day freshness"
+    The aggregate-backed endpoints — `/runtime`, `/sla-summary`, `/trends` — read from `calculator_sli_daily`, which is now rebuilt by a **nightly batch** (`DailyAggregationJob`) rather than on every run completion. They therefore reflect data **through the last completed day**; the current day's runs appear after the next nightly run. Live, per-run views (`/run-performance`, `/executions`, and the query API) read raw `calculator_runs` and are unaffected.
+
 ---
 
 ## GET /api/v1/analytics/calculators/{calculatorId}/runtime
@@ -162,8 +165,15 @@ Response shape is identical to `/run-performance` (same `RunPerformanceData` env
 - `expectedDurationMs` — configured expected duration (immutable, set at first INSERT); use for actual-vs-expected variance comparison
 - `runNumber` — `"1"` or `"2"` (string, matches the DB column type)
 - `subRunIds` — always `null` on this endpoint (no grouping)
+- `estimatedStartTime` / `slaTime` — this run's own estimated start and duration-derived SLA deadline
 
-Cache: `max-age=60, private`.
+#### Envelope reference lines (`estimatedStartTime`, `slaTime`)
+
+The two **top-level** fields are chart reference lines for the performance card (a "typical start" line and an "SLA" line). They are sourced from the calculator's cached daily **profile** — the typical start (historical average start-of-day) and a typical buffered deadline (`avgDuration × (1 + thresholdPercent) + lateBand`) — so the lines stay stable across the window instead of tracking one run.
+
+If the calculator has insufficient history (fewer than `min-sample-size` runs), the envelope falls back to the **most recent run's** stored `estimatedStartTime` / `slaTime`. Per-run values in each `RunDataPoint` are always that run's own.
+
+Cache: `max-age=60, private`. The per-run rows come from raw `calculator_runs` (live); the envelope reference lines come from the profile cache (refreshed nightly).
 
 ### cURL Example
 

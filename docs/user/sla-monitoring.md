@@ -4,21 +4,23 @@ The Observability Service provides two independent SLA breach detection mechanis
 
 ---
 
-## How SLA Time Works
+## How SLA Time Works (duration-based)
 
-When you call `POST /runs/start`, you provide a `slaTimeCet` field — the SLA deadline expressed as a time-of-day in CET (Central European Time):
+The SLA deadline is **derived from each calculator's own average runtime**, not from an absolute time you supply. At `POST /runs/start` the service resolves a baseline duration and freezes a deadline into the `sla_time` column:
 
-```json
-{
-  "slaTimeCet": "06:30:00",
-  "reportingDate": "2026-03-24"
-}
+```
+baseline  = avg runtime (cached profile)  ▸ else expectedDurationMs  ▸ else (slaTime − startTime)
+slaTime   = startTime + baseline × (1 + thresholdPercent) + lateBand
 ```
 
-The service computes the UTC SLA deadline by combining the reporting date and the CET time, accounting for DST. This deadline is stored in the `sla_time` column and used for all subsequent breach evaluation.
+- `slaTime` (in the start request) is now **optional** — it is only used as a last-resort baseline if there is no history and no `expectedDurationMs`.
+- `expectedDurationMs` (optional) is a good per-run baseline when history is thin.
+- If none of these are available, the run is left **ungraded** (treated ON_TIME) until enough history accrues.
 
-!!! info "DAILY only"
-    Live SLA monitoring applies to **DAILY** runs only. MONTHLY runs are evaluated on-write when `complete` is called, but are not registered in the Redis SLA monitoring set for live detection.
+A run is graded at completion by comparing its **actual duration** to the frozen deadline plus grace bands (defaults: 20% buffer, 15-minute LATE band, 30-minute VERY_LATE band).
+
+!!! info "DAILY and MONTHLY"
+    Both DAILY and MONTHLY runs are graded and registered for live monitoring (whenever a deadline was derived). MONTHLY history is sparse, so monthly baselines often fall back to `expectedDurationMs` until ~13 months of history exist.
 
 ---
 
@@ -26,23 +28,18 @@ The service computes the UTC SLA deadline by combining the reporting date and th
 
 ### 1. On-Write Evaluation
 
-Runs synchronously during `POST /runs/start` and `POST /runs/{runId}/complete`.
+Runs synchronously during `POST /runs/{runId}/complete`. (There is **no start-time breach** — "started late" is not a concept in the duration model. The deadline is simply derived and frozen at start.)
 
-**During `start`:**
+**During `complete`** — the actual duration is classified once against the frozen deadline:
 
-| Condition | Breach Reason | When it triggers |
-|-----------|---------------|-----------------|
-| `startTime > slaDeadline` | Start time exceeded SLA deadline | Run started so late it cannot finish by SLA |
+| Condition | Status | Severity |
+|-----------|--------|----------|
+| `status = FAILED` or `TIMEOUT` | breach | CRITICAL |
+| `duration ≤ buffered + lateBand` | ON_TIME | — |
+| `duration ≤ buffered + veryLateBand` | LATE | MEDIUM |
+| `duration > buffered + veryLateBand` | VERY_LATE | HIGH |
 
-**During `complete`:**
-
-| Condition | Breach Reason | Severity |
-|-----------|---------------|----------|
-| `endTime > slaTime` | `END_TIME_EXCEEDED` | Scaled by delay minutes |
-| `durationMs > expectedDurationMs × 1.5` | `DURATION_EXCEEDED` | MEDIUM |
-| `status = FAILED` or `TIMEOUT` | `RUN_FAILED` | CRITICAL |
-
-Multiple conditions can trigger simultaneously. All breach reasons are concatenated with `;` and the highest severity is used.
+(`buffered = baseline × (1 + thresholdPercent)`; the deadline frozen into `slaTime` is `startTime + buffered + lateBand`.)
 
 ### 2. Live Detection Job
 
@@ -63,14 +60,13 @@ A separate check identifies runs approaching their SLA within the next 10 minute
 
 ## Severity Levels
 
-| Severity | `END_TIME_EXCEEDED` / `STILL_RUNNING_PAST_SLA` | `RUN_FAILED` | `DURATION_EXCEEDED` |
-|----------|------------------------------------------------|--------------|---------------------|
-| **LOW** | Delay ≤ 15 minutes | — | — |
-| **MEDIUM** | Delay 15–30 minutes | — | Always MEDIUM |
-| **HIGH** | Delay 30–60 minutes | — | — |
-| **CRITICAL** | Delay > 60 minutes | Always CRITICAL | — |
+| Severity | Trigger |
+|----------|---------|
+| **MEDIUM** | LATE band — duration past the ON_TIME edge but within one band gap (`veryLateBand − lateBand`) |
+| **HIGH** | VERY_LATE band — duration beyond the band gap |
+| **CRITICAL** | `FAILED` or `TIMEOUT` (always) |
 
-When multiple breach conditions trigger, the **highest severity wins**.
+Live detection grades a still-running breach the same way: within one band gap past the deadline → MEDIUM, beyond → HIGH.
 
 ---
 
@@ -90,9 +86,9 @@ The `sla-summary` and `trends` endpoints classify each day using a traffic light
 
 | Status | Meaning |
 |--------|---------|
-| `SLA_MET` | Run completed within the SLA deadline |
-| `LATE` | Breach with severity LOW or MEDIUM |
-| `VERY_LATE` | Breach with severity HIGH or CRITICAL |
+| `ON_TIME` | Duration within the ON_TIME edge (no breach) |
+| `LATE` | LATE band — breach with severity MEDIUM |
+| `VERY_LATE` | VERY_LATE band — breach with severity HIGH (or CRITICAL for FAILED/TIMEOUT) |
 
 ---
 
@@ -158,7 +154,12 @@ curl -u admin:admin -H "X-Tenant-Id: acme-corp" \
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `observability.sla.live-tracking.enabled` | `true` | Register DAILY runs in Redis SLA monitoring |
+| `observability.sla.duration-based.enabled` | `true` | Derive the deadline from avg runtime (`false` = use request `slaTime` as-is) |
+| `observability.sla.duration-based.threshold-percent` | `20` | Buffer over the baseline |
+| `observability.sla.duration-based.late-band-minutes` | `15` | ON_TIME upper edge |
+| `observability.sla.duration-based.very-late-band-minutes` | `30` | LATE upper edge |
+| `observability.sla.duration-based.min-sample-size` | `5` | Runs before the average is trusted |
+| `observability.sla.live-tracking.enabled` | `true` | Register runs (DAILY + MONTHLY) in Redis SLA monitoring |
 | `observability.sla.live-detection.enabled` | `true` | Enable the live detection job |
 | `observability.sla.live-detection.interval-ms` | `120000` (2 min) | How often the detection job runs |
 | `observability.sla.early-warning.enabled` | `true` | Enable the early warning check |

@@ -288,19 +288,20 @@ CREATE TABLE calculator_runs (
 CREATE TABLE calculator_sli_daily (
     calculator_id     VARCHAR(100)  NOT NULL,
     tenant_id         VARCHAR(50)   NOT NULL,
-    day_cet           DATE          NOT NULL,
+    frequency         VARCHAR(10)   NOT NULL DEFAULT 'DAILY',  -- V8
+    reporting_date    DATE          NOT NULL,
     total_runs        INT           DEFAULT 0,
     success_runs      INT           DEFAULT 0,
     sla_breaches      INT           DEFAULT 0,
-    avg_duration_ms   BIGINT        DEFAULT 0,
-    avg_start_min_cet INT           DEFAULT 0,   -- minutes since midnight CET, 0-1439
-    avg_end_min_cet   INT           DEFAULT 0,
+    sum_duration_ms   BIGINT        DEFAULT 0,   -- SUM (avg computed at read time)
+    sum_start_min_utc BIGINT        DEFAULT 0,   -- minutes since midnight UTC, summed
+    sum_end_min_utc   BIGINT        DEFAULT 0,
     computed_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (calculator_id, tenant_id, day_cet)
+    PRIMARY KEY (calculator_id, tenant_id, frequency, reporting_date)  -- 4-col (V8)
 );
 ```
 
-Not partitioned. Aggregates are computed incrementally via running-average upsert on every run completion. `day_cet` is the CET calendar day (not UTC).
+Not partitioned. Stores **sums** (averages computed at read time) and is **frequency-aware**. Rebuilt by the nightly `DailyAggregationJob` (idempotent recompute from `calculator_runs`), **not** on every completion. `reporting_date` is the business date (UTC-aligned); start/end minutes are UTC.
 
 #### Table: `sla_breach_events`
 
@@ -351,7 +352,7 @@ CREATE TABLE sla_breach_events (
 | `calculator_runs_sla_idx` | `calculator_runs` | `(sla_time, status) WHERE status='RUNNING' AND sla_time IS NOT NULL` | BTREE (partial) | SLA deadline queries |
 | `calculator_runs_frequency_idx` | `calculator_runs` | `(frequency, reporting_date DESC)` | BTREE | Frequency-specific scans |
 | `calculator_runs_tenant_calculator_frequency_idx` | `calculator_runs` | `(tenant_id, calculator_id, frequency, reporting_date DESC, created_at DESC)` | BTREE | Batch status queries (V12) |
-| `idx_calculator_sli_daily_recent` | `calculator_sli_daily` | `(calculator_id, tenant_id, day_cet DESC)` | BTREE | Recent aggregates queries |
+| `idx_calculator_sli_daily_recent` | `calculator_sli_daily` | `(calculator_id, tenant_id, reporting_date DESC)` | BTREE | Frequency-agnostic aggregate reads (4-col PK index covers frequency-scoped profile reads) |
 | `sla_breach_events_tenant_calculator_created_idx` | `sla_breach_events` | `(tenant_id, calculator_id, created_at DESC, breach_id DESC)` | BTREE | Keyset pagination without severity |
 | `sla_breach_events_tenant_calculator_severity_created_idx` | `sla_breach_events` | `(tenant_id, calculator_id, severity, created_at DESC, breach_id DESC)` | BTREE | Keyset pagination with severity |
 | `idx_sla_breach_events_unalerted` | `sla_breach_events` | `(created_at) WHERE alerted=false` | BTREE (partial) | Alert retry queries |
@@ -554,9 +555,10 @@ Validation errors (field-level):
 | `frequency` | CalculatorFrequency | `@NotNull` | `DAILY`/`D` or `MONTHLY`/`M` |
 | `reportingDate` | LocalDate | `@NotNull` | Partition key — must always be provided |
 | `startTime` | Instant | `@NotNull` | UTC; example: `2026-02-06T23:22:32Z` |
-| `slaTimeCet` | LocalTime | `@NotNull` | CET time-of-day for SLA deadline; example: `06:15:00` |
-| `expectedDurationMs` | Long | optional | Used for >150% duration breach detection |
-| `estimatedStartTimeCet` | LocalTime | optional | |
+| `slaTime` | Instant | optional | UTC. Weakest baseline fallback only — the graded deadline is derived from avg runtime |
+| `expectedDurationMs` | Long | optional | Duration baseline when history is thin; drives estimated-end fallback |
+| `estimatedStartTime` | Instant | optional | UTC. Falls back to historical avg start, then `startTime` |
+| `estimatedEndTime` | Instant | optional | UTC. Falls back to `start + expectedDurationMs`, then `estimatedStart + avg duration` |
 | `runParameters` | Map\<String,Object\> | optional | Stored as JSONB |
 | `additionalAttributes` | Map\<String,Object\> | optional | Stored as JSONB |
 
@@ -695,13 +697,20 @@ All analytics endpoints require the same auth headers. All return `Cache-Control
 }
 ```
 
-**SQL (simplified):**
+**SQL (simplified):** frequency-agnostic reads collapse across frequency (SUM + GROUP BY) so callers see one row per date.
 ```sql
-SELECT * FROM calculator_sli_daily
+SELECT calculator_id, tenant_id, reporting_date,
+       SUM(total_runs) AS total_runs, SUM(success_runs) AS success_runs,
+       SUM(sla_breaches) AS sla_breaches, SUM(sum_duration_ms) AS sum_duration_ms,
+       SUM(sum_start_min_utc) AS sum_start_min_utc, SUM(sum_end_min_utc) AS sum_end_min_utc,
+       MAX(computed_at) AS computed_at
+FROM calculator_sli_daily
 WHERE calculator_id = ? AND tenant_id = ?
-AND day_cet >= CURRENT_DATE - CAST(? AS INTEGER) * INTERVAL '1 day'
-ORDER BY day_cet DESC
+AND reporting_date >= CURRENT_DATE - CAST(? AS INTEGER) * INTERVAL '1 day'
+GROUP BY calculator_id, tenant_id, reporting_date
+ORDER BY reporting_date DESC
 ```
+(The SLA baseline / estimate **profile** reads the same table frequency-scoped via `findProfile`/`findAllProfiles`.)
 
 **Partition safety:** `calculator_sli_daily` is not partitioned — no partition concern.
 **Cache:** `obs:analytics:runtime:{calcId}:{tenantId}:{freq}:{days}` — 5-minute TTL.
@@ -1032,30 +1041,23 @@ All endpoints annotated with `@Tag` groupings:
 
 2. MONTHLY validation: warn if reportingDate is not end-of-month (non-blocking)
 
-3. SLA deadline: slaDeadline = TimeUtils.calculateSlaDeadline(reportingDate, slaTimeCet)
-   (DAILY only; MONTHLY runs have no SLA deadline)
+3. Fetch cached profile: profile = calculatorProfileService.getProfile(calcId, tenantId, frequency)
 
-4. Start-time breach check (DAILY only):
-   IF startTime > slaDeadline:
-     run.slaBreached = true
-     run.slaBreachReason = "Start time exceeded SLA deadline"
+4. Derive & freeze the SLA deadline (DAILY and MONTHLY; no start-time breach):
+   slaDeadline = slaBaselineResolver.resolveDeadline(request, frequency, profile)
+   = startTime + baseline×(1+thresholdPercent) + lateBand, or null (ungraded)
 
-5. Build CalculatorRun domain object (status = RUNNING)
+5. Resolve estimated start/end (request → profile avg → computed)
 
-6. DB write: runRepository.upsert(run)
+6. Build CalculatorRun domain object (status = RUNNING, slaBreached = false)
+
+7. DB write: runRepository.upsert(run)
    → INSERT ... ON CONFLICT (run_id, reporting_date) DO UPDATE
 
-7. SLA monitoring registration (DAILY + not breached + slaTime != null):
+8. SLA monitoring registration (liveTrackingEnabled AND slaDeadline != null; DAILY + MONTHLY):
    slaMonitoringCache.registerForSlaMonitoring(run)
    → ZADD obs:sla:deadlines slaEpochMs runKey
    → HSET obs:sla:run_info runKey json
-
-8. (if breached at start) publish SlaBreachedEvent(run, result)
-   → async AFTER_COMMIT → AlertHandlerService:
-       a. Build SlaBreachEvent record
-       b. INSERT into sla_breach_events (DuplicateKeyException → skip)
-       c. Log alert warning
-       d. UPDATE sla_breach_events: alerted=true, alert_status='SENT'
 
 9. publish RunStartedEvent(run)
    → async AFTER_COMMIT → CacheWarmingService:
@@ -1085,12 +1087,12 @@ All endpoints annotated with `@Tag` groupings:
 6. Status: RunStatus.fromCompletionStatus(request.status) → defaults to SUCCESS
 
 7. SLA evaluation (SlaEvaluationService.evaluateSla()):
-   Checks (in order):
-   a. endTime > slaTime → END_TIME_EXCEEDED
-   b. status=RUNNING past slaTime → STILL_RUNNING_PAST_SLA  ← only for live detection
-   c. durationMs > expectedDurationMs * 1.5 → DURATION_EXCEEDED
-   d. status = FAILED or TIMEOUT → RUN_FAILED
-   Returns SlaEvaluationResult(breached, reason, severity)
+   Duration-band classification against the frozen slaTime:
+   a. status = FAILED or TIMEOUT                    → CRITICAL breach
+   b. durationMs ≤ (slaTime − startTime)            → ON_TIME (no breach)
+   c. durationMs ≤ (slaTime − startTime) + bandGap  → LATE (MEDIUM breach)
+   d. otherwise                                     → VERY_LATE (HIGH breach)
+   (slaTime null → ungraded → ON_TIME). Returns SlaEvaluationResult(breached, reason, severity)
 
 8. Apply SLA result to run object
 
@@ -1099,10 +1101,7 @@ All endpoints annotated with `@Tag` groupings:
 10. Deregister from SLA monitoring:
     slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate)
 
-11. Update daily aggregate:
-    dailyAggregateRepository.upsertDaily(...)
-    → increments total_runs, success_runs, sla_breaches
-    → recalculates running averages for duration and CET times
+11. (No daily-aggregate write here — calculator_sli_daily is rebuilt nightly by DailyAggregationJob.)
 
 12. Publish event:
     IF sla_breached: SlaBreachedEvent → AlertHandlerService (see step 8 above)
@@ -1162,19 +1161,18 @@ All endpoints annotated with `@Tag` groupings:
 
 ### On-Write Evaluation (`SlaEvaluationService`)
 
-Runs synchronously in the request thread during `completeRun()`. Checks 4 conditions, accumulates all breach reasons:
+Runs synchronously in the request thread during `completeRun()`. The deadline is derived from the calculator's average runtime at start and frozen into `slaTime` (see §SLA deadline derivation). At completion, the run's **actual duration** is classified once:
 
-| Check | Condition | Breach reason | Severity logic |
-|-------|-----------|---------------|---------------|
-| End time exceeded | `endTime > slaTime` | `"END_TIME_EXCEEDED"` | Delay minutes: >60→CRITICAL, >30→HIGH, >15→MEDIUM, ≤15→LOW |
-| Still running past SLA | `status=RUNNING AND now > slaTime` | `"STILL_RUNNING_PAST_SLA"` | Same delay-based thresholds |
-| Duration >150% | `durationMs > expectedDurationMs * 1.5` | `"DURATION_EXCEEDED"` | Default MEDIUM |
-| Run failed | `status = FAILED or TIMEOUT` | `"RUN_FAILED"` | Always CRITICAL |
+| Order | Condition | Status | Severity |
+|-------|-----------|--------|----------|
+| 1 | `status = FAILED or TIMEOUT` | breach | CRITICAL |
+| 2 | `durationMs ≤ (slaTime − startTime)` | ON_TIME | — |
+| 3 | `durationMs ≤ (slaTime − startTime) + bandGap` | LATE | MEDIUM |
+| 4 | otherwise | VERY_LATE | HIGH |
 
-If multiple conditions hold, all reasons are joined with `;`. Severity is the **highest** severity across all checks.
+`bandGap = veryLateBand − lateBand` (default 15m). `slaTime == null` → ungraded → ON_TIME. The old absolute-time and 150%-of-expected checks were removed.
 
-Additionally, `startRun()` evaluates a 5th condition:
-- **Start-time breach**: `startTime > slaDeadline` — the run starts too late to complete by SLA.
+There is **no start-time breach** — "started late" is not a concept in the duration model. At start the deadline is simply derived and frozen.
 
 ### Live Detection Job (`LiveSlaBreachDetectionJob`)
 
@@ -1213,7 +1211,7 @@ slaMonitoringCache.getApproachingSlaRuns(10)  // next 10 minutes
 → Update gauge: sla.approaching.count
 ```
 
-**DAILY-only enforcement:** `registerForSlaMonitoring()` in `RunIngestionService.startRun()` is only called when `frequency == DAILY`. MONTHLY runs are never registered in the SLA monitoring ZSET. The detection job itself has no explicit frequency filter — the filtering is entirely upstream at registration time.
+**Registration (DAILY + MONTHLY):** `registerForSlaMonitoring()` in `RunIngestionService.startRun()` is called whenever `liveTrackingEnabled` and a deadline was derived (`slaDeadline != null`) — for both frequencies. Runs with no resolvable baseline are not registered (ungraded). The detection job has no frequency filter of its own.
 
 ### Why Dual Mechanism?
 
@@ -1281,7 +1279,7 @@ Without the live detection job, a hung DAILY run would never have its SLA breach
 
 1. **Single Redis instance** — no clustering or sentinel configured. Redis failure takes down all caching; all reads fall through to PostgreSQL.
 2. **MONTHLY query partition scan** (~395 partitions) — queries cannot be further optimized without repartitioning MONTHLY runs onto a monthly-granularity partition scheme.
-3. **Daily aggregate running average** — `upsertDaily()` uses a pure SQL running average. Under high concurrency for the same `(calculatorId, tenantId, day_cet)`, the denominator can be stale (see §13).
+3. **Daily aggregate** — now stored as sums and rebuilt by the nightly `DailyAggregationJob` (single-writer idempotent recompute); the former running-average concurrency hazard is resolved. Trade-off: aggregate analytics reflect data through the last completed day.
 4. **Alert sending is synchronous-within-async** — `AlertHandlerService.sendSimpleAlert()` currently logs only. If replaced with HTTP calls, the async executor pool becomes a bottleneck under SLA storm scenarios.
 
 ---
@@ -1616,16 +1614,9 @@ Queries without a `reporting_date` predicate **MUST NOT be added** to production
 
 ---
 
-### TD-3: Daily Aggregate Running Average — Concurrency Unsafe
+### TD-3: Daily Aggregate Running Average — Concurrency Unsafe ✅ RESOLVED
 
-`DailyAggregateRepository.upsertDaily()` computes running averages via:
-```sql
-avg_duration_ms = (avg_duration_ms * total_runs + EXCLUDED.avg_duration_ms) / (total_runs + 1)
-```
-
-Under concurrent upserts for the same `(calculatorId, tenantId, day_cet)`, `total_runs` in the denominator is the pre-increment value, producing a slightly wrong average. This is non-critical (analytics data, not financial) but introduces subtle inaccuracy under parallelism.
-
-**Fix:** Use advisory locks or accumulate to sum+count columns and compute average at read time.
+**Resolution:** `calculator_sli_daily` now stores **sums** (`sum_duration_ms`, `sum_start_min_utc`, `sum_end_min_utc`, `total_runs`) with averages computed at read time, and the table is rebuilt by the nightly `DailyAggregationJob` via an idempotent single-writer `recomputeForDateRange()` (DELETE + `INSERT … SELECT … GROUP BY`). The per-completion `upsertDaily()` / `updateDailyAggregate()` were removed. With one writer and wholesale recompute, there is no concurrent running-average update.
 
 ---
 

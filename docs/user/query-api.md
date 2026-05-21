@@ -217,6 +217,8 @@ X-Tenant-Id: <tenant>
           "slaStatus": "ON_TIME",
           "startTime": "2026-05-19T13:02:00Z",
           "endTime": "2026-05-19T14:45:00Z",
+          "estimatedStartTime": "2026-05-19T13:00:00Z",
+          "estimatedEndTime": "2026-05-19T14:50:00Z",
           "sla": "2026-05-19T15:00:00Z",
           "durationMs": 6180000,
           "slaBreached": false,
@@ -246,6 +248,7 @@ X-Tenant-Id: <tenant>
 - Each run entry exposes one of `region` or `runType` (regional calculators use `region`; typed calculators use `runType`) — never both.
 - `isRerun: true` indicates that dimensional run was re-triggered (the UI renders the dimension label with a `*` suffix and a failed icon).
 - Null fields on `RunEntry` are omitted from JSON.
+- `estimatedStartTime` / `estimatedEndTime` / `sla` carry the run's stored values, set at start by precedence: **request value (Airflow) → cached historical profile (avg start / avg duration) → computed (`start + expectedDurationMs`)**. `sla` is the duration-derived deadline (`startTime + avgDuration × (1 + thresholdPercent) + lateBand`), not an upstream-supplied wall-clock time.
 
 ### Server-Side Behaviour
 

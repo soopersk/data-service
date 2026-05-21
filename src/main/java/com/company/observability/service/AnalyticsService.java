@@ -1,6 +1,7 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.AnalyticsCacheService;
+import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.SlaBreachEvent;
@@ -35,6 +36,8 @@ public class AnalyticsService {
     private final SlaBreachEventRepository slaBreachEventRepository;
     private final CalculatorRunRepository calculatorRunRepository;
     private final AnalyticsCacheService cacheService;
+    private final CalculatorProfileService calculatorProfileService;
+    private final com.company.observability.config.DurationBasedSlaProperties slaProperties;
 
     private static final String CACHE_RUNTIME = "runtime";
     private static final String CACHE_SLA_CORE = "sla-core";
@@ -363,7 +366,7 @@ public class AnalyticsService {
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
                 .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days, runNumber);
 
-        return buildExecutionsResponse(calculatorId, rawRuns, days, frequency);
+        return buildExecutionsResponse(calculatorId, tenantId, rawRuns, days, frequency);
     }
 
     /**
@@ -377,11 +380,12 @@ public class AnalyticsService {
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
                 .findRunsWithSlaStatusByName(calculatorName, tenantId, frequency, days, runNumber);
 
-        return buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
+        return buildExecutionsResponse(calculatorName, tenantId, rawRuns, days, frequency);
     }
 
     private RunPerformanceData buildExecutionsResponse(
             String calculatorKey,
+            String tenantId,
             List<RunWithSlaStatus> rawRuns,
             int days,
             CalculatorFrequency frequency) {
@@ -415,11 +419,12 @@ public class AnalyticsService {
                 })
                 .toList();
 
-        return buildRunPerformanceDataEnvelope(calculatorKey, rawRuns, dataPoints, days, frequency);
+        return buildRunPerformanceDataEnvelope(calculatorKey, tenantId, rawRuns, dataPoints, days, frequency);
     }
 
     private RunPerformanceData buildRunPerformanceDataEnvelope(
             String calculatorId,
+            String tenantId,
             List<RunWithSlaStatus> rawRuns,
             List<RunPerformanceData.RunDataPoint> dataPoints,
             int days,
@@ -453,6 +458,8 @@ public class AnalyticsService {
 
         long meanDuration = completedCount > 0 ? totalDuration / completedCount : 0;
 
+        ReferenceLines refLines = resolveReferenceLines(latestRaw, tenantId, frequency);
+
         return new RunPerformanceData(
                 calculatorId,
                 latestRaw.calculatorName(),
@@ -465,9 +472,32 @@ public class AnalyticsService {
                 lateCount,
                 veryLateCount,
                 dataPoints,
-                latestRaw.estimatedStartTime(),
-                latestRaw.slaTime());
+                refLines.estimatedStartTime(),
+                refLines.slaTime());
     }
+
+    /**
+     * Chart reference lines for the executions/performance-card view. Sourced from the cached
+     * profile (stable "typical" start + buffered deadline) when it has enough samples; otherwise
+     * falls back to the most recent run's stored values. Per-run RunDataPoints keep their own values.
+     */
+    private ReferenceLines resolveReferenceLines(
+            RunWithSlaStatus latestRaw, String tenantId, CalculatorFrequency frequency) {
+
+        CalculatorProfile profile = calculatorProfileService.getProfile(
+                latestRaw.calculatorId(), tenantId, frequency);
+
+        if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
+            java.time.Instant estStart = com.company.observability.util.TimeUtils
+                    .instantFromUtcMinuteOfDay(latestRaw.reportingDate(), profile.avgStartMinUtc());
+            long bufferedMs = Math.round(profile.avgDurationMs() * (1 + slaProperties.getThresholdPercent() / 100.0))
+                    + slaProperties.lateBandMs();
+            return new ReferenceLines(estStart, estStart.plusMillis(bufferedMs));
+        }
+        return new ReferenceLines(latestRaw.estimatedStartTime(), latestRaw.slaTime());
+    }
+
+    private record ReferenceLines(java.time.Instant estimatedStartTime, java.time.Instant slaTime) {}
 
     private String classifySlaStatusForRun(RunWithSlaStatus run) {
         if (run.status() == RunStatus.RUNNING || !Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.ON_TIME.name();

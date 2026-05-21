@@ -69,28 +69,31 @@ The following columns are **immutable after first INSERT**. The `ON CONFLICT UPD
 
 ## Table: `calculator_sli_daily`
 
-Pre-aggregated daily statistics. Updated via a running-average upsert on every `completeRun()` call.
+Pre-aggregated statistics stored as **SUMs** (averages computed at read time). Rebuilt by a **nightly batch** (`DailyAggregationJob`), not per `completeRun()`. Frequency-aware so DAILY and MONTHLY runs of the same calculator do not blend on shared (month-end) reporting dates.
 
 ```sql
 CREATE TABLE calculator_sli_daily (
     calculator_id     VARCHAR(100)  NOT NULL,
     tenant_id         VARCHAR(50)   NOT NULL,
-    day_cet           DATE          NOT NULL,
+    frequency         VARCHAR(10)   NOT NULL DEFAULT 'DAILY',  -- V8
+    reporting_date    DATE          NOT NULL,
     total_runs        INT           DEFAULT 0,
     success_runs      INT           DEFAULT 0,
     sla_breaches      INT           DEFAULT 0,
-    avg_duration_ms   BIGINT        DEFAULT 0,
-    avg_start_min_cet INT           DEFAULT 0,   -- minutes since midnight CET (0-1439)
-    avg_end_min_cet   INT           DEFAULT 0,
+    sum_duration_ms   BIGINT        DEFAULT 0,
+    sum_start_min_utc BIGINT        DEFAULT 0,   -- minutes since midnight UTC, summed
+    sum_end_min_utc   BIGINT        DEFAULT 0,
     computed_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (calculator_id, tenant_id, day_cet)
+    PRIMARY KEY (calculator_id, tenant_id, frequency, reporting_date)  -- 4-col (V8)
 );
 ```
 
-- Not partitioned. One row per `(calculatorId, tenantId, day_cet)`.
-- `day_cet` is the CET calendar day (not UTC). A run finishing just after midnight CET is counted in the **new** day.
-- All analytics endpoints (`/runtime`, `/sla-summary`, `/trends`) read from this table.
-- The `run-performance` endpoint is the exception — it reads raw `calculator_runs` directly.
+- Not partitioned. One row per `(calculatorId, tenantId, frequency, reportingDate)`.
+- Sums (not averages) are stored; `DailyAggregate` / `CalculatorProfile` compute averages at read time. This sidesteps the old running-average concurrency hazard.
+- `reporting_date` is the business date (UTC-aligned), matching `calculator_runs`. Start/end minutes are UTC.
+- Aggregate-backed analytics (`/runtime`, `/sla-summary`, `/trends`) read from this table — frequency-agnostic reads collapse across frequency (one row per date); the SLA baseline / estimate **profile** reads it frequency-scoped.
+- `run-performance` and `executions` are the exception — they read raw `calculator_runs` directly (live).
+- The `frequency` column joins the PRIMARY KEY (a derived aggregate, so widening the PK is the clean way to give `ON CONFLICT`/grouping a unique key); `DEFAULT 'DAILY'` keeps future no-frequency calculators working.
 
 ---
 
@@ -139,7 +142,7 @@ Example: `calculator_runs_2026_03_24` covers `[2026-03-24, 2026-03-25)`.
 
 | Phase | Action | Schedule |
 |-------|--------|----------|
-| Initial migration (V4) | Creates ~62 partitions (yesterday + today + 60 future days) | On first Flyway migration |
+| Initial migration (V2) | Creates ~62 partitions (yesterday + today + 60 future days) | On first Flyway migration |
 | Daily creation | `PartitionManagementJob.createPartitions()` | Daily at 01:00 — maintains 60-day forward window |
 | Weekly cleanup | `PartitionManagementJob.dropOldPartitions()` | Sunday at 02:00 — drops partitions > 395 days old |
 
@@ -167,14 +170,14 @@ All indexes are created on the parent partitioned table. PostgreSQL propagates t
 | `calculator_runs_sla_idx` | `(sla_time, status) WHERE status='RUNNING' AND sla_time IS NOT NULL` | BTREE partial | SLA deadline queries |
 | `calculator_runs_frequency_idx` | `(frequency, reporting_date DESC)` | BTREE | Frequency-specific scans |
 | `calculator_runs_tenant_calculator_frequency_idx` | `(tenant_id, calculator_id, frequency, reporting_date DESC, created_at DESC)` | BTREE | Batch status queries |
-| `idx_calculator_sli_daily_recent` | `(calculator_id, tenant_id, day_cet DESC)` | BTREE | Analytics queries |
+| `idx_calculator_sli_daily_recent` | `(calculator_id, tenant_id, reporting_date DESC)` | BTREE | Frequency-agnostic analytics reads (the 4-col PK index covers frequency-scoped profile reads) |
 | `sla_breach_events_tenant_calculator_created_idx` | `(tenant_id, calculator_id, created_at DESC, breach_id DESC)` | BTREE | Keyset pagination (no severity filter) |
 | `sla_breach_events_tenant_calculator_severity_created_idx` | `(tenant_id, calculator_id, severity, created_at DESC, breach_id DESC)` | BTREE | Keyset pagination (with severity filter) |
 | `idx_sla_breach_events_unalerted` | `(created_at) WHERE alerted=false` | BTREE partial | Alert retry queries |
 | `idx_sla_breach_events_calculator` | `(calculator_id, created_at DESC)` | BTREE | Breach history by calculator |
 
-!!! note "Migration flags"
-    V3 and V12 migrations use `-- flyway:transactional=false` to allow `CREATE INDEX CONCURRENTLY` on partitioned tables, which cannot run inside a transaction.
+!!! note "Frequency migration (V8)"
+    `V8__calculator_sli_daily_frequency.sql` adds the `frequency` column, widens the PRIMARY KEY to 4 columns, and recomputes `calculator_sli_daily` from `calculator_runs` (un-blending any historical DAILY/MONTHLY rows).
 
 ---
 
@@ -242,22 +245,36 @@ All writes use `INSERT ... ON CONFLICT (run_id, reporting_date) DO UPDATE`. This
 
 ---
 
-## Daily Aggregate Update Flow
+## Daily Aggregate Build Flow (end-of-day batch)
 
-On every `completeRun()`, the daily aggregate is updated via a running-average upsert:
+`calculator_sli_daily` is **not** written on `completeRun()`. A nightly `DailyAggregationJob`
+(`@Scheduled`, default cron `0 30 0 * * *`) rebuilds a trailing window from `calculator_runs`,
+then warms the profile cache. The recompute is **idempotent** (DELETE the range, re-INSERT):
 
 ```sql
-INSERT INTO calculator_sli_daily (calculator_id, tenant_id, day_cet, ...)
-VALUES (?, ?, ?, ...)
-ON CONFLICT (calculator_id, tenant_id, day_cet) DO UPDATE SET
-  total_runs        = calculator_sli_daily.total_runs + 1,
-  success_runs      = calculator_sli_daily.success_runs + EXCLUDED.success_runs,
-  sla_breaches      = calculator_sli_daily.sla_breaches + EXCLUDED.sla_breaches,
-  avg_duration_ms   = (calculator_sli_daily.avg_duration_ms * calculator_sli_daily.total_runs
-                       + EXCLUDED.avg_duration_ms) / (calculator_sli_daily.total_runs + 1),
-  ...
+DELETE FROM calculator_sli_daily WHERE reporting_date BETWEEN :from AND :to;
+
+INSERT INTO calculator_sli_daily (
+    calculator_id, tenant_id, frequency, reporting_date,
+    total_runs, success_runs, sla_breaches,
+    sum_duration_ms, sum_start_min_utc, sum_end_min_utc, computed_at)
+SELECT calculator_id, tenant_id, frequency, reporting_date,
+       COUNT(*),
+       COUNT(*) FILTER (WHERE status = 'SUCCESS'),
+       COUNT(*) FILTER (WHERE sla_breached),
+       COALESCE(SUM(duration_ms), 0),
+       COALESCE(SUM(EXTRACT(HOUR FROM start_time AT TIME ZONE 'UTC')*60
+                  + EXTRACT(MINUTE FROM start_time AT TIME ZONE 'UTC')), 0),
+       COALESCE(SUM(CASE WHEN end_time IS NOT NULL THEN
+                  EXTRACT(HOUR FROM end_time AT TIME ZONE 'UTC')*60
+                  + EXTRACT(MINUTE FROM end_time AT TIME ZONE 'UTC') ELSE 0 END), 0),
+       NOW()
+FROM calculator_runs
+WHERE end_time IS NOT NULL AND reporting_date BETWEEN :from AND :to
+GROUP BY calculator_id, tenant_id, frequency, reporting_date;
 ```
 
-!!! warning "Concurrency limitation (TD-3)"
-    Under concurrent completions for the same `(calculatorId, tenantId, day_cet)`, the running-average denominator can be stale. This is non-critical (analytics data) but introduces slight inaccuracy under high parallelism. See [TD-3](tech-debt.md#td-3-daily-aggregate-running-average-concurrency-unsafe).
+- `recompute-window-days` (default 3) covers the last few reporting dates so late-arriving completions are captured.
+- Because sums are recomputed wholesale, there is **no concurrency hazard** (the former TD-3 running-average issue is gone — see [tech-debt.md](tech-debt.md)).
+- Trade-off: aggregate analytics reflect data through the last completed day; the current day appears after the next nightly run. Live per-run views are unaffected.
 

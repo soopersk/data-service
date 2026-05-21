@@ -44,6 +44,8 @@ class AnalyticsServiceTest {
     private CalculatorRunRepository calculatorRunRepository;
     @Mock
     private AnalyticsCacheService cacheService;
+    @Mock
+    private CalculatorProfileService calculatorProfileService;
 
     private AnalyticsService service;
 
@@ -53,7 +55,9 @@ class AnalyticsServiceTest {
                 dailyAggregateRepository,
                 slaBreachEventRepository,
                 calculatorRunRepository,
-                cacheService
+                cacheService,
+                calculatorProfileService,
+                new com.company.observability.config.DurationBasedSlaProperties()
         );
     }
 
@@ -251,6 +255,10 @@ class AnalyticsServiceTest {
         when(calculatorRunRepository.findRunsWithSlaStatus(
                 "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30, null))
                 .thenReturn(List.of(split1, split2));
+        // No usable profile → envelope reference lines fall back to latest-run values.
+        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+                .thenReturn(new com.company.observability.domain.CalculatorProfile(
+                        "calc-1", "tenant-1", "DAILY", 0, 0, 0, 0));
 
         RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
 
@@ -281,6 +289,35 @@ class AnalyticsServiceTest {
         assertTrue(result.runs().isEmpty());
         assertNull(result.estimatedStartTime());
         assertNull(result.slaTime());
+    }
+
+    @Test
+    void getRunExecutions_referenceLinesSourcedFromProfileWhenSufficientSamples() {
+        LocalDate day = LocalDate.of(2026, 5, 11);
+        Instant start = Instant.parse("2026-05-11T05:00:00Z");
+        Instant end = Instant.parse("2026-05-11T05:30:00Z");
+        Instant runSla = Instant.parse("2026-05-11T06:30:00Z");
+
+        RunWithSlaStatus run = new RunWithSlaStatus(
+                "run-1", "calc-1", "Portfolio", day,
+                start, end, 1_800_000L,
+                runSla, start, CalculatorFrequency.DAILY,
+                RunStatus.SUCCESS, false, null, null, null, "1", 300000L);
+
+        when(calculatorRunRepository.findRunsWithSlaStatus(
+                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30, null))
+                .thenReturn(List.of(run));
+        // avg start = 270 min UTC (04:30); avg duration = 1h; 10 samples → trusted.
+        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+                .thenReturn(new com.company.observability.domain.CalculatorProfile(
+                        "calc-1", "tenant-1", "DAILY", 3_600_000L, 270, 330, 10));
+
+        RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
+
+        // estStart = day @ 04:30 UTC; buffered = 3_600_000*1.2 + 15m = 72m + 15m = 87m
+        Instant expectedStart = Instant.parse("2026-05-11T04:30:00Z");
+        assertEquals(expectedStart, result.estimatedStartTime());
+        assertEquals(expectedStart.plusMillis(87L * 60 * 1000), result.slaTime());
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

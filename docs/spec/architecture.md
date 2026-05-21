@@ -165,7 +165,7 @@ sequenceDiagram
     Service->>Repository: upsert()
     Repository->>PostgreSQL: UPDATE sla_breached
     Service->>Redis: ZREM sla:deadlines
-    Service->>Repository: upsertDaily()
+    Note over Service: calculator_sli_daily rebuilt nightly (DailyAggregationJob), not here
     Service-->>AlertHandler: publish SlaBreachedEvent or RunCompletedEvent (async)
     AlertHandler->>PostgreSQL: INSERT sla_breach_events
     AlertHandler->>Redis: evict + warm cache

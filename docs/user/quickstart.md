@@ -27,7 +27,6 @@ curl -u admin:admin \
     "frequency": "DAILY",
     "reportingDate": "2026-03-24",
     "startTime": "2026-03-24T05:00:00Z",
-    "slaTimeCet": "06:30:00",
     "expectedDurationMs": 3600000
   }'
 ```
@@ -50,8 +49,8 @@ curl -u admin:admin \
 
 The `Location` response header points to `/api/v1/runs/run-fx-20260324-001`.
 
-!!! tip "SLA Deadline"
-    `slaTimeCet: "06:30:00"` means the run must complete by 06:30 CET on the reporting date. The service converts this to a UTC timestamp using the reporting date and stores it as `sla_time`.
+!!! tip "SLA Deadline (duration-based)"
+    No SLA time is required at start. The service derives the deadline from the calculator's average runtime (falling back to `expectedDurationMs`) and stores it as `sla_time`. `slaTime` is an optional request field used only as a last-resort baseline.
 
 ---
 
@@ -170,10 +169,10 @@ curl -u admin:admin -H "X-Tenant-Id: acme-corp" -H "Content-Type: application/js
     "frequency": "DAILY",
     "reportingDate": "2026-03-24",
     "startTime": "2026-03-24T05:00:00Z",
-    "slaTimeCet": "06:30:00"
+    "expectedDurationMs": 3600000
   }'
 
-# Complete it after the SLA deadline (06:30 CET = 05:30 UTC)
+# Complete it well beyond the derived deadline (actual duration ≫ baseline + bands)
 curl -u admin:admin -H "X-Tenant-Id: acme-corp" -H "Content-Type: application/json" \
   -X POST http://localhost:8080/api/v1/runs/run-fx-20260324-002/complete \
   -d '{
@@ -189,7 +188,7 @@ curl -u admin:admin -H "X-Tenant-Id: acme-corp" -H "Content-Type: application/js
   "runId": "run-fx-20260324-002",
   "status": "SUCCESS",
   "slaBreached": true,
-  "slaBreachReason": "END_TIME_EXCEEDED"
+  "slaBreachReason": "Finished 60 minutes late (VERY_LATE band)"
 }
 ```
 

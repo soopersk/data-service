@@ -105,10 +105,10 @@ TARGET (new domain endpoints, additive)
 ### Request
 ```
 GET /api/v1/calculators/batch/runs
-  ?reporting_date=2026-03-06   (required, ISO date)
-  &frequency=DAILY             (DAILY|MONTHLY, default DAILY)
-  &run_number=1                (1|2, default 1 — user-selected in UI)
-  &keys=capital|modelled-exposure|gemini-hedge|portfolio|group-portfolio|consolidation
+  ?reporting_date=2026-05-19          (required, ISO date)
+  &frequency=DAILY                    (DAILY|MONTHLY, default DAILY)
+  &run_number=1                       (1|2, optional)
+  &keys=capitalcalc|portfoliocalc|grportfoliocalc
 Header: X-Tenant-Id: tenant1
 ```
 
@@ -201,13 +201,20 @@ Header: X-Tenant-Id: tenant1
 
 ---
 
-## Endpoint 2: `GET /api/v1/analytics/calculators/{id}/executions`
+## Endpoint 2: `GET /api/v1/analytics/calculators/{calculatorName}/executions`
 
 **Not an alias for `/run-performance`.** Returns each physical run independently — split runs sharing a `correlationId` appear as separate rows, not collapsed. `subRunIds` is always `null`. Backed by a new `getRunExecutions()` service method that bypasses `LogicalRunGrouper`.
 
 **Params:** `calculatorId` (path), `X-Tenant-Id` (header), `days` (default 30, 1–365), `frequency` (default DAILY)
 
 **Contrast with `/run-performance`:** same underlying data but splits there are collapsed into one logical entry with `subRunIds` populated.
+
+GET /api/v1/analytics/calculators/portfoliocalc/executions
+  ?days=30           (1-365, default 30)
+  &frequency=DAILY   (default DAILY)
+  &run_number=1      (1|2, optional)
+Header: X-Tenant-Id: tenant1
+
 
 ### Sample Response
 ```json

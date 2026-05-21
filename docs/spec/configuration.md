@@ -44,13 +44,30 @@ Default: `dev` (set via `SPRING_PROFILES_ACTIVE` env var or `spring.profiles.act
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `observability.sla.live-tracking.enabled` | `true` | Register DAILY runs in SLA monitoring Redis ZSET |
+| `observability.sla.duration-based.enabled` | `true` | Derive the SLA deadline from avg runtime; `false` passes the request `slaTime` through unchanged |
+| `observability.sla.duration-based.threshold-percent` | `20` | Percentage buffer over the resolved baseline |
+| `observability.sla.duration-based.late-band-minutes` | `15` | ON_TIME upper edge beyond buffered baseline (baked into `slaTime`) |
+| `observability.sla.duration-based.very-late-band-minutes` | `30` | LATE upper edge beyond buffered baseline |
+| `observability.sla.duration-based.min-sample-size` | `5` | Runs required before the historical average is trusted |
+| `observability.sla.duration-based.lookback.daily-days` | `30` | Trailing window for DAILY baselines/profiles |
+| `observability.sla.duration-based.lookback.monthly-days` | `395` | Trailing window for MONTHLY baselines/profiles |
+| `observability.sla.live-tracking.enabled` | `true` | Register runs (DAILY + MONTHLY) in the SLA monitoring Redis ZSET |
 | `observability.sla.live-detection.enabled` | `true` | Enable `LiveSlaBreachDetectionJob` |
 | `observability.sla.live-detection.interval-ms` | `120000` | Detection job interval in milliseconds (2 min) |
 | `observability.sla.live-detection.initial-delay-ms` | `30000` | Startup delay in milliseconds (30s) |
 | `observability.sla.early-warning.enabled` | `true` | Enable early warning check |
 | `observability.sla.early-warning.interval-ms` | `180000` | Early warning interval in milliseconds (3 min) |
 | `observability.sla.early-warning.threshold-minutes` | `10` | Warn if SLA deadline within this many minutes |
+
+### Aggregation (end-of-day batch + profile cache)
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `observability.aggregation.daily.enabled` | `true` | Enable the nightly `DailyAggregationJob` |
+| `observability.aggregation.daily.cron` | `0 30 0 * * *` | Daily at 00:30 — recompute `calculator_sli_daily` + warm profile cache |
+| `observability.aggregation.recompute-window-days` | `3` | Trailing reporting dates recomputed each run (catches late completions) |
+| `observability.aggregation.profile-cache-ttl-hours` | `26` | TTL for cached `CalculatorProfile`s with samples |
+| `observability.aggregation.empty-profile-cache-ttl-minutes` | `60` | TTL for the zero-sample profile sentinel |
 
 ### Cache
 

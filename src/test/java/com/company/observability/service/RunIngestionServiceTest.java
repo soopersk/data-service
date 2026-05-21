@@ -11,8 +11,8 @@ import com.company.observability.event.RunCompletedEvent;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.exception.DomainAccessDeniedException;
 import com.company.observability.exception.DomainValidationException;
+import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.repository.CalculatorRunRepository;
-import com.company.observability.repository.DailyAggregateRepository;
 import com.company.observability.util.SlaEvaluationResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,9 +30,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -46,11 +43,11 @@ class RunIngestionServiceTest {
     @Mock
     private CalculatorRunRepository runRepository;
     @Mock
-    private DailyAggregateRepository dailyAggregateRepository;
-    @Mock
     private SlaEvaluationService slaEvaluationService;
     @Mock
     private SlaBaselineResolver slaBaselineResolver;
+    @Mock
+    private CalculatorProfileService calculatorProfileService;
     @Mock
     private ApplicationEventPublisher eventPublisher;
     @Mock
@@ -58,13 +55,16 @@ class RunIngestionServiceTest {
 
     private RunIngestionService service;
 
+    private static final CalculatorProfile EMPTY_PROFILE =
+            new CalculatorProfile("calc-1", "tenant-1", "DAILY", 0, 0, 0, 0);
+
     @BeforeEach
     void setUp() {
         service = new RunIngestionService(
                 runRepository,
-                dailyAggregateRepository,
                 slaEvaluationService,
                 slaBaselineResolver,
+                calculatorProfileService,
                 eventPublisher,
                 new SimpleMeterRegistry(),
                 slaMonitoringCache,
@@ -110,7 +110,9 @@ class RunIngestionServiceTest {
 
         when(runRepository.findById("run-derived", reportingDate)).thenReturn(Optional.empty());
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq("tenant-1"), eq(CalculatorFrequency.DAILY)))
+        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+                .thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(CalculatorFrequency.DAILY), any()))
                 .thenReturn(derivedDeadline);
 
         service.startRun(request, "tenant-1");
@@ -141,7 +143,9 @@ class RunIngestionServiceTest {
 
         when(runRepository.findById("run-monthly-derived", eom)).thenReturn(Optional.empty());
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq("tenant-1"), eq(CalculatorFrequency.MONTHLY)))
+        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.MONTHLY))
+                .thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(CalculatorFrequency.MONTHLY), any()))
                 .thenReturn(derivedDeadline);
 
         service.startRun(request, "tenant-1");
@@ -169,7 +173,9 @@ class RunIngestionServiceTest {
 
         when(runRepository.findById("run-ungraded", reportingDate)).thenReturn(Optional.empty());
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq("tenant-1"), eq(CalculatorFrequency.DAILY)))
+        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+                .thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(CalculatorFrequency.DAILY), any()))
                 .thenReturn(null);
 
         service.startRun(request, "tenant-1");
@@ -330,27 +336,65 @@ class RunIngestionServiceTest {
         verify(eventPublisher, never()).publishEvent(any());
     }
 
-    @Test
-    void completeRun_dailyAggregateException_isSwallowed_andEventStillPublished() {
-        Instant start = Instant.parse("2026-04-10T05:00:00Z");
-        CalculatorRun run = runningRun(start);
-        when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
-        when(slaEvaluationService.evaluateSla(any())).thenReturn(new SlaEvaluationResult(false, null, "LOW"));
-        when(runRepository.upsert(any())).thenAnswer(inv -> inv.getArgument(0));
-        org.mockito.Mockito.doThrow(new RuntimeException("DB unavailable"))
-                .when(dailyAggregateRepository).upsertDaily(any(), any(), any(), any(), any(), anyBoolean(), anyLong(), anyInt(), anyInt());
+    // ---------------------------------------------------------------
+    // startRun — estimated start/end precedence
+    // ---------------------------------------------------------------
 
-        CompleteRunRequest request = CompleteRunRequest.builder()
-                .reportingDate(LocalDate.now())
-                .endTime(start.plusSeconds(300))
-                .status(CompletionStatus.SUCCESS)
+    @Test
+    void startRun_estimatedTimes_requestValuesWinOverProfile() {
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+        Instant reqEstStart = Instant.parse("2026-02-20T04:30:00Z");
+        Instant reqEstEnd = Instant.parse("2026-02-20T06:30:00Z");
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-est").calculatorId("calc-1").calculatorName("Calculator 1")
+                .frequency(CalculatorFrequency.DAILY).reportingDate(reportingDate).startTime(start)
+                .estimatedStartTime(reqEstStart).estimatedEndTime(reqEstEnd)
                 .build();
 
-        // Must NOT throw — exception from dailyAggregate is swallowed
-        CalculatorRun result = service.completeRun("run-1", request, "tenant-1");
+        when(runRepository.findById("run-est", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(inv -> inv.getArgument(0));
+        // Profile has samples, but request values must take precedence.
+        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+                .thenReturn(new CalculatorProfile("calc-1", "tenant-1", "DAILY", 3_600_000L, 200, 300, 10));
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(CalculatorFrequency.DAILY), any()))
+                .thenReturn(null);
 
-        assertThat(result.getStatus()).isEqualTo(RunStatus.SUCCESS);
-        verify(eventPublisher).publishEvent(any(RunCompletedEvent.class));
+        service.startRun(request, "tenant-1");
+
+        verify(runRepository).upsert(argThat(run ->
+                reqEstStart.equals(run.getEstimatedStartTime())
+                        && reqEstEnd.equals(run.getEstimatedEndTime())));
+    }
+
+    @Test
+    void startRun_estimatedTimes_derivedFromProfileWhenRequestOmits() {
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-est2").calculatorId("calc-1").calculatorName("Calculator 1")
+                .frequency(CalculatorFrequency.DAILY).reportingDate(reportingDate).startTime(start)
+                .build(); // no estimated times, no expectedDurationMs
+
+        // avg start = 270 min UTC = 04:30; avg duration = 1h
+        when(runRepository.findById("run-est2", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+                .thenReturn(new CalculatorProfile("calc-1", "tenant-1", "DAILY", 3_600_000L, 270, 330, 10));
+        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(CalculatorFrequency.DAILY), any()))
+                .thenReturn(null);
+
+        service.startRun(request, "tenant-1");
+
+        Instant expectedStart = Instant.parse("2026-02-20T04:30:00Z");          // date(start) + 270 min UTC
+        Instant expectedEnd = expectedStart.plusMillis(3_600_000L);             // estimatedStart + avgDuration
+        verify(runRepository).upsert(argThat(run ->
+                expectedStart.equals(run.getEstimatedStartTime())
+                        && expectedEnd.equals(run.getEstimatedEndTime())));
     }
 
     @Test
