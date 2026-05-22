@@ -40,7 +40,7 @@ public class AnalyticsController {
     )
     public ResponseEntity<RuntimeAnalyticsResponse> getRuntimeAnalytics(
             @PathVariable String calculatorId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam @Min(1) @Max(365) int days,
             @Parameter(description = "Frequency: DAILY or MONTHLY")
@@ -51,7 +51,7 @@ public class AnalyticsController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RuntimeAnalyticsResponse response = analyticsService
-                    .getRuntimeAnalytics(calculatorId, tenantId, days, freq);
+                    .getRuntimeAnalytics(calculatorId, days, freq);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
@@ -69,14 +69,14 @@ public class AnalyticsController {
     )
     public ResponseEntity<SlaSummaryResponse> getSlaSummary(
             @PathVariable String calculatorId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam @Min(1) @Max(365) int days) {
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             SlaSummaryResponse response = analyticsService
-                    .getSlaSummary(calculatorId, tenantId, days);
+                    .getSlaSummary(calculatorId, days);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
@@ -95,14 +95,14 @@ public class AnalyticsController {
     )
     public ResponseEntity<TrendAnalyticsResponse> getTrends(
             @PathVariable String calculatorId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam @Min(1) @Max(365) int days) {
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             TrendAnalyticsResponse response = analyticsService
-                    .getTrends(calculatorId, tenantId, days);
+                    .getTrends(calculatorId, days);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
@@ -122,7 +122,7 @@ public class AnalyticsController {
     )
     public ResponseEntity<PagedResponse<SlaBreachDetailResponse>> getSlaBreachDetails(
             @PathVariable String calculatorId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam @Min(1) @Max(365) int days,
             @Parameter(description = "Filter by severity: LOW, MEDIUM, HIGH, CRITICAL")
@@ -135,7 +135,7 @@ public class AnalyticsController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             PagedResponse<SlaBreachDetailResponse> response = analyticsService
-                    .getSlaBreachDetails(calculatorId, tenantId, days, severity, page, size, cursor);
+                    .getSlaBreachDetails(calculatorId, days, severity, page, size, cursor);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.noCache())
@@ -158,7 +158,7 @@ public class AnalyticsController {
     )
     public ResponseEntity<RunPerformanceData> getRunExecutions(
             @PathVariable String calculatorName,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days,
             @Parameter(description = "Frequency: DAILY or MONTHLY")
@@ -172,7 +172,7 @@ public class AnalyticsController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RunPerformanceData response = analyticsService
-                    .getRunExecutionsByName(calculatorName, tenantId, days, freq, runNumber);
+                    .getRunExecutionsByName(calculatorName, days, freq, runNumber);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
@@ -192,7 +192,7 @@ public class AnalyticsController {
     )
     public ResponseEntity<RunPerformanceData> getRunPerformanceData(
             @PathVariable String calculatorId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days,
             @Parameter(description = "Frequency: DAILY or MONTHLY")
@@ -203,7 +203,7 @@ public class AnalyticsController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RunPerformanceData response = analyticsService
-                    .getRunPerformanceData(calculatorId, tenantId, days, freq);
+                    .getRunPerformanceData(calculatorId, days, freq);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())

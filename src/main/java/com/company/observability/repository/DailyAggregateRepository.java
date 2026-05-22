@@ -50,13 +50,12 @@ public class DailyAggregateRepository {
 
         String insert = """
             INSERT INTO calculator_sli_daily (
-                calculator_id, tenant_id, frequency, reporting_date,
+                calculator_id, frequency, reporting_date,
                 total_runs, success_runs, sla_breaches,
                 sum_duration_ms, sum_start_min_utc, sum_end_min_utc, computed_at
             )
             SELECT
                 calculator_id,
-                tenant_id,
                 frequency,
                 reporting_date,
                 COUNT(*),
@@ -77,7 +76,7 @@ public class DailyAggregateRepository {
             FROM calculator_runs
             WHERE end_time IS NOT NULL
               AND reporting_date BETWEEN :from AND :to
-            GROUP BY calculator_id, tenant_id, frequency, reporting_date
+            GROUP BY calculator_id, frequency, reporting_date
             """;
 
         try {
@@ -97,10 +96,10 @@ public class DailyAggregateRepository {
      * date — preserving behavior from before the frequency dimension was added.
      */
     public List<DailyAggregate> findRecentAggregates(
-            String calculatorId, String tenantId, int days) {
+            String calculatorId, int days) {
 
         String sql = """
-            SELECT calculator_id, tenant_id, reporting_date,
+            SELECT calculator_id, reporting_date,
                    SUM(total_runs)        AS total_runs,
                    SUM(success_runs)      AS success_runs,
                    SUM(sla_breaches)      AS sla_breaches,
@@ -109,15 +108,14 @@ public class DailyAggregateRepository {
                    SUM(sum_end_min_utc)   AS sum_end_min_utc,
                    MAX(computed_at)       AS computed_at
             FROM calculator_sli_daily
-            WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
+            WHERE calculator_id = :calculatorId
             AND reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
-            GROUP BY calculator_id, tenant_id, reporting_date
+            GROUP BY calculator_id, reporting_date
             ORDER BY reporting_date DESC
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("days", days);
 
         try {
@@ -136,14 +134,14 @@ public class DailyAggregateRepository {
      * NPJT expands :reportingDates list into the IN clause automatically.
      */
     public List<DailyAggregate> findByReportingDates(
-            String calculatorId, String tenantId, List<LocalDate> reportingDates) {
+            String calculatorId, List<LocalDate> reportingDates) {
 
         if (reportingDates == null || reportingDates.isEmpty()) {
             return Collections.emptyList();
         }
 
         String sql = """
-            SELECT calculator_id, tenant_id, reporting_date,
+            SELECT calculator_id, reporting_date,
                    SUM(total_runs)        AS total_runs,
                    SUM(success_runs)      AS success_runs,
                    SUM(sla_breaches)      AS sla_breaches,
@@ -152,15 +150,14 @@ public class DailyAggregateRepository {
                    SUM(sum_end_min_utc)   AS sum_end_min_utc,
                    MAX(computed_at)       AS computed_at
             FROM calculator_sli_daily
-            WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
+            WHERE calculator_id = :calculatorId
             AND reporting_date IN (:reportingDates)
-            GROUP BY calculator_id, tenant_id, reporting_date
+            GROUP BY calculator_id, reporting_date
             ORDER BY reporting_date DESC
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("reportingDates", reportingDates);
 
         try {
@@ -177,7 +174,7 @@ public class DailyAggregateRepository {
      * {@code CalculatorProfileService}. Returns a zero-sample profile when no history exists.
      */
     public CalculatorProfile findProfile(
-            String calculatorId, String tenantId, String frequency, int days) {
+            String calculatorId, String frequency, int days) {
 
         String sql = """
             SELECT COALESCE(SUM(sum_duration_ms), 0)   AS sum_duration_ms,
@@ -185,26 +182,25 @@ public class DailyAggregateRepository {
                    COALESCE(SUM(sum_end_min_utc), 0)   AS sum_end_min_utc,
                    COALESCE(SUM(total_runs), 0)        AS total_runs
             FROM calculator_sli_daily
-            WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
+            WHERE calculator_id = :calculatorId
             AND frequency = :frequency
             AND reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("frequency", frequency)
                 .addValue("days", days);
 
         try {
             return jdbcTemplate.queryForObject(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
-                    calculatorId, tenantId, frequency,
+                    calculatorId, frequency,
                     rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
                     rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
         } catch (Exception e) {
             log.error("event=daily_aggregate.find_profile outcome=failure calculator_id={} frequency={}",
                     calculatorId, frequency, e);
-            return CalculatorProfile.fromSums(calculatorId, tenantId, frequency, 0, 0, 0, 0);
+            return CalculatorProfile.fromSums(calculatorId, frequency, 0, 0, 0, 0);
         }
     }
 
@@ -214,7 +210,7 @@ public class DailyAggregateRepository {
      */
     public List<CalculatorProfile> findAllProfiles(String frequency, int days) {
         String sql = """
-            SELECT calculator_id, tenant_id,
+            SELECT calculator_id,
                    SUM(sum_duration_ms)   AS sum_duration_ms,
                    SUM(sum_start_min_utc) AS sum_start_min_utc,
                    SUM(sum_end_min_utc)   AS sum_end_min_utc,
@@ -222,7 +218,7 @@ public class DailyAggregateRepository {
             FROM calculator_sli_daily
             WHERE frequency = :frequency
             AND reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
-            GROUP BY calculator_id, tenant_id
+            GROUP BY calculator_id
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -231,7 +227,7 @@ public class DailyAggregateRepository {
 
         try {
             return jdbcTemplate.query(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
-                    rs.getString("calculator_id"), rs.getString("tenant_id"), frequency,
+                    rs.getString("calculator_id"), frequency,
                     rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
                     rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
         } catch (Exception e) {
@@ -246,7 +242,6 @@ public class DailyAggregateRepository {
             try {
                 return new DailyAggregate(
                         rs.getString("calculator_id"),
-                        rs.getString("tenant_id"),
                         rs.getObject("reporting_date", LocalDate.class),
                         rs.getInt("total_runs"),
                         rs.getInt("success_runs"),

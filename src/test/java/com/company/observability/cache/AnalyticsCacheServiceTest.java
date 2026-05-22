@@ -60,39 +60,39 @@ class AnalyticsCacheServiceTest {
     @Test
     void onRunStarted_evictsOnlyRunPerfKeys() {
         CalculatorRun run = run("calc-1", "tenant-a");
-        String indexKey = "obs:analytics:index:calc-1:tenant-a";
+        String indexKey = "obs:analytics:index:calc-1";
         Set<Object> indexedKeys = new LinkedHashSet<>(List.of(
-                "obs:analytics:run-perf:calc-1:tenant-a:DAILY:30",
-                "obs:analytics:runtime:calc-1:tenant-a:DAILY:30",
-                "obs:analytics:trends:calc-1:tenant-a:30"
+                "obs:analytics:run-perf:calc-1:DAILY:30",
+                "obs:analytics:runtime:calc-1:DAILY:30",
+                "obs:analytics:trends:calc-1:30"
         ));
 
         when(setOperations.members(indexKey)).thenReturn(indexedKeys);
 
         service.onRunStarted(new RunStartedEvent(run));
 
-        verify(redisTemplate).delete(List.of("obs:analytics:run-perf:calc-1:tenant-a:DAILY:30"));
+        verify(redisTemplate).delete(List.of("obs:analytics:run-perf:calc-1:DAILY:30"));
 
         var removeCaptor = org.mockito.ArgumentCaptor.forClass(Object[].class);
         verify(setOperations).remove(eq(indexKey), removeCaptor.capture());
-        assertArrayEquals(new Object[]{"obs:analytics:run-perf:calc-1:tenant-a:DAILY:30"}, removeCaptor.getValue());
+        assertArrayEquals(new Object[]{"obs:analytics:run-perf:calc-1:DAILY:30"}, removeCaptor.getValue());
     }
 
     @Test
     void onRunCompleted_andOnSlaBreached_evictAllIndexedAnalyticsKeys() {
         CalculatorRun run = run("calc-1", "tenant-a");
-        String indexKey = "obs:analytics:index:calc-1:tenant-a";
+        String indexKey = "obs:analytics:index:calc-1";
         Set<Object> indexedKeys = new LinkedHashSet<>(List.of(
-                "obs:analytics:run-perf:calc-1:tenant-a:DAILY:30",
-                "obs:analytics:runtime:calc-1:tenant-a:DAILY:30"
+                "obs:analytics:run-perf:calc-1:DAILY:30",
+                "obs:analytics:runtime:calc-1:DAILY:30"
         ));
 
         when(setOperations.members(indexKey)).thenReturn(indexedKeys);
 
         service.onRunCompleted(new RunCompletedEvent(run));
         verify(redisTemplate).delete(List.of(
-                "obs:analytics:run-perf:calc-1:tenant-a:DAILY:30",
-                "obs:analytics:runtime:calc-1:tenant-a:DAILY:30",
+                "obs:analytics:run-perf:calc-1:DAILY:30",
+                "obs:analytics:runtime:calc-1:DAILY:30",
                 indexKey
         ));
 
@@ -102,8 +102,8 @@ class AnalyticsCacheServiceTest {
 
         service.onSlaBreached(new SlaBreachedEvent(run, new SlaEvaluationResult(true, "b", "HIGH")));
         verify(redisTemplate).delete(List.of(
-                "obs:analytics:run-perf:calc-1:tenant-a:DAILY:30",
-                "obs:analytics:runtime:calc-1:tenant-a:DAILY:30",
+                "obs:analytics:run-perf:calc-1:DAILY:30",
+                "obs:analytics:runtime:calc-1:DAILY:30",
                 indexKey
         ));
         verify(setOperations, never()).remove(any(), any());
@@ -118,10 +118,10 @@ class AnalyticsCacheServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.opsForSet()).thenReturn(setOperations);
 
-        service.putInCache("runtime", "calc-1", "tenant-1", 30, "response-payload");
+        service.putInCache("runtime", "calc-1", 30, "response-payload");
 
-        String expectedKey   = "obs:analytics:runtime:calc-1:tenant-1:30";
-        String expectedIndex = "obs:analytics:index:calc-1:tenant-1";
+        String expectedKey   = "obs:analytics:runtime:calc-1:30";
+        String expectedIndex = "obs:analytics:index:calc-1";
 
         verify(valueOperations).set(expectedKey, "response-payload", Duration.ofMinutes(5));
         verify(setOperations).add(expectedIndex, expectedKey);
@@ -135,10 +135,10 @@ class AnalyticsCacheServiceTest {
     @Test
     void getFromCache_cacheHit_returnsValueDirectly() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("obs:analytics:runtime:calc-1:tenant-1:30"))
+        when(valueOperations.get("obs:analytics:runtime:calc-1:30"))
                 .thenReturn("cached-value");
 
-        String result = service.getFromCache("runtime", "calc-1", "tenant-1", 30, String.class);
+        String result = service.getFromCache("runtime", "calc-1", 30, String.class);
 
         assertThat(result).isEqualTo("cached-value");
     }
@@ -148,7 +148,7 @@ class AnalyticsCacheServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(anyString())).thenReturn(null);
 
-        String result = service.getFromCache("runtime", "calc-1", "tenant-1", 30, String.class);
+        String result = service.getFromCache("runtime", "calc-1", 30, String.class);
 
         assertThat(result).isNull();
     }
@@ -158,9 +158,9 @@ class AnalyticsCacheServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         // Redis JSON deserialization may return a LinkedHashMap when the stored type is unknown at read time
         LinkedHashMap<String, Object> rawMap = new LinkedHashMap<>(Map.of("name", "hello"));
-        when(valueOperations.get("obs:analytics:runtime:calc-1:tenant-1:30")).thenReturn(rawMap);
+        when(valueOperations.get("obs:analytics:runtime:calc-1:30")).thenReturn(rawMap);
 
-        SimpleResponse result = service.getFromCache("runtime", "calc-1", "tenant-1", 30, SimpleResponse.class);
+        SimpleResponse result = service.getFromCache("runtime", "calc-1", 30, SimpleResponse.class);
 
         assertThat(result).isNotNull();
         assertThat(result.name()).isEqualTo("hello");

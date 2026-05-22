@@ -50,7 +50,7 @@ public class RunQueryController {
     )
     public ResponseEntity<CalculatorStatusResponse> getCalculatorStatus(
             @PathVariable String calculatorId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
 
             @Parameter(description = "Frequency: DAILY, MONTHLY, D, or M (case-insensitive)")
             @RequestParam String frequency,
@@ -67,7 +67,7 @@ public class RunQueryController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             CalculatorStatusResponse response = queryService.getCalculatorStatus(
-                    calculatorId, tenantId, freq, historyLimit, bypassCache);
+                    calculatorId, freq, historyLimit, bypassCache);
 
             CacheControl cacheControl = bypassCache
                     ? CacheControl.noCache()
@@ -91,7 +91,7 @@ public class RunQueryController {
     )
     public ResponseEntity<List<CalculatorStatusResponse>> getBatchCalculatorStatus(
             @RequestBody @NotEmpty @Size(max = 100) List<String> calculatorIds,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
 
             @Parameter(description = "Frequency: DAILY, MONTHLY, D, or M")
             @RequestParam String frequency,
@@ -111,7 +111,7 @@ public class RunQueryController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             List<CalculatorStatusResponse> response = queryService.getBatchCalculatorStatus(
-                    calculatorIds, tenantId, freq, historyLimit, allowStale);
+                    calculatorIds, freq, historyLimit, allowStale);
 
             CacheControl cacheControl = allowStale
                     ? CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate()
@@ -137,7 +137,7 @@ public class RunQueryController {
                     "Empty runs list = no run found. isRerun=true = a re-trigger was fired for that dimension."
     )
     public ResponseEntity<CalculatorBatchRunsResponse> getBatchRuns(
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @RequestParam("reporting_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate,
             @RequestParam(defaultValue = "DAILY") String frequency,
             @RequestParam(value = "run_number", required = false)
@@ -158,7 +158,7 @@ public class RunQueryController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             Map<String, CalculatorBatchRunsResponse.CalculatorEntry> calculators =
-                    calculatorStateService.getState(tenantId, reportingDate, freq, runNumber, calculatorNames);
+                    calculatorStateService.getState(reportingDate, freq, runNumber, calculatorNames);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())

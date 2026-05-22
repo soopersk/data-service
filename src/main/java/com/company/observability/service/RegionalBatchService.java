@@ -34,8 +34,8 @@ public class RegionalBatchService {
      * Backward-compatible overload — no run_number filter applied.
      * Used by the existing regional-batch-status endpoint.
      */
-    public RegionalBatchResult getRegionalBatchStatus(String tenantId, LocalDate reportingDate) {
-        return getRegionalBatchStatus(tenantId, reportingDate, null);
+    public RegionalBatchResult getRegionalBatchStatus(LocalDate reportingDate) {
+        return getRegionalBatchStatus(reportingDate, null);
     }
 
     /**
@@ -44,8 +44,8 @@ public class RegionalBatchService {
      *
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter
      */
-    public RegionalBatchResult getRegionalBatchStatus(String tenantId, LocalDate reportingDate, String runNumber) {
-        List<CalculatorRun> runs = calculatorRunRepository.findRegionalBatchRuns(tenantId, reportingDate, runNumber);
+    public RegionalBatchResult getRegionalBatchStatus(LocalDate reportingDate, String runNumber) {
+        List<CalculatorRun> runs = calculatorRunRepository.findRegionalBatchRuns(reportingDate, runNumber);
 
         // Build map keyed by region (from run_parameters)
         Map<String, CalculatorRun> runsByRegion = new LinkedHashMap<>();
@@ -114,7 +114,7 @@ public class RegionalBatchService {
 
         List<RegionalBatchTiming> history = null;
         if (needsHistoryStart || needsHistoryEnd) {
-            history = loadHistory(tenantId, reportingDate, runNumber);
+            history = loadHistory(reportingDate, runNumber);
         }
 
         EstimatedTime estStart = (actualEarliestStart != null)
@@ -127,8 +127,8 @@ public class RegionalBatchService {
 
         boolean overallBreached = !slaBreachedRegions.isEmpty();
 
-        log.debug("event=regional_batch.status tenant_id={} reporting_date={} total={} completed={} running={} failed={} breached={} est_start_actual={} est_end_actual={}",
-                tenantId, reportingDate, properties.getRegionOrder().size(),
+        log.debug("event=regional_batch.status reporting_date={} total={} completed={} running={} failed={} breached={} est_start_actual={} est_end_actual={}",
+                reportingDate, properties.getRegionOrder().size(),
                 completedCount, runningCount, failedCount, overallBreached,
                 estStart != null && estStart.actual(), estEnd != null && estEnd.actual());
 
@@ -160,14 +160,14 @@ public class RegionalBatchService {
      * When both estimates are needed (nothing started yet), the two {@code loadHistory()}
      * calls within the same request both hit the Redis cache after the first populates it.
      */
-    private List<RegionalBatchTiming> loadHistory(String tenantId, LocalDate reportingDate, String runNumber) {
-        List<RegionalBatchTiming> cached = cacheService.getHistory(tenantId, reportingDate, runNumber);
+    private List<RegionalBatchTiming> loadHistory(LocalDate reportingDate, String runNumber) {
+        List<RegionalBatchTiming> cached = cacheService.getHistory(reportingDate, runNumber);
         if (cached != null) {
             return cached;
         }
         List<RegionalBatchTiming> history = calculatorRunRepository
-                .findRegionalBatchHistory(tenantId, reportingDate, LOOKBACK_DAYS, runNumber);
-        cacheService.putHistory(tenantId, reportingDate, runNumber, history);
+                .findRegionalBatchHistory(reportingDate, LOOKBACK_DAYS, runNumber);
+        cacheService.putHistory(reportingDate, runNumber, history);
         return history;
     }
 

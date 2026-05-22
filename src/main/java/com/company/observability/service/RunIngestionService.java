@@ -7,7 +7,6 @@ import com.company.observability.domain.enums.CalculatorFrequency;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.*;
-import com.company.observability.exception.DomainAccessDeniedException;
 import com.company.observability.exception.DomainNotFoundException;
 import com.company.observability.exception.DomainValidationException;
 import com.company.observability.event.*;
@@ -81,7 +80,7 @@ public class RunIngestionService {
         // Fetch the calculator's cached rolling profile once (Redis-backed, no DB on warm cache).
         // It feeds both the SLA baseline and the estimated start/end fallbacks.
         CalculatorProfile profile = calculatorProfileService.getProfile(
-                request.getCalculatorId(), tenantId, frequency);
+                request.getCalculatorId(), frequency);
 
         // Derive the SLA deadline from the calculator's average runtime and freeze it into
         // slaTime. Applies to DAILY and MONTHLY. May be null when no baseline is available
@@ -145,17 +144,13 @@ public class RunIngestionService {
 
         var prev = MdcContextUtil.setCalculatorContext(run.getCalculatorId(), runId);
         try {
-            return doCompleteRun(run, request, tenantId);
+            return doCompleteRun(run, request);
         } finally {
             MdcContextUtil.restoreContext(prev);
         }
     }
 
-    private CalculatorRun doCompleteRun(CalculatorRun run, CompleteRunRequest request, String tenantId) {
-        if (!run.getTenantId().equals(tenantId)) {
-            throw new DomainAccessDeniedException("Access denied to run " + run.getRunId() + " for tenant " + tenantId);
-        }
-
+    private CalculatorRun doCompleteRun(CalculatorRun run, CompleteRunRequest request) {
         if (run.getStatus() != RunStatus.RUNNING) {
             lifecycleLogger.emit(LifecycleEvent.RUN_COMPLETE_REJECTED, kv("reason", "duplicate"));
             meterRegistry.counter(INGESTION_RUN_DUPLICATE, "phase", "complete").increment();

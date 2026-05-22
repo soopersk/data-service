@@ -37,7 +37,6 @@ class RegionalBatchCacheServiceTest {
 
     private RegionalBatchCacheService service;
 
-    private static final String TENANT = "tenant-1";
     private static final LocalDate DATE = LocalDate.of(2026, 4, 17);
 
     @BeforeEach
@@ -59,20 +58,20 @@ class RegionalBatchCacheServiceTest {
                         Instant.parse("2026-04-16T17:00:00Z"))
         );
 
-        service.putHistory(TENANT, DATE, history);
+        service.putHistory(DATE,history);
 
         verify(valueOps).set(
-                eq("obs:analytics:regional-batch:history:tenant-1:2026-04-17"),
+                eq("obs:analytics:regional-batch:history:2026-04-17"),
                 any(),
                 eq(Duration.ofHours(24)));
     }
 
     @Test
     void getHistory_cacheMiss_returnsNull() {
-        when(valueOps.get("obs:analytics:regional-batch:history:tenant-1:2026-04-17"))
+        when(valueOps.get("obs:analytics:regional-batch:history:2026-04-17"))
                 .thenReturn(null);
 
-        List<RegionalBatchTiming> result = service.getHistory(TENANT, DATE);
+        List<RegionalBatchTiming> result = service.getHistory(DATE);
 
         assertThat(result).isNull();
     }
@@ -86,15 +85,15 @@ class RegionalBatchCacheServiceTest {
                         Instant.parse("2026-04-16T17:00:00Z"))
         );
         // Store and retrieve using the service's own serialization to simulate the round-trip
-        service.putHistory(TENANT, DATE, stored);
+        service.putHistory(DATE,stored);
         var captor = org.mockito.ArgumentCaptor.forClass(Object.class);
         verify(valueOps).set(any(), captor.capture(), any());
 
         Object captured = captor.getValue();
-        when(valueOps.get("obs:analytics:regional-batch:history:tenant-1:2026-04-17"))
+        when(valueOps.get("obs:analytics:regional-batch:history:2026-04-17"))
                 .thenReturn(captured);
 
-        List<RegionalBatchTiming> result = service.getHistory(TENANT, DATE);
+        List<RegionalBatchTiming> result = service.getHistory(DATE);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).region()).isEqualTo("AMER");
@@ -104,7 +103,7 @@ class RegionalBatchCacheServiceTest {
     void getHistory_redisException_returnsNull() {
         when(valueOps.get(any())).thenThrow(new RuntimeException("Redis down"));
 
-        assertThat(service.getHistory(TENANT, DATE)).isNull();
+        assertThat(service.getHistory(DATE)).isNull();
     }
 
     @Test
@@ -113,17 +112,17 @@ class RegionalBatchCacheServiceTest {
                 .when(valueOps).set(any(), any(), any());
 
         assertThatNoException().isThrownBy(
-                () -> service.putHistory(TENANT, DATE, List.of()));
+                () -> service.putHistory(DATE, List.of()));
     }
 
     // ── Status response cache ────────────────────────────────────────
 
     @Test
     void getStatusResponse_cacheMiss_returnsNull() {
-        when(valueOps.get("obs:analytics:regional-batch:status:tenant-1:2026-04-17"))
+        when(valueOps.get("obs:analytics:regional-batch:status:2026-04-17"))
                 .thenReturn(null);
 
-        assertThat(service.getStatusResponse(TENANT, DATE)).isNull();
+        assertThat(service.getStatusResponse(DATE)).isNull();
     }
 
     @Test
@@ -131,14 +130,14 @@ class RegionalBatchCacheServiceTest {
         RegionalBatchStatusResponse response = minimalResponse(10, 10, 0, 0);
 
         // Capture what was stored
-        service.putStatusResponse(TENANT, DATE, response);
+        service.putStatusResponse(DATE,response);
         var captor = org.mockito.ArgumentCaptor.forClass(Object.class);
         verify(valueOps).set(any(), captor.capture(), any());
 
-        when(valueOps.get("obs:analytics:regional-batch:status:tenant-1:2026-04-17"))
+        when(valueOps.get("obs:analytics:regional-batch:status:2026-04-17"))
                 .thenReturn(captor.getValue());
 
-        RegionalBatchStatusResponse result = service.getStatusResponse(TENANT, DATE);
+        RegionalBatchStatusResponse result = service.getStatusResponse(DATE);
 
         assertThat(result).isNotNull();
         assertThat(result.totalRegions()).isEqualTo(10);
@@ -149,7 +148,7 @@ class RegionalBatchCacheServiceTest {
     void getStatusResponse_redisException_returnsNull() {
         when(valueOps.get(any())).thenThrow(new RuntimeException("Redis down"));
 
-        assertThat(service.getStatusResponse(TENANT, DATE)).isNull();
+        assertThat(service.getStatusResponse(DATE)).isNull();
     }
 
     @Test
@@ -158,7 +157,7 @@ class RegionalBatchCacheServiceTest {
                 .when(valueOps).set(any(), any(), any());
 
         assertThatNoException().isThrownBy(
-                () -> service.putStatusResponse(TENANT, DATE, minimalResponse(10, 10, 0, 0)));
+                () -> service.putStatusResponse(DATE, minimalResponse(10, 10, 0, 0)));
     }
 
     // ── Smart TTL selection ──────────────────────────────────────────
@@ -202,7 +201,7 @@ class RegionalBatchCacheServiceTest {
     void putStatusResponse_usesCorrectTtlForTerminalClean() {
         RegionalBatchStatusResponse r = minimalResponse(10, 10, 0, 0);
 
-        service.putStatusResponse(TENANT, DATE, r);
+        service.putStatusResponse(DATE,r);
 
         verify(valueOps).set(any(), any(), eq(Duration.ofHours(4)));
     }
@@ -211,7 +210,7 @@ class RegionalBatchCacheServiceTest {
     void putStatusResponse_usesCorrectTtlForActive() {
         RegionalBatchStatusResponse r = minimalResponse(10, 5, 2, 0);
 
-        service.putStatusResponse(TENANT, DATE, r);
+        service.putStatusResponse(DATE,r);
 
         verify(valueOps).set(any(), any(), eq(Duration.ofSeconds(30)));
     }

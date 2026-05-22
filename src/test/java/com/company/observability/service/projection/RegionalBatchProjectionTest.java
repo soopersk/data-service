@@ -43,9 +43,9 @@ class RegionalBatchProjectionTest {
         LocalDate date = LocalDate.of(2026, 4, 17);
         RegionalBatchStatusResponse cached = minimalResponse(date, 10, 10, 0, 0);
 
-        when(regionalBatchCacheService.getStatusResponse("tenant-1", date)).thenReturn(cached);
+        when(regionalBatchCacheService.getStatusResponse(date)).thenReturn(cached);
 
-        RegionalBatchStatusResponse result = projection.getRegionalBatchStatus("tenant-1", date);
+        RegionalBatchStatusResponse result = projection.getRegionalBatchStatus(date);
 
         assertThat(result).isSameAs(cached);
         verifyNoInteractions(regionalBatchService);
@@ -54,7 +54,7 @@ class RegionalBatchProjectionTest {
     @Test
     void getRegionalBatchStatus_cacheMiss_computesAndCachesResult() {
         LocalDate date = LocalDate.of(2026, 4, 17);
-        when(regionalBatchCacheService.getStatusResponse("tenant-1", date)).thenReturn(null);
+        when(regionalBatchCacheService.getStatusResponse(date)).thenReturn(null);
 
         var result = new RegionalBatchService.RegionalBatchResult(
                 date,
@@ -64,15 +64,15 @@ class RegionalBatchProjectionTest {
                 List.of(),
                 List.of()
         );
-        when(regionalBatchService.getRegionalBatchStatus("tenant-1", date)).thenReturn(result);
+        when(regionalBatchService.getRegionalBatchStatus(date)).thenReturn(result);
 
-        RegionalBatchStatusResponse response = projection.getRegionalBatchStatus("tenant-1", date);
+        RegionalBatchStatusResponse response = projection.getRegionalBatchStatus(date);
 
         assertThat(response).isNotNull();
         assertThat(response.overallSla()).isEqualTo(
                 new SlaIndicator(Instant.parse("2026-04-17T15:45:00Z"), false));
         assertThat(response.totalRegions()).isEqualTo(10);
-        verify(regionalBatchCacheService).putStatusResponse(eq("tenant-1"), eq(date), any());
+        verify(regionalBatchCacheService).putStatusResponse(eq(date), any());
     }
 
     @Test

@@ -34,9 +34,9 @@ class CalculatorProfileServiceTest {
 
     private CalculatorProfileService service;
 
-    private static final String KEY = "obs:profile:calc-1:tenant-1:DAILY";
+    private static final String KEY = "obs:profile:calc-1:DAILY";
     private final CalculatorProfile profile =
-            new CalculatorProfile("calc-1", "tenant-1", "DAILY", 600_000L, 300, 360, 10);
+            new CalculatorProfile("calc-1", "DAILY", 600_000L, 300, 360, 10);
 
     @BeforeEach
     void setUp() {
@@ -50,19 +50,19 @@ class CalculatorProfileServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(KEY)).thenReturn(profile);
 
-        CalculatorProfile result = service.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY);
+        CalculatorProfile result = service.getProfile("calc-1", CalculatorFrequency.DAILY);
 
         assertThat(result.avgDurationMs()).isEqualTo(600_000L);
-        verify(dailyAggregateRepository, never()).findProfile(anyString(), anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt());
+        verify(dailyAggregateRepository, never()).findProfile(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
     void cacheMiss_readsFromDb_andCaches() {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(KEY)).thenReturn(null);
-        when(dailyAggregateRepository.findProfile("calc-1", "tenant-1", "DAILY", 30)).thenReturn(profile);
+        when(dailyAggregateRepository.findProfile("calc-1", "DAILY", 30)).thenReturn(profile);
 
-        CalculatorProfile result = service.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY);
+        CalculatorProfile result = service.getProfile("calc-1", CalculatorFrequency.DAILY);
 
         assertThat(result.avgDurationMs()).isEqualTo(600_000L);
         // non-empty profile → long TTL (26h default)
@@ -71,12 +71,12 @@ class CalculatorProfileServiceTest {
 
     @Test
     void emptyProfile_cachedWithShortTtl() {
-        CalculatorProfile empty = new CalculatorProfile("calc-1", "tenant-1", "DAILY", 0, 0, 0, 0);
+        CalculatorProfile empty = new CalculatorProfile("calc-1", "DAILY", 0, 0, 0, 0);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(KEY)).thenReturn(null);
-        when(dailyAggregateRepository.findProfile("calc-1", "tenant-1", "DAILY", 30)).thenReturn(empty);
+        when(dailyAggregateRepository.findProfile("calc-1", "DAILY", 30)).thenReturn(empty);
 
-        service.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY);
+        service.getProfile("calc-1", CalculatorFrequency.DAILY);
 
         verify(valueOps).set(eq(KEY), eq(empty), eq(Duration.ofMinutes(60)));
     }
@@ -85,9 +85,9 @@ class CalculatorProfileServiceTest {
     void redisReadFailure_fallsBackToDb() {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(KEY)).thenThrow(new RuntimeException("redis down"));
-        when(dailyAggregateRepository.findProfile("calc-1", "tenant-1", "DAILY", 30)).thenReturn(profile);
+        when(dailyAggregateRepository.findProfile("calc-1", "DAILY", 30)).thenReturn(profile);
 
-        CalculatorProfile result = service.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY);
+        CalculatorProfile result = service.getProfile("calc-1", CalculatorFrequency.DAILY);
 
         assertThat(result.avgDurationMs()).isEqualTo(600_000L);
     }

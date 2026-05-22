@@ -41,15 +41,15 @@ public class DashboardProjection {
     private final DashboardCacheService dashboardCacheService;
 
     public CalculatorDashboardResponse getCalculatorDashboard(
-            String tenantId, LocalDate reportingDate, String frequency, int runNumber) {
+            LocalDate reportingDate, String frequency, int runNumber) {
 
         CalculatorDashboardResponse cached =
-                dashboardCacheService.getStatusResponse(tenantId, reportingDate, frequency, runNumber);
+                dashboardCacheService.getStatusResponse(reportingDate, frequency, runNumber);
         if (cached != null) return cached;
 
-        DashboardResult result = dashboardService.buildDashboard(tenantId, reportingDate, frequency, runNumber);
+        DashboardResult result = dashboardService.buildDashboard(reportingDate, frequency, runNumber);
         CalculatorDashboardResponse response = toDashboardResponse(result);
-        dashboardCacheService.putStatusResponse(tenantId, reportingDate, frequency, runNumber, response);
+        dashboardCacheService.putStatusResponse(reportingDate, frequency, runNumber, response);
         return response;
     }
 

@@ -72,17 +72,17 @@ public class CalculatorRunRepository {
      * MONTHLY: reporting_date = end of month
      */
     public List<CalculatorRun> findRecentRuns(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, int limit) {
+            String calculatorId, CalculatorFrequency frequency, int limit) {
 
         // Check bloom filter
         if (!redisCache.mightExist(calculatorId)) {
             log.debug("event=cache.bloom_check outcome=miss calculator_id={}", calculatorId);
-            return queryAndCacheRecentRuns(calculatorId, tenantId, frequency, limit);
+            return queryAndCacheRecentRuns(calculatorId, frequency, limit);
         }
 
         // Try Redis sorted set
         Optional<List<CalculatorRun>> cached = redisCache.getRecentRuns(
-                calculatorId, tenantId, frequency, limit);
+                calculatorId, frequency, limit);
 
         if (cached.isPresent()) {
             log.debug("event=cache.read outcome=hit calculator_id={}", calculatorId);
@@ -91,19 +91,18 @@ public class CalculatorRunRepository {
 
         // Cache miss - query database
         log.debug("event=cache.read outcome=miss calculator_id={}", calculatorId);
-        return queryAndCacheRecentRuns(calculatorId, tenantId, frequency, limit);
+        return queryAndCacheRecentRuns(calculatorId, frequency, limit);
     }
 
     /**
      * Query with partition pruning based on frequency
      */
     private List<CalculatorRun> queryAndCacheRecentRuns(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, int limit) {
+            String calculatorId, CalculatorFrequency frequency, int limit) {
 
         String sql = buildPartitionPrunedQuery(SELECT_STATUS_BASE, frequency);
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("frequency", frequency.name())
                 .addValue("limit", limit);
 
@@ -124,7 +123,6 @@ public class CalculatorRunRepository {
         if (frequency == CalculatorFrequency.DAILY) {
             return selectBase + """
                 WHERE calculator_id = :calculatorId
-                AND tenant_id = :tenantId
                 AND frequency = :frequency
                 AND reporting_date >= CURRENT_DATE - INTERVAL '3 days'
                 AND reporting_date <= CURRENT_DATE
@@ -134,7 +132,6 @@ public class CalculatorRunRepository {
         } else {
             return selectBase + """
                 WHERE calculator_id = :calculatorId
-                AND tenant_id = :tenantId
                 AND frequency = :frequency
                 AND reporting_date = (DATE_TRUNC('month', reporting_date) + INTERVAL '1 month - 1 day')::DATE
                 AND reporting_date >= CURRENT_DATE - INTERVAL '13 months'
@@ -148,7 +145,7 @@ public class CalculatorRunRepository {
      * Batch query with partition pruning
      */
     public Map<String, List<CalculatorRun>> findBatchRecentRuns(
-            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, int limit) {
+            List<String> calculatorIds, CalculatorFrequency frequency, int limit) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
             return Collections.emptyMap();
@@ -160,7 +157,7 @@ public class CalculatorRunRepository {
         // Check Redis for each calculator
         for (String calculatorId : calculatorIds) {
             Optional<List<CalculatorRun>> cached = redisCache.getRecentRuns(
-                    calculatorId, tenantId, frequency, limit);
+                    calculatorId, frequency, limit);
 
             if (cached.isPresent()) {
                 result.put(calculatorId, cached.get());
@@ -174,7 +171,7 @@ public class CalculatorRunRepository {
         // Query database for cache misses
         if (!cacheMisses.isEmpty()) {
             Map<String, List<CalculatorRun>> dbResults = queryBatchFromDatabase(
-                    cacheMisses, tenantId, frequency, limit);
+                    cacheMisses, frequency, limit);
 
             // Cache the results
             dbResults.forEach((calcId, runs) -> runs.forEach(redisCache::cacheRunOnWrite));
@@ -190,14 +187,14 @@ public class CalculatorRunRepository {
      * Used by RunQueryService after response-cache misses are already known.
      */
     public Map<String, List<CalculatorRun>> findBatchRecentRunsDbOnly(
-            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, int limit) {
+            List<String> calculatorIds, CalculatorFrequency frequency, int limit) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
         Map<String, List<CalculatorRun>> dbResults = queryBatchFromDatabase(
-                calculatorIds, tenantId, frequency, limit);
+                calculatorIds, frequency, limit);
 
         dbResults.forEach((calcId, runs) -> runs.forEach(redisCache::cacheRunOnWrite));
         return dbResults;
@@ -208,7 +205,7 @@ public class CalculatorRunRepository {
      * NPJT expands :calculatorIds list into the IN clause automatically.
      */
     private Map<String, List<CalculatorRun>> queryBatchFromDatabase(
-            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, int limit) {
+            List<String> calculatorIds, CalculatorFrequency frequency, int limit) {
 
         String partitionFilter = buildPartitionFilter(frequency);
 
@@ -227,7 +224,6 @@ public class CalculatorRunRepository {
                        ) as rn
                 FROM calculator_runs
                 WHERE calculator_id IN (:calculatorIds)
-                AND tenant_id = :tenantId
                 AND frequency = :frequency
                 %s
             ) ranked
@@ -237,7 +233,6 @@ public class CalculatorRunRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorIds", calculatorIds)
-                .addValue("tenantId", tenantId)
                 .addValue("frequency", frequency.name())
                 .addValue("limit", limit);
 
@@ -451,15 +446,15 @@ public class CalculatorRunRepository {
      * Find runs with SLA severity for performance card (LEFT JOIN with sla_breach_events)
      */
     public List<RunWithSlaStatus> findRunsWithSlaStatus(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, int days) {
-        return findRunsWithSlaStatus(calculatorId, tenantId, frequency, days, null);
+            String calculatorId, CalculatorFrequency frequency, int days) {
+        return findRunsWithSlaStatus(calculatorId, frequency, days, null);
     }
 
     /**
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
     public List<RunWithSlaStatus> findRunsWithSlaStatus(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, int days, String runNumber) {
+            String calculatorId, CalculatorFrequency frequency, int days, String runNumber) {
 
         StringBuilder sql = new StringBuilder("""
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
@@ -469,8 +464,8 @@ public class CalculatorRunRepository {
                    cr.run_number, cr.expected_duration_ms,
                    sbe.severity
             FROM calculator_runs cr
-            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id AND sbe.tenant_id = cr.tenant_id
-            WHERE cr.calculator_id = :calculatorId AND cr.tenant_id = :tenantId AND cr.frequency = :frequency
+            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id
+            WHERE cr.calculator_id = :calculatorId AND cr.frequency = :frequency
             AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             AND cr.reporting_date <= CURRENT_DATE
             """);
@@ -481,7 +476,6 @@ public class CalculatorRunRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("frequency", frequency.name())
                 .addValue("days", days);
         if (runNumber != null) {
@@ -524,7 +518,7 @@ public class CalculatorRunRepository {
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
     public List<RunWithSlaStatus> findRunsWithSlaStatusByName(
-            String calculatorName, String tenantId, CalculatorFrequency frequency, int days, String runNumber) {
+            String calculatorName, CalculatorFrequency frequency, int days, String runNumber) {
 
         StringBuilder sql = new StringBuilder("""
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
@@ -534,8 +528,8 @@ public class CalculatorRunRepository {
                    cr.run_number, cr.expected_duration_ms,
                    sbe.severity
             FROM calculator_runs cr
-            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id AND sbe.tenant_id = cr.tenant_id
-            WHERE cr.calculator_name = :calculatorName AND cr.tenant_id = :tenantId AND cr.frequency = :frequency
+            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id
+            WHERE cr.calculator_name = :calculatorName AND cr.frequency = :frequency
             AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             AND cr.reporting_date <= CURRENT_DATE
             """);
@@ -546,7 +540,6 @@ public class CalculatorRunRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorName", calculatorName)
-                .addValue("tenantId", tenantId)
                 .addValue("frequency", frequency.name())
                 .addValue("days", days);
         if (runNumber != null) {
@@ -585,8 +578,8 @@ public class CalculatorRunRepository {
      * Find latest regional batch run per region for a given reporting date.
      * Backward-compatible overload — delegates with no run_number filter.
      */
-    public List<CalculatorRun> findRegionalBatchRuns(String tenantId, LocalDate reportingDate) {
-        return findRegionalBatchRuns(tenantId, reportingDate, null);
+    public List<CalculatorRun> findRegionalBatchRuns(LocalDate reportingDate) {
+        return findRegionalBatchRuns(reportingDate, null);
     }
 
     /**
@@ -597,7 +590,7 @@ public class CalculatorRunRepository {
      *
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (backward compat)
      */
-    public List<CalculatorRun> findRegionalBatchRuns(String tenantId, LocalDate reportingDate, String runNumber) {
+    public List<CalculatorRun> findRegionalBatchRuns(LocalDate reportingDate, String runNumber) {
         String runNumberClause = runNumber != null
                 ? "AND run_number = :runNumber\n"
                 : "";
@@ -618,8 +611,7 @@ public class CalculatorRunRepository {
                            ORDER BY start_time DESC
                        ) as rn
                 FROM calculator_runs
-                WHERE tenant_id = :tenantId
-                  AND reporting_date = :reportingDate
+                WHERE reporting_date = :reportingDate
                   AND run_type = 'BATCH'
                   AND region IS NOT NULL
                   """ + runNumberClause + """
@@ -629,7 +621,6 @@ public class CalculatorRunRepository {
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenantId)
                 .addValue("reportingDate", reportingDate);
         if (runNumber != null) {
             params.addValue("runNumber", runNumber);
@@ -647,8 +638,8 @@ public class CalculatorRunRepository {
      * Backward-compatible overload — delegates with no run_number filter.
      */
     public List<RegionalBatchTiming> findRegionalBatchHistory(
-            String tenantId, LocalDate excludeDate, int lookbackDays) {
-        return findRegionalBatchHistory(tenantId, excludeDate, lookbackDays, null);
+            LocalDate excludeDate, int lookbackDays) {
+        return findRegionalBatchHistory(excludeDate, lookbackDays, null);
     }
 
     /**
@@ -660,7 +651,7 @@ public class CalculatorRunRepository {
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (backward compat)
      */
     public List<RegionalBatchTiming> findRegionalBatchHistory(
-            String tenantId, LocalDate excludeDate, int lookbackDays, String runNumber) {
+            LocalDate excludeDate, int lookbackDays, String runNumber) {
 
         String runNumberClause = runNumber != null
                 ? "AND run_number = :runNumber\n"
@@ -675,8 +666,7 @@ public class CalculatorRunRepository {
                            ORDER BY start_time DESC
                        ) as rn
                 FROM calculator_runs
-                WHERE tenant_id = :tenantId
-                  AND reporting_date >= :fromDate
+                WHERE reporting_date >= :fromDate
                   AND reporting_date < :excludeDate
                   AND run_type = 'BATCH'
                   AND region IS NOT NULL
@@ -689,7 +679,6 @@ public class CalculatorRunRepository {
 
         LocalDate fromDate = excludeDate.minusDays(lookbackDays);
         MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenantId)
                 .addValue("fromDate", fromDate)
                 .addValue("excludeDate", excludeDate);
         if (runNumber != null) {
@@ -723,7 +712,7 @@ public class CalculatorRunRepository {
      * @return map keyed by calculator_id
      */
     public Map<String, CalculatorRun> findDashboardCalculatorRuns(
-            String tenantId, LocalDate reportingDate, String frequency,
+            LocalDate reportingDate, String frequency,
             String runNumber, List<String> calculatorIds) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
@@ -746,8 +735,7 @@ public class CalculatorRunRepository {
                            ORDER BY start_time DESC NULLS LAST
                        ) as rn
                 FROM calculator_runs
-                WHERE tenant_id = :tenantId
-                  AND reporting_date = :reportingDate
+                WHERE reporting_date = :reportingDate
                   AND frequency = :frequency
                   AND calculator_id IN (:calculatorIds)
                   AND run_number = :runNumber
@@ -756,7 +744,6 @@ public class CalculatorRunRepository {
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenantId)
                 .addValue("reportingDate", reportingDate)
                 .addValue("frequency", frequency)
                 .addValue("runNumber", runNumber)
@@ -781,7 +768,6 @@ public class CalculatorRunRepository {
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
     public List<CalculatorRun> findAllRunsByDateAndDimension(
-            String tenantId,
             LocalDate reportingDate,
             CalculatorFrequency frequency,
             String runNumber,
@@ -794,8 +780,7 @@ public class CalculatorRunRepository {
         StringBuilder sql = new StringBuilder("""
                 SELECT *
                 FROM calculator_runs
-                WHERE tenant_id       = :tenantId
-                  AND reporting_date  = :reportingDate
+                WHERE reporting_date  = :reportingDate
                   AND frequency       = :frequency
                   AND calculator_name IN (:calculatorNames)
                 """);
@@ -811,7 +796,6 @@ public class CalculatorRunRepository {
                 """);
 
         MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenantId)
                 .addValue("reportingDate", reportingDate)
                 .addValue("frequency", frequency.name())
                 .addValue("calculatorNames", calculatorNames);
@@ -831,7 +815,7 @@ public class CalculatorRunRepository {
      * @return list ordered by calculator_id, reporting_date DESC
      */
     public List<HistoricalRunStatus> findDashboardCalculatorHistory(
-            String tenantId, LocalDate excludeDate, int lookbackDays,
+            LocalDate excludeDate, int lookbackDays,
             String frequency, String runNumber, List<String> calculatorIds) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
@@ -846,8 +830,7 @@ public class CalculatorRunRepository {
                            ORDER BY start_time DESC NULLS LAST
                        ) as rn
                 FROM calculator_runs
-                WHERE tenant_id = :tenantId
-                  AND reporting_date < :excludeDate
+                WHERE reporting_date < :excludeDate
                   AND reporting_date >= :fromDate
                   AND frequency = :frequency
                   AND calculator_id IN (:calculatorIds)
@@ -860,7 +843,6 @@ public class CalculatorRunRepository {
 
         LocalDate fromDate = excludeDate.minusDays(lookbackDays);
         MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenantId)
                 .addValue("excludeDate", excludeDate)
                 .addValue("fromDate", fromDate)
                 .addValue("frequency", frequency)
@@ -893,7 +875,7 @@ public class CalculatorRunRepository {
      *         that have a non-null estimated_start_time are included)
      */
     public Map<String, Instant> findNextRunEstimatedStarts(
-            String tenantId, LocalDate reportingDate, String frequency,
+            LocalDate reportingDate, String frequency,
             String runNumber, List<String> calculatorIds) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
@@ -911,8 +893,7 @@ public class CalculatorRunRepository {
                                     created_at ASC
                        ) AS rn
                 FROM calculator_runs
-                WHERE tenant_id            = :tenantId
-                  AND frequency            = :frequency
+                WHERE frequency            = :frequency
                   AND calculator_id        IN (:calculatorIds)
                   AND estimated_start_time IS NOT NULL
                   AND (
@@ -929,7 +910,6 @@ public class CalculatorRunRepository {
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("tenantId", tenantId)
                 .addValue("frequency", frequency)
                 .addValue("calculatorIds", calculatorIds)
                 .addValue("reportingDate", reportingDate)

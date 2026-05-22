@@ -10,7 +10,6 @@ import java.time.LocalDate;
  */
 public record DailyAggregate(
         String calculatorId,
-        String tenantId,
         LocalDate reportingDate,
         int totalRuns,
         int successRuns,

@@ -38,11 +38,11 @@ class PerformanceCardProjectionTest {
                 0, 0, 0, 0, 0,
                 Collections.emptyList(), null, null);
 
-        when(analyticsService.getRunPerformanceData("calc-1", "t1", 30, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunPerformanceData("calc-1", 30, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
         PerformanceCardResponse result = projection
-                .getPerformanceCard("calc-1", "t1", 30, CalculatorFrequency.DAILY);
+                .getPerformanceCard("calc-1", 30, CalculatorFrequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
         assertNull(result.calculatorName());
@@ -80,11 +80,11 @@ class PerformanceCardProjectionTest {
                 ),
                 estStart, slaTime);
 
-        when(analyticsService.getRunPerformanceData("calc-1", "t1", 30, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunPerformanceData("calc-1", 30, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
         PerformanceCardResponse result = projection
-                .getPerformanceCard("calc-1", "t1", 30, CalculatorFrequency.DAILY);
+                .getPerformanceCard("calc-1", 30, CalculatorFrequency.DAILY);
 
         assertEquals("Calculator One", result.calculatorName());
 
@@ -136,11 +136,11 @@ class PerformanceCardProjectionTest {
                 ),
                 estStart1, slaTime1);
 
-        when(analyticsService.getRunPerformanceData("calc-1", "t1", 7, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunPerformanceData("calc-1", 7, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
         PerformanceCardResponse result = projection
-                .getPerformanceCard("calc-1", "t1", 7, CalculatorFrequency.DAILY);
+                .getPerformanceCard("calc-1", 7, CalculatorFrequency.DAILY);
 
         assertEquals(2, result.schedule().size());
         assertEquals("run1", result.schedule().get(0).runKey());
@@ -161,11 +161,11 @@ class PerformanceCardProjectionTest {
                         null, null, null, null)),
                 null, null);
 
-        when(analyticsService.getRunPerformanceData("calc-1", "t1", 7, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunPerformanceData("calc-1", 7, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
         PerformanceCardResponse result = projection
-                .getPerformanceCard("calc-1", "t1", 7, CalculatorFrequency.DAILY);
+                .getPerformanceCard("calc-1", 7, CalculatorFrequency.DAILY);
 
         assertEquals(1, result.runs().size());
         PerformanceCardResponse.RunBar bar = result.runs().get(0);
@@ -198,11 +198,11 @@ class PerformanceCardProjectionTest {
                 ),
                 estStart, slaTime);
 
-        when(analyticsService.getRunPerformanceData("calc-1", "t1", 3, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunPerformanceData("calc-1", 3, CalculatorFrequency.DAILY))
                 .thenReturn(data);
 
         PerformanceCardResponse result = projection
-                .getPerformanceCard("calc-1", "t1", 3, CalculatorFrequency.DAILY);
+                .getPerformanceCard("calc-1", 3, CalculatorFrequency.DAILY);
 
         assertEquals(0, result.slaSummary().totalRuns());
         assertEquals(0.0, result.slaSummary().veryLatePct());

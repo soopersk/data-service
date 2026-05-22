@@ -25,10 +25,10 @@ public class PerformanceCardProjection {
     private final AnalyticsService analyticsService;
 
     public PerformanceCardResponse getPerformanceCard(
-            String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
+            String calculatorId, int days, CalculatorFrequency frequency) {
 
         RunPerformanceData data = analyticsService
-                .getRunPerformanceData(calculatorId, tenantId, days, frequency);
+                .getRunPerformanceData(calculatorId, days, frequency);
 
         return toPerformanceCard(data);
     }

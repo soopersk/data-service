@@ -40,7 +40,7 @@ public class RunIngestionController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Start a calculator run", description = "Called by Airflow when calculator starts")
     public ResponseEntity<RunResponse> startRun(
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Valid @RequestBody StartRunRequest request,
             Principal principal) {
 
@@ -66,7 +66,7 @@ public class RunIngestionController {
     @Operation(summary = "Complete a calculator run", description = "Called by Airflow when calculator finishes")
     public ResponseEntity<RunResponse> completeRun(
             @PathVariable String runId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Valid @RequestBody CompleteRunRequest request,
             Principal principal) {
 

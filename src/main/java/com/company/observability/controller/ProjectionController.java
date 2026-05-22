@@ -46,7 +46,7 @@ public class ProjectionController {
     )
     public ResponseEntity<PerformanceCardResponse> getPerformanceCard(
             @PathVariable String calculatorId,
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days,
             @Parameter(description = "Frequency: DAILY or MONTHLY")
@@ -57,7 +57,7 @@ public class ProjectionController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             PerformanceCardResponse response = performanceCardProjection
-                    .getPerformanceCard(calculatorId, tenantId, days, freq);
+                    .getPerformanceCard(calculatorId, days, freq);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())
@@ -76,7 +76,7 @@ public class ProjectionController {
                     "frequency, and run number. The UI polls this every 60 seconds."
     )
     public ResponseEntity<CalculatorDashboardResponse> getCalculatorDashboard(
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Reporting date (ISO format, e.g. 2026-04-17)")
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate,
             @Parameter(description = "Frequency: DAILY or MONTHLY")
@@ -87,7 +87,7 @@ public class ProjectionController {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             CalculatorDashboardResponse response = dashboardProjection
-                    .getCalculatorDashboard(tenantId, reportingDate, frequency, runNumber);
+                    .getCalculatorDashboard(reportingDate, frequency, runNumber);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())
@@ -106,14 +106,14 @@ public class ProjectionController {
                     "Returns the status of all regional batch runs for a given reporting date."
     )
     public ResponseEntity<RegionalBatchStatusResponse> getRegionalBatchStatus(
-            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Reporting date (ISO format, e.g. 2026-04-17)")
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate) {
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RegionalBatchStatusResponse response = regionalBatchProjection
-                    .getRegionalBatchStatus(tenantId, reportingDate);
+                    .getRegionalBatchStatus(reportingDate);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())

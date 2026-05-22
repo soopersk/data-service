@@ -46,11 +46,11 @@ class CalculatorStateServiceTest {
 
     @Test
     void returnsEmptyRunsForMissingCalculator() {
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of());
 
         Map<String, CalculatorBatchRunsResponse.CalculatorEntry> result =
-                service.getState("t1", DATE, FREQ, "1", List.of("missing-calc"));
+                service.getState(DATE, FREQ, "1",List.of("missing-calc"));
 
         assertThat(result).containsKey("missing-calc");
         assertThat(result.get("missing-calc").runs()).isEmpty();
@@ -62,10 +62,10 @@ class CalculatorStateServiceTest {
         CalculatorRun s2 = buildRun("cap", "r-s2", RunStatus.FAILED,  "WMAP", null, "1", "corr-1", T_MINUS_3, T_MINUS_2, SLA_TIME);
         CalculatorRun s3 = buildRun("cap", "r-s3", RunStatus.RUNNING, "WMAP", null, "1", "corr-1", T_MINUS_3, null,       SLA_TIME);
 
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(s1, s2, s3));
 
-        var result = service.getState("t1", DATE, FREQ, "1", List.of("cap"));
+        var result = service.getState(DATE, FREQ, "1",List.of("cap"));
         var entries = result.get("cap").runs();
 
         assertThat(entries).hasSize(1);
@@ -78,10 +78,10 @@ class CalculatorStateServiceTest {
         CalculatorRun attempt1 = buildRun("cap", "r-1", RunStatus.FAILED,  "LDNL", null, "1", null, T_MINUS_3, T_MINUS_2, SLA_TIME);
         CalculatorRun attempt2 = buildRun("cap", "r-2", RunStatus.SUCCESS, "LDNL", null, "1", null, T_MINUS_1, NOW,       SLA_TIME);
 
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(attempt1, attempt2));
 
-        var result = service.getState("t1", DATE, FREQ, "1", List.of("cap"));
+        var result = service.getState(DATE, FREQ, "1",List.of("cap"));
         var entries = result.get("cap").runs();
 
         assertThat(entries).hasSize(1);
@@ -95,10 +95,10 @@ class CalculatorStateServiceTest {
                 buildRun("capital", "r-wmap", RunStatus.SUCCESS, "WMAP", null, "1", null, T_MINUS_3, T_MINUS_1, SLA_TIME),
                 buildRun("capital", "r-wmde", RunStatus.SUCCESS, "WMDE", null, "1", null, T_MINUS_3, T_MINUS_2, SLA_TIME)
         );
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(dbRuns);
 
-        var result = service.getState("t1", DATE, FREQ, "1", List.of("capital"));
+        var result = service.getState(DATE, FREQ, "1",List.of("capital"));
         var entry = result.get("capital");
 
         assertThat(entry.runs()).hasSize(2);
@@ -118,10 +118,10 @@ class CalculatorStateServiceTest {
                 T_MINUS_3, null, SLA_TIME);
         run.setSlaBreached(true);
 
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(run));
 
-        var entries = service.getState("t1", DATE, FREQ, "1", List.of("calc")).get("calc").runs();
+        var entries = service.getState(DATE, FREQ, "1",List.of("calc")).get("calc").runs();
 
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).slaStatus()).isNotEqualTo("ON_TIME");
@@ -136,10 +136,10 @@ class CalculatorStateServiceTest {
         CalculatorRun run = buildRun("calc", "r-1", RunStatus.SUCCESS, "WMAP", null, "1", null,
                 T_MINUS_3, endTime, SLA_TIME);
 
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(run));
 
-        var entries = service.getState("t1", DATE, FREQ, "1", List.of("calc")).get("calc").runs();
+        var entries = service.getState(DATE, FREQ, "1",List.of("calc")).get("calc").runs();
 
         assertThat(entries.get(0).slaStatus()).isEqualTo("LATE");
     }
@@ -154,10 +154,10 @@ class CalculatorStateServiceTest {
         CalculatorRun run = buildRun("calc", "r-1", RunStatus.SUCCESS, "WMAP", null, "1", null,
                 T_MINUS_3, endTime, SLA_TIME);
 
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(run));
 
-        var entries = service.getState("t1", DATE, FREQ, "1", List.of("calc")).get("calc").runs();
+        var entries = service.getState(DATE, FREQ, "1",List.of("calc")).get("calc").runs();
 
         assertThat(entries.get(0).slaStatus()).isEqualTo("VERY_LATE");
     }
@@ -171,10 +171,10 @@ class CalculatorStateServiceTest {
                 T_MINUS_3, T_MINUS_1, SLA_TIME);
         run.setExpectedDurationMs(5_400_000L);  // 90 min expected
 
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(run));
 
-        var entries = service.getState("t1", DATE, FREQ, "1", List.of("calc")).get("calc").runs();
+        var entries = service.getState(DATE, FREQ, "1",List.of("calc")).get("calc").runs();
 
         assertThat(entries.get(0).expectedDurationMs()).isEqualTo(5_400_000L);
     }
@@ -191,10 +191,10 @@ class CalculatorStateServiceTest {
                 T_MINUS_2, T_MINUS_1, SLA_TIME);
         s2.setExpectedDurationMs(7_200_000L);
 
-        when(runRepository.findAllRunsByDateAndDimension(any(), eq(DATE), eq(FREQ), eq("1"), any()))
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(s1, s2));
 
-        var entries = service.getState("t1", DATE, FREQ, "1", List.of("cap")).get("cap").runs();
+        var entries = service.getState(DATE, FREQ, "1",List.of("cap")).get("cap").runs();
 
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).expectedDurationMs()).isEqualTo(7_200_000L);

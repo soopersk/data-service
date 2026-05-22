@@ -43,8 +43,8 @@ class DailyAggregationJobTest {
         LocalDate from = today.minusDays(3); // default recompute-window-days
 
         when(dailyAggregateRepository.recomputeForDateRange(from, today)).thenReturn(5);
-        CalculatorProfile dailyProfile = new CalculatorProfile("calc-1", "t1", "DAILY", 100L, 0, 0, 10);
-        CalculatorProfile monthlyProfile = new CalculatorProfile("calc-1", "t1", "MONTHLY", 200L, 0, 0, 3);
+        CalculatorProfile dailyProfile = new CalculatorProfile("calc-1", "DAILY", 100L, 0, 0, 10);
+        CalculatorProfile monthlyProfile = new CalculatorProfile("calc-1", "MONTHLY", 200L, 0, 0, 3);
         when(dailyAggregateRepository.findAllProfiles("DAILY", 30)).thenReturn(List.of(dailyProfile));
         when(dailyAggregateRepository.findAllProfiles("MONTHLY", 395)).thenReturn(List.of(monthlyProfile));
 

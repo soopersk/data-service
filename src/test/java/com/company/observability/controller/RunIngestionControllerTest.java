@@ -21,6 +21,7 @@ import java.time.LocalDate;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -187,7 +188,18 @@ class RunIngestionControllerTest {
     }
 
     @Test
-    void startRun_missingTenantIdHeader_returnsBadRequest() throws Exception {
+    void startRun_missingTenantIdHeader_succeedsWithNullTenant() throws Exception {
+        CalculatorRun savedRun = CalculatorRun.builder()
+                .runId("run-1")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator One")
+                .status(RunStatus.RUNNING)
+                .startTime(START_TIME)
+                .slaBreached(false)
+                .build();
+
+        when(ingestionService.startRun(any(), isNull())).thenReturn(savedRun);
+
         String payload = """
                 {
                   "runId": "run-1",
@@ -203,8 +215,9 @@ class RunIngestionControllerTest {
         mockMvc.perform(post("/api/v1/runs/start")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.runId").value("run-1"));
 
-        verifyNoInteractions(ingestionService);
+        verify(ingestionService).startRun(any(), isNull());
     }
 }

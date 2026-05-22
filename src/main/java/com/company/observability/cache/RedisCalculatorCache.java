@@ -40,13 +40,12 @@ public class RedisCalculatorCache {
     // Cache key builders with enum support
     // ================================================================
 
-    private String buildRecentRunsKey(String calculatorId, String tenantId, CalculatorFrequency frequency) {
-        return RECENT_RUNS_ZSET + calculatorId + ":" + tenantId + ":" + frequency.name();
+    private String buildRecentRunsKey(String calculatorId, CalculatorFrequency frequency) {
+        return RECENT_RUNS_ZSET + calculatorId + ":" + frequency.name();
     }
 
-    private String buildStatusHashKey(String calculatorId, String tenantId,
-                                      CalculatorFrequency frequency) {
-        return STATUS_RESPONSE_HASH + calculatorId + ":" + tenantId + ":" + frequency.name();
+    private String buildStatusHashKey(String calculatorId, CalculatorFrequency frequency) {
+        return STATUS_RESPONSE_HASH + calculatorId + ":" + frequency.name();
     }
 
     // ================================================================
@@ -57,7 +56,7 @@ public class RedisCalculatorCache {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             CalculatorFrequency frequency = run.getFrequency();
-            String key = buildRecentRunsKey(run.getCalculatorId(), run.getTenantId(), frequency);
+            String key = buildRecentRunsKey(run.getCalculatorId(), frequency);
 
             // Add to sorted set with timestamp as score
             redisTemplate.opsForZSet().add(key, run, run.getCreatedAt().toEpochMilli());
@@ -71,12 +70,11 @@ public class RedisCalculatorCache {
 
             // Track if running
             RunStatus status = run.getStatus();
+            String runningKey = run.getCalculatorId() + ":" + frequency.name();
             if (status == RunStatus.RUNNING) {
-                String runningKey = run.getCalculatorId() + ":" + run.getTenantId() + ":" + frequency.name();
                 redisTemplate.opsForSet().add(RUNNING_SET, runningKey);
                 redisTemplate.expire(RUNNING_SET, Duration.ofHours(2));
             } else {
-                String runningKey = run.getCalculatorId() + ":" + run.getTenantId() + ":" + frequency.name();
                 redisTemplate.opsForSet().remove(RUNNING_SET, runningKey);
             }
 
@@ -105,7 +103,7 @@ public class RedisCalculatorCache {
     public void updateRunInCache(CalculatorRun run) {
         try {
             CalculatorFrequency frequency = run.getFrequency();
-            String key = buildRecentRunsKey(run.getCalculatorId(), run.getTenantId(), frequency);
+            String key = buildRecentRunsKey(run.getCalculatorId(), frequency);
 
             // Remove old version by value (safer than score-based removal)
             redisTemplate.opsForZSet().remove(key, run);
@@ -146,9 +144,9 @@ public class RedisCalculatorCache {
     // ================================================================
 
     public Optional<List<CalculatorRun>> getRecentRuns(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, int limit) {
+            String calculatorId, CalculatorFrequency frequency, int limit) {
 
-        String key = buildRecentRunsKey(calculatorId, tenantId, frequency);
+        String key = buildRecentRunsKey(calculatorId, frequency);
         Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
@@ -189,10 +187,10 @@ public class RedisCalculatorCache {
     }
 
     public void cacheStatusResponse(
-            String calculatorId, String tenantId, CalculatorFrequency frequency,
+            String calculatorId, CalculatorFrequency frequency,
             int historyLimit, CalculatorStatusResponse response) {
 
-        String hashKey = buildStatusHashKey(calculatorId, tenantId, frequency);
+        String hashKey = buildStatusHashKey(calculatorId, frequency);
         String field = String.valueOf(historyLimit);
         Timer.Sample sample = Timer.start(meterRegistry);
 
@@ -226,9 +224,9 @@ public class RedisCalculatorCache {
     }
 
     public Optional<CalculatorStatusResponse> getStatusResponse(
-            String calculatorId, String tenantId, CalculatorFrequency frequency, int historyLimit) {
+            String calculatorId, CalculatorFrequency frequency, int historyLimit) {
 
-        String hashKey = buildStatusHashKey(calculatorId, tenantId, frequency);
+        String hashKey = buildStatusHashKey(calculatorId, frequency);
         String field = String.valueOf(historyLimit);
         Timer.Sample sample = Timer.start(meterRegistry);
 
@@ -261,11 +259,11 @@ public class RedisCalculatorCache {
         }
     }
 
-    public void evictStatusResponse(String calculatorId, String tenantId, CalculatorFrequency frequency) {
+    public void evictStatusResponse(String calculatorId, CalculatorFrequency frequency) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             // Evict all history limits for this calculator+frequency (hash delete)
-            String hashKey = buildStatusHashKey(calculatorId, tenantId, frequency);
+            String hashKey = buildStatusHashKey(calculatorId, frequency);
             redisTemplate.delete(hashKey);
 
             sample.stop(Timer.builder(CACHE_REDIS_DURATION)
@@ -283,10 +281,10 @@ public class RedisCalculatorCache {
         }
     }
 
-    public void evictAllFrequencies(String calculatorId, String tenantId) {
+    public void evictAllFrequencies(String calculatorId) {
         try {
-            evictStatusResponse(calculatorId, tenantId, CalculatorFrequency.DAILY);
-            evictStatusResponse(calculatorId, tenantId, CalculatorFrequency.MONTHLY);
+            evictStatusResponse(calculatorId, CalculatorFrequency.DAILY);
+            evictStatusResponse(calculatorId, CalculatorFrequency.MONTHLY);
             log.debug("event=cache.evict outcome=success calculatorId={} scope=all_frequencies", calculatorId);
         } catch (Exception e) {
             log.warn("event=cache.evict outcome=failure calculatorId={} scope=all_frequencies error={}",
@@ -294,9 +292,9 @@ public class RedisCalculatorCache {
         }
     }
 
-    public void evictRecentRuns(String calculatorId, String tenantId, CalculatorFrequency frequency) {
+    public void evictRecentRuns(String calculatorId, CalculatorFrequency frequency) {
         try {
-            String key = buildRecentRunsKey(calculatorId, tenantId, frequency);
+            String key = buildRecentRunsKey(calculatorId, frequency);
             redisTemplate.delete(key);
             log.debug("event=cache.evict outcome=success calculatorId={} frequency={} tier=zset",
                     calculatorId, frequency);
@@ -312,7 +310,7 @@ public class RedisCalculatorCache {
 
     @SuppressWarnings("unchecked")
     public Map<String, CalculatorStatusResponse> getBatchStatusResponses(
-            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency, int historyLimit) {
+            List<String> calculatorIds, CalculatorFrequency frequency, int historyLimit) {
 
         Map<String, CalculatorStatusResponse> results = new HashMap<>();
         String field = String.valueOf(historyLimit);
@@ -328,7 +326,7 @@ public class RedisCalculatorCache {
 
             List<Object> pipelined = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
                 for (String calcId : calculatorIds) {
-                    String hashKey = buildStatusHashKey(calcId, tenantId, frequency);
+                    String hashKey = buildStatusHashKey(calcId, frequency);
                     byte[] keyBytes = keySerializer.serialize(hashKey);
                     byte[] fieldBytes = hashKeySerializer.serialize(field);
                     if (keyBytes != null && fieldBytes != null) {
@@ -369,7 +367,7 @@ public class RedisCalculatorCache {
     @SuppressWarnings("unchecked")
     public void cacheBatchStatusResponses(
             Map<String, CalculatorStatusResponse> responses,
-            String tenantId, CalculatorFrequency frequency, int historyLimit) {
+            CalculatorFrequency frequency, int historyLimit) {
 
         Timer.Sample sample = Timer.start(meterRegistry);
 
@@ -384,7 +382,7 @@ public class RedisCalculatorCache {
 
             redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
                 responses.forEach((calcId, response) -> {
-                    String hashKey = buildStatusHashKey(calcId, tenantId, frequency);
+                    String hashKey = buildStatusHashKey(calcId, frequency);
                     String field = String.valueOf(historyLimit);
 
                     RunStatus currentStatus = response.current() != null
@@ -447,9 +445,9 @@ public class RedisCalculatorCache {
         }
     }
 
-    public boolean isRunning(String calculatorId, String tenantId, CalculatorFrequency frequency) {
+    public boolean isRunning(String calculatorId, CalculatorFrequency frequency) {
         try {
-            String member = calculatorId + ":" + tenantId + ":" + frequency.name();
+            String member = calculatorId + ":" + frequency.name();
             return Boolean.TRUE.equals(
                     redisTemplate.opsForSet().isMember(RUNNING_SET, member)
             );

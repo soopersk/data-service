@@ -1,7 +1,7 @@
 -- Make calculator_sli_daily frequency-aware so DAILY and MONTHLY runs of the same
 -- calculator no longer blend on shared (month-end) reporting dates.
 --
--- The old 3-column PRIMARY KEY (calculator_id, tenant_id, reporting_date) is exactly
+-- The old PRIMARY KEY (calculator_id, reporting_date) is exactly
 -- what forced a DAILY run and a MONTHLY run to collide on a month-end date. ON CONFLICT
 -- upserts also need a UNIQUE arbiter, so `frequency` must be part of the key. This is a
 -- derived aggregate table (not the source of truth), so we simply widen its PRIMARY KEY
@@ -18,9 +18,9 @@ ALTER TABLE calculator_sli_daily
 
 ALTER TABLE calculator_sli_daily
     ADD CONSTRAINT calculator_sli_daily_pkey
-    PRIMARY KEY (calculator_id, tenant_id, frequency, reporting_date);
+    PRIMARY KEY (calculator_id, frequency, reporting_date);
 
--- idx_calculator_sli_daily_recent (calculator_id, tenant_id, reporting_date DESC) from V3
+-- idx_calculator_sli_daily_recent (calculator_id, reporting_date DESC) from V3
 -- is retained as-is: it serves the frequency-agnostic collapse reads (findRecentAggregates,
 -- findByReportingDates). The new PK index covers the frequency-scoped findAverageDuration.
 
@@ -32,13 +32,12 @@ ALTER TABLE calculator_sli_daily
 TRUNCATE TABLE calculator_sli_daily;
 
 INSERT INTO calculator_sli_daily (
-    calculator_id, tenant_id, frequency, reporting_date,
+    calculator_id, frequency, reporting_date,
     total_runs, success_runs, sla_breaches,
     sum_duration_ms, sum_start_min_utc, sum_end_min_utc, computed_at
 )
 SELECT
     calculator_id,
-    tenant_id,
     frequency,
     reporting_date,
     COUNT(*),
@@ -58,4 +57,4 @@ SELECT
     NOW()
 FROM calculator_runs
 WHERE end_time IS NOT NULL
-GROUP BY calculator_id, tenant_id, frequency, reporting_date;
+GROUP BY calculator_id, frequency, reporting_date;

@@ -40,7 +40,7 @@ class SlaBreachEventRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         save("run-3", t3, Severity.HIGH);
 
         List<SlaBreachEvent> firstPage = repository.findByCalculatorIdKeyset(
-                "calc-1", "tenant-1", 30, "HIGH", null, null, 2
+                "calc-1", 30, "HIGH", null, null, 2
         );
         assertEquals(2, firstPage.size());
         assertEquals("run-1", firstPage.get(0).getRunId());
@@ -48,7 +48,7 @@ class SlaBreachEventRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
 
         SlaBreachEvent cursor = firstPage.get(1);
         List<SlaBreachEvent> secondPage = repository.findByCalculatorIdKeyset(
-                "calc-1", "tenant-1", 30, "HIGH", cursor.getCreatedAt(), cursor.getBreachId(), 2
+                "calc-1", 30, "HIGH", cursor.getCreatedAt(), cursor.getBreachId(), 2
         );
         assertEquals(1, secondPage.size());
         assertEquals("run-3", secondPage.get(0).getRunId());
@@ -61,10 +61,10 @@ class SlaBreachEventRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         save("run-c", Instant.parse("2026-02-22T10:00:00Z"), Severity.LOW);
 
         List<SlaBreachEvent> page = repository.findByCalculatorIdPaginated(
-                "calc-1", "tenant-1", 30, "CRITICAL", 0, 10
+                "calc-1", 30, "CRITICAL", 0, 10
         );
         long count = repository.countByCalculatorIdAndPeriod(
-                "calc-1", "tenant-1", 30, "CRITICAL"
+                "calc-1", 30, "CRITICAL"
         );
 
         assertEquals(2, page.size());

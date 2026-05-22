@@ -42,7 +42,7 @@ public class CacheEvictionService {
 
         try {
             // Evict status response cache for this frequency
-            redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
+            redisCache.evictStatusResponse(run.getCalculatorId(), run.getFrequency());
 
             meterRegistry.counter(ObservabilityConstants.CACHE_EVICTION_TOTAL,
                     Tags.of(
@@ -64,7 +64,7 @@ public class CacheEvictionService {
         CalculatorRun run = event.getRun();
 
         try {
-            redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
+            redisCache.evictStatusResponse(run.getCalculatorId(), run.getFrequency());
 
             meterRegistry.counter(ObservabilityConstants.CACHE_EVICTION_TOTAL,
                     Tags.of(
@@ -91,7 +91,7 @@ public class CacheEvictionService {
             redisCache.updateRunInCache(run);
 
             // Also evict status response cache
-            redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
+            redisCache.evictStatusResponse(run.getCalculatorId(), run.getFrequency());
 
             meterRegistry.counter(ObservabilityConstants.CACHE_EVICTION_TOTAL,
                     Tags.of(

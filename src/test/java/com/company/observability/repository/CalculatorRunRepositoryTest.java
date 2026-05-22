@@ -55,12 +55,12 @@ class CalculatorRunRepositoryTest {
                 .thenReturn(List.of(dbRun));
 
         Map<String, List<CalculatorRun>> result = repository.findBatchRecentRunsDbOnly(
-                List.of("calc-2"), "tenant-1", CalculatorFrequency.DAILY, 3
+                List.of("calc-2"), CalculatorFrequency.DAILY, 3
         );
 
         assertEquals(1, result.size());
         assertTrue(result.containsKey("calc-2"));
-        verify(redisCache, never()).getRecentRuns(anyString(), anyString(), any(CalculatorFrequency.class), anyInt());
+        verify(redisCache, never()).getRecentRuns(anyString(), any(CalculatorFrequency.class), anyInt());
         verify(redisCache).cacheRunOnWrite(dbRun);
     }
 
@@ -69,16 +69,16 @@ class CalculatorRunRepositoryTest {
         CalculatorRun cachedRun = run("calc-1", "run-1");
         CalculatorRun dbRun = run("calc-2", "run-2");
 
-        when(redisCache.getRecentRuns("calc-1", "tenant-1", CalculatorFrequency.DAILY, 3))
+        when(redisCache.getRecentRuns("calc-1", CalculatorFrequency.DAILY, 3))
                 .thenReturn(Optional.of(List.of(cachedRun)));
-        when(redisCache.getRecentRuns("calc-2", "tenant-1", CalculatorFrequency.DAILY, 3))
+        when(redisCache.getRecentRuns("calc-2", CalculatorFrequency.DAILY, 3))
                 .thenReturn(Optional.empty());
 
         when(jdbcTemplate.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of(dbRun));
 
         Map<String, List<CalculatorRun>> result = repository.findBatchRecentRuns(
-                List.of("calc-1", "calc-2"), "tenant-1", CalculatorFrequency.DAILY, 3
+                List.of("calc-1", "calc-2"), CalculatorFrequency.DAILY, 3
         );
 
         assertEquals(2, result.size());

@@ -83,7 +83,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         cache.cacheRunOnWrite(run);
 
         Optional<List<CalculatorRun>> result =
-                cache.getRecentRuns(run.getCalculatorId(), run.getTenantId(), CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns(run.getCalculatorId(), CalculatorFrequency.DAILY, 5);
 
         assertThat(result).isPresent();
         assertThat(result.get()).hasSize(1);
@@ -115,7 +115,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
 
         // retrieving 200 to get all; ZSet should have trimmed to 100
         Optional<List<CalculatorRun>> result =
-                cache.getRecentRuns(TestFixtures.DEFAULT_CALC_ID, TestFixtures.DEFAULT_TENANT_ID,
+                cache.getRecentRuns(TestFixtures.DEFAULT_CALC_ID,
                         CalculatorFrequency.DAILY, 200);
 
         assertThat(result).isPresent();
@@ -134,7 +134,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         cache.cacheRunOnWrite(running);
 
         assertThat(cache.isRunning(
-                running.getCalculatorId(), running.getTenantId(), CalculatorFrequency.DAILY))
+                running.getCalculatorId(), CalculatorFrequency.DAILY))
                 .isTrue();
 
         // Now cache the same calculator as completed
@@ -143,7 +143,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         cache.cacheRunOnWrite(completed);
 
         assertThat(cache.isRunning(
-                running.getCalculatorId(), running.getTenantId(), CalculatorFrequency.DAILY))
+                running.getCalculatorId(), CalculatorFrequency.DAILY))
                 .isFalse();
     }
 
@@ -156,8 +156,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         CalculatorRun run = TestFixtures.aRunningRun();
         cache.cacheRunOnWrite(run);
 
-        String zsetKey = "obs:runs:zset:" + run.getCalculatorId()
-                + ":" + run.getTenantId() + ":DAILY";
+        String zsetKey = "obs:runs:zset:" + run.getCalculatorId() + ":DAILY";
         Long ttlSeconds = redisTemplate.getExpire(zsetKey, TimeUnit.SECONDS);
 
         assertThat(ttlSeconds).isNotNull()
@@ -179,8 +178,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         run.setSlaBreachReason("Still running past SLA deadline");
         cache.updateRunInCache(run);
 
-        String zsetKey = "obs:runs:zset:" + run.getCalculatorId()
-                + ":" + run.getTenantId() + ":DAILY";
+        String zsetKey = "obs:runs:zset:" + run.getCalculatorId() + ":DAILY";
         Long size = redisTemplate.opsForZSet().size(zsetKey);
         assertThat(size).isEqualTo(1L);
     }
@@ -214,11 +212,11 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
 
         cache.cacheBatchStatusResponses(
                 Map.of("calc-1", r1, "calc-2", r2),
-                TestFixtures.DEFAULT_TENANT_ID, CalculatorFrequency.DAILY, 5);
+                CalculatorFrequency.DAILY, 5);
 
         Map<String, CalculatorStatusResponse> hits = cache.getBatchStatusResponses(
                 List.of("calc-1", "calc-2"),
-                TestFixtures.DEFAULT_TENANT_ID, CalculatorFrequency.DAILY, 5);
+                CalculatorFrequency.DAILY, 5);
 
         assertThat(hits).containsKeys("calc-1", "calc-2");
         assertThat(hits.get("calc-1").calculatorName()).isEqualTo("Calculator calc-1");
@@ -229,11 +227,11 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
     void batchStatusResponsePipeline_missingId_notInResult() {
         cache.cacheBatchStatusResponses(
                 Map.of("calc-1", statusResponse("calc-1")),
-                TestFixtures.DEFAULT_TENANT_ID, CalculatorFrequency.DAILY, 5);
+                CalculatorFrequency.DAILY, 5);
 
         Map<String, CalculatorStatusResponse> hits = cache.getBatchStatusResponses(
                 List.of("calc-1", "calc-missing"),
-                TestFixtures.DEFAULT_TENANT_ID, CalculatorFrequency.DAILY, 5);
+                CalculatorFrequency.DAILY, 5);
 
         assertThat(hits).containsKey("calc-1");
         assertThat(hits).doesNotContainKey("calc-missing");

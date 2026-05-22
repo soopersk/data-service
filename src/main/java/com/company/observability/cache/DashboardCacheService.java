@@ -53,8 +53,8 @@ public class DashboardCacheService {
      * or {@code null} on miss.
      */
     public CalculatorDashboardResponse getStatusResponse(
-            String tenantId, LocalDate reportingDate, String frequency, int runNumber) {
-        String key = statusKey(tenantId, reportingDate, frequency, runNumber);
+            LocalDate reportingDate, String frequency, int runNumber) {
+        String key = statusKey(reportingDate, frequency, runNumber);
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
@@ -73,9 +73,9 @@ public class DashboardCacheService {
      * current completion state across all sections.
      */
     public void putStatusResponse(
-            String tenantId, LocalDate reportingDate, String frequency, int runNumber,
+            LocalDate reportingDate, String frequency, int runNumber,
             CalculatorDashboardResponse response) {
-        String key = statusKey(tenantId, reportingDate, frequency, runNumber);
+        String key = statusKey(reportingDate, frequency, runNumber);
         Duration ttl = determineTtl(response);
         try {
             redisTemplate.opsForValue().set(key, response, ttl);
@@ -136,7 +136,7 @@ public class DashboardCacheService {
 
     // ── Key builders ─────────────────────────────────────────────────────────
 
-    private String statusKey(String tenantId, LocalDate reportingDate, String frequency, int runNumber) {
-        return STATUS_KEY_PREFIX + tenantId + ":" + reportingDate + ":" + frequency + ":" + runNumber;
+    private String statusKey(LocalDate reportingDate, String frequency, int runNumber) {
+        return STATUS_KEY_PREFIX + reportingDate + ":" + frequency + ":" + runNumber;
     }
 }

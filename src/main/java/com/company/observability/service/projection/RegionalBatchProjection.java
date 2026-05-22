@@ -36,14 +36,14 @@ public class RegionalBatchProjection {
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("EEE dd MMM yyyy", Locale.ENGLISH);
 
-    public RegionalBatchStatusResponse getRegionalBatchStatus(String tenantId, LocalDate reportingDate) {
-        RegionalBatchStatusResponse cached = regionalBatchCacheService.getStatusResponse(tenantId, reportingDate);
+    public RegionalBatchStatusResponse getRegionalBatchStatus(LocalDate reportingDate) {
+        RegionalBatchStatusResponse cached = regionalBatchCacheService.getStatusResponse(reportingDate);
         if (cached != null) {
             return cached;
         }
-        RegionalBatchResult result = regionalBatchService.getRegionalBatchStatus(tenantId, reportingDate);
+        RegionalBatchResult result = regionalBatchService.getRegionalBatchStatus(reportingDate);
         RegionalBatchStatusResponse response = toRegionalBatchResponse(result);
-        regionalBatchCacheService.putStatusResponse(tenantId, reportingDate, response);
+        regionalBatchCacheService.putStatusResponse(reportingDate, response);
         return response;
     }
 

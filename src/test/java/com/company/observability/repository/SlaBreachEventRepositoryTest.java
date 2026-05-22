@@ -38,7 +38,7 @@ class SlaBreachEventRepositoryTest {
         when(jdbcTemplate.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of());
 
-        repository.findByCalculatorIdPaginated("calc-1", "tenant-1", 30, "HIGH", 40, 20);
+        repository.findByCalculatorIdPaginated("calc-1", 30, "HIGH", 40, 20);
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sqlCaptor.capture(), any(SqlParameterSource.class), any(RowMapper.class));
@@ -54,7 +54,7 @@ class SlaBreachEventRepositoryTest {
                 .thenReturn(List.of());
 
         repository.findByCalculatorIdKeyset(
-                "calc-1", "tenant-1", 30, "CRITICAL",
+                "calc-1", 30, "CRITICAL",
                 Instant.parse("2026-02-22T10:00:00Z"), 123L, 25
         );
 

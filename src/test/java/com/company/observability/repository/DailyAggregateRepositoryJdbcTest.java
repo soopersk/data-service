@@ -71,7 +71,7 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
 
         repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 3);
+        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", 3);
         assertThat(results).hasSize(1);
         assertThat(results.get(0).totalRuns()).isEqualTo(2);
         assertThat(results.get(0).sumDurationMs()).isEqualTo(300L);
@@ -85,7 +85,7 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         repository.recomputeForDateRange(DATE.minusDays(1), DATE);
         repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 3);
+        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", 3);
         assertThat(results).hasSize(1);
         assertThat(results.get(0).totalRuns()).isEqualTo(1);
     }
@@ -100,8 +100,8 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         insertRun("m1", "calc-1", "tenant-1", "MONTHLY", DATE, 300, 500L, "SUCCESS", false);
         repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        CalculatorProfile daily = repository.findProfile("calc-1", "tenant-1", "DAILY", 3);
-        CalculatorProfile monthly = repository.findProfile("calc-1", "tenant-1", "MONTHLY", 3);
+        CalculatorProfile daily = repository.findProfile("calc-1", "DAILY", 3);
+        CalculatorProfile monthly = repository.findProfile("calc-1", "MONTHLY", 3);
 
         assertThat(daily.totalRuns()).isEqualTo(1);
         assertThat(daily.avgDurationMs()).isEqualTo(100L);
@@ -115,7 +115,7 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         insertRun("m1", "calc-1", "tenant-1", "MONTHLY", DATE, 300, 500L, "SUCCESS", false);
         repository.recomputeForDateRange(DATE.minusDays(1), DATE);
 
-        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", "tenant-1", 3);
+        List<DailyAggregate> results = repository.findRecentAggregates("calc-1", 3);
 
         assertThat(results).hasSize(1);
         assertThat(results.get(0).totalRuns()).isEqualTo(2);
@@ -138,7 +138,7 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
 
     @Test
     void findProfile_noRows_returnsZeroSampleProfile() {
-        CalculatorProfile result = repository.findProfile("missing", "tenant-1", "DAILY", 30);
+        CalculatorProfile result = repository.findProfile("missing", "DAILY", 30);
 
         assertThat(result.totalRuns()).isZero();
         assertThat(result.avgDurationMs()).isZero();

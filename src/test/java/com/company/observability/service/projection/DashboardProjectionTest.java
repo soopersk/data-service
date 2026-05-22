@@ -49,9 +49,9 @@ class DashboardProjectionTest {
     @Test
     void getCalculatorDashboard_cacheHit_returnsCachedResponseWithoutCallingService() {
         CalculatorDashboardResponse cached = minimalResponse(DATE);
-        when(dashboardCacheService.getStatusResponse("tenant-1", DATE, "DAILY", 1)).thenReturn(cached);
+        when(dashboardCacheService.getStatusResponse(DATE, "DAILY", 1)).thenReturn(cached);
 
-        CalculatorDashboardResponse result = projection.getCalculatorDashboard("tenant-1", DATE, "DAILY", 1);
+        CalculatorDashboardResponse result = projection.getCalculatorDashboard(DATE, "DAILY", 1);
 
         assertThat(result).isSameAs(cached);
         verifyNoInteractions(dashboardService);
@@ -59,12 +59,12 @@ class DashboardProjectionTest {
 
     @Test
     void getCalculatorDashboard_cacheMiss_buildsAndCachesResult() {
-        when(dashboardCacheService.getStatusResponse("tenant-1", DATE, "DAILY", 1)).thenReturn(null);
+        when(dashboardCacheService.getStatusResponse(DATE, "DAILY", 1)).thenReturn(null);
 
         DashboardResult domainResult = new DashboardResult(DATE, "DAILY", 1, GENERATED_AT, List.of());
-        when(dashboardService.buildDashboard("tenant-1", DATE, "DAILY", 1)).thenReturn(domainResult);
+        when(dashboardService.buildDashboard(DATE, "DAILY", 1)).thenReturn(domainResult);
 
-        CalculatorDashboardResponse response = projection.getCalculatorDashboard("tenant-1", DATE, "DAILY", 1);
+        CalculatorDashboardResponse response = projection.getCalculatorDashboard(DATE, "DAILY", 1);
 
         assertThat(response).isNotNull();
         assertThat(response.reportingDate()).isEqualTo(DATE);
@@ -72,22 +72,22 @@ class DashboardProjectionTest {
         assertThat(response.runNumber()).isEqualTo(1);
         assertThat(response.generatedAt()).isEqualTo(GENERATED_AT);
         assertThat(response.sections()).isEmpty();
-        verify(dashboardCacheService).putStatusResponse(eq("tenant-1"), eq(DATE), eq("DAILY"), eq(1), any());
+        verify(dashboardCacheService).putStatusResponse(eq(DATE), eq("DAILY"), eq(1), any());
     }
 
     @Test
     void getCalculatorDashboard_run2_usesCorrectCacheKey() {
-        when(dashboardCacheService.getStatusResponse("tenant-1", DATE, "DAILY", 2)).thenReturn(null);
+        when(dashboardCacheService.getStatusResponse(DATE, "DAILY", 2)).thenReturn(null);
 
         DashboardResult domainResult = new DashboardResult(DATE, "DAILY", 2, GENERATED_AT, List.of());
-        when(dashboardService.buildDashboard("tenant-1", DATE, "DAILY", 2)).thenReturn(domainResult);
+        when(dashboardService.buildDashboard(DATE, "DAILY", 2)).thenReturn(domainResult);
 
-        projection.getCalculatorDashboard("tenant-1", DATE, "DAILY", 2);
+        projection.getCalculatorDashboard(DATE, "DAILY", 2);
 
-        verify(dashboardCacheService).getStatusResponse("tenant-1", DATE, "DAILY", 2);
-        verify(dashboardCacheService).putStatusResponse(eq("tenant-1"), eq(DATE), eq("DAILY"), eq(2), any());
+        verify(dashboardCacheService).getStatusResponse(DATE, "DAILY", 2);
+        verify(dashboardCacheService).putStatusResponse(eq(DATE), eq("DAILY"), eq(2), any());
         // Run 1 cache is never touched
-        verify(dashboardCacheService, never()).getStatusResponse("tenant-1", DATE, "DAILY", 1);
+        verify(dashboardCacheService, never()).getStatusResponse(DATE, "DAILY", 1);
     }
 
     @Test

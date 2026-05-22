@@ -41,7 +41,7 @@ public class SlaBreachEventRepository {
     private static final String SELECT_FROM = "SELECT " + SELECT_COLUMNS + "\nFROM sla_breach_events\n";
 
     private static final String BASE_WHERE = """
-            WHERE calculator_id = :calculatorId AND tenant_id = :tenantId
+            WHERE calculator_id = :calculatorId
             AND created_at >= NOW() - CAST(:days AS INTEGER) * INTERVAL '1 day'""";
 
     private static final String ORDER_DESC = "\nORDER BY created_at DESC, breach_id DESC";
@@ -141,7 +141,7 @@ public class SlaBreachEventRepository {
      * Aggregated breach counts by severity for analytics summary/trends.
      */
     public Map<String, Integer> countBySeverity(
-            String calculatorId, String tenantId, int days) {
+            String calculatorId, int days) {
         String sql = """
             SELECT severity, COUNT(*) AS cnt
             FROM sla_breach_events
@@ -151,7 +151,6 @@ public class SlaBreachEventRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("days", days);
 
         Map<String, Integer> result = new HashMap<>();
@@ -172,7 +171,7 @@ public class SlaBreachEventRepository {
      * Aggregated breach counts by breach_type for analytics summary.
      */
     public Map<String, Integer> countByType(
-            String calculatorId, String tenantId, int days) {
+            String calculatorId, int days) {
         String sql = """
             SELECT COALESCE(breach_type, 'UNKNOWN') AS breach_type, COUNT(*) AS cnt
             FROM sla_breach_events
@@ -182,7 +181,6 @@ public class SlaBreachEventRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("days", days);
 
         Map<String, Integer> result = new HashMap<>();
@@ -201,7 +199,7 @@ public class SlaBreachEventRepository {
      * Worst breach severity per CET day (CRITICAL > HIGH > MEDIUM > LOW).
      */
     public Map<LocalDate, String> findWorstSeverityByDay(
-            String calculatorId, String tenantId, int days) {
+            String calculatorId, int days) {
         String sql = """
             SELECT (created_at AT TIME ZONE 'Europe/Amsterdam')::DATE AS day_cet,
                    MAX(
@@ -220,7 +218,6 @@ public class SlaBreachEventRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("days", days);
 
         Map<LocalDate, String> result = new HashMap<>();
@@ -238,14 +235,13 @@ public class SlaBreachEventRepository {
      * Find breaches with offset pagination and optional severity filter.
      */
     public List<SlaBreachEvent> findByCalculatorIdPaginated(
-            String calculatorId, String tenantId, int days,
+            String calculatorId, int days,
             String severity, int offset, int limit) {
 
         boolean hasSeverity = severity != null && !severity.isBlank();
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("days", days);
 
         StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
@@ -270,7 +266,7 @@ public class SlaBreachEventRepository {
      * Keyset pagination for SLA breach history (stable on created_at, breach_id).
      */
     public List<SlaBreachEvent> findByCalculatorIdKeyset(
-            String calculatorId, String tenantId, int days, String severity,
+            String calculatorId, int days, String severity,
             Instant cursorCreatedAt, Long cursorBreachId, int limit) {
 
         boolean hasCursor = cursorCreatedAt != null && cursorBreachId != null;
@@ -278,7 +274,6 @@ public class SlaBreachEventRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("days", days);
 
         StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
@@ -308,13 +303,12 @@ public class SlaBreachEventRepository {
      * Count breaches with optional severity filter.
      */
     public long countByCalculatorIdAndPeriod(
-            String calculatorId, String tenantId, int days, String severity) {
+            String calculatorId, int days, String severity) {
 
         boolean hasSeverity = severity != null && !severity.isBlank();
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
-                .addValue("tenantId", tenantId)
                 .addValue("days", days);
 
         StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM sla_breach_events\n")

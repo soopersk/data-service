@@ -39,8 +39,8 @@ public class CalculatorProfileService {
     private static final String PROFILE_PREFIX = "obs:profile:";
 
     /** Cache-aside read. Never throws; falls back to a DB read (and a zero-sample profile on error). */
-    public CalculatorProfile getProfile(String calculatorId, String tenantId, CalculatorFrequency frequency) {
-        String key = key(calculatorId, tenantId, frequency);
+    public CalculatorProfile getProfile(String calculatorId, CalculatorFrequency frequency) {
+        String key = key(calculatorId, frequency);
 
         CalculatorProfile cached = readFromCache(key);
         if (cached != null) {
@@ -50,14 +50,14 @@ public class CalculatorProfileService {
         meterRegistry.counter("obs.profile.cache", "result", "miss").increment();
 
         CalculatorProfile profile = dailyAggregateRepository.findProfile(
-                calculatorId, tenantId, frequency.name(), slaProperties.lookbackDays(frequency));
+                calculatorId, frequency.name(), slaProperties.lookbackDays(frequency));
         writeToCache(key, profile);
         return profile;
     }
 
     /** Warm a precomputed profile into the cache (called by the nightly job). */
     public void warm(CalculatorProfile profile) {
-        writeToCache(key(profile.calculatorId(), profile.tenantId(),
+        writeToCache(key(profile.calculatorId(),
                 CalculatorFrequency.from(profile.frequency())), profile);
     }
 
@@ -85,7 +85,7 @@ public class CalculatorProfileService {
         }
     }
 
-    private String key(String calculatorId, String tenantId, CalculatorFrequency frequency) {
-        return PROFILE_PREFIX + calculatorId + ":" + tenantId + ":" + frequency.name();
+    private String key(String calculatorId, CalculatorFrequency frequency) {
+        return PROFILE_PREFIX + calculatorId + ":" + frequency.name();
     }
 }

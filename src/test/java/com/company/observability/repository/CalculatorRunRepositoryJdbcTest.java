@@ -67,7 +67,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         insertRun("run-c2-2", "calc-2", reportDate, base.plusSeconds(150));
 
         Map<String, List<CalculatorRun>> result = repository.findBatchRecentRunsDbOnly(
-                List.of("calc-1", "calc-2"), "tenant-1", CalculatorFrequency.DAILY, 2
+                List.of("calc-1", "calc-2"), CalculatorFrequency.DAILY, 2
         );
 
         assertEquals(2, result.get("calc-1").size());
@@ -95,7 +95,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         );
 
         List<RunWithSlaStatus> result = repository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 3
+                "calc-1", CalculatorFrequency.DAILY, 3
         );
 
         assertEquals(1, result.size());

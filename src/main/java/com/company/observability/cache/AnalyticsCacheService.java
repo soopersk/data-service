@@ -40,9 +40,9 @@ public class AnalyticsCacheService {
     // Generic cache operations with Redis resilience
     // ================================================================
 
-    public <T> T getFromCache(String keyPrefix, String calculatorId, String tenantId,
+    public <T> T getFromCache(String keyPrefix, String calculatorId,
                               int days, Class<T> responseType) {
-        String key = buildKey(keyPrefix, calculatorId, tenantId, days);
+        String key = buildKey(keyPrefix, calculatorId, days);
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
@@ -56,9 +56,9 @@ public class AnalyticsCacheService {
         return null;
     }
 
-    public <T> T getFromCache(String keyPrefix, String calculatorId, String tenantId,
+    public <T> T getFromCache(String keyPrefix, String calculatorId,
                               String frequency, int days, Class<T> responseType) {
-        String key = buildKey(keyPrefix, calculatorId, tenantId, frequency, days);
+        String key = buildKey(keyPrefix, calculatorId, frequency, days);
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
@@ -72,10 +72,10 @@ public class AnalyticsCacheService {
         return null;
     }
 
-    public void putInCache(String keyPrefix, String calculatorId, String tenantId,
+    public void putInCache(String keyPrefix, String calculatorId,
                            int days, Object response) {
-        String key = buildKey(keyPrefix, calculatorId, tenantId, days);
-        String indexKey = buildIndexKey(calculatorId, tenantId);
+        String key = buildKey(keyPrefix, calculatorId, days);
+        String indexKey = buildIndexKey(calculatorId);
         try {
             redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
             trackKey(indexKey, key);
@@ -85,10 +85,10 @@ public class AnalyticsCacheService {
         }
     }
 
-    public void putInCache(String keyPrefix, String calculatorId, String tenantId,
+    public void putInCache(String keyPrefix, String calculatorId,
                            String frequency, int days, Object response) {
-        String key = buildKey(keyPrefix, calculatorId, tenantId, frequency, days);
-        String indexKey = buildIndexKey(calculatorId, tenantId);
+        String key = buildKey(keyPrefix, calculatorId, frequency, days);
+        String indexKey = buildIndexKey(calculatorId);
         try {
             redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
             trackKey(indexKey, key);
@@ -121,7 +121,7 @@ public class AnalyticsCacheService {
     }
 
     private void evictForCalculator(CalculatorRun run) {
-        String indexKey = buildIndexKey(run.getCalculatorId(), run.getTenantId());
+        String indexKey = buildIndexKey(run.getCalculatorId());
         try {
             Set<Object> indexedKeys = redisTemplate.opsForSet().members(indexKey);
             if (indexedKeys != null && !indexedKeys.isEmpty()) {
@@ -141,7 +141,7 @@ public class AnalyticsCacheService {
     }
 
     private void evictForCalculatorByPrefix(CalculatorRun run, String fullKeyPrefix) {
-        String indexKey = buildIndexKey(run.getCalculatorId(), run.getTenantId());
+        String indexKey = buildIndexKey(run.getCalculatorId());
         try {
             Set<Object> indexedKeys = redisTemplate.opsForSet().members(indexKey);
             if (indexedKeys == null || indexedKeys.isEmpty()) {
@@ -170,18 +170,18 @@ public class AnalyticsCacheService {
     // Key builders
     // ================================================================
 
-    private String buildKey(String prefix, String calculatorId, String tenantId, int days) {
-        return ANALYTICS_PREFIX + prefix + ":" + calculatorId + ":" + tenantId + ":" + days;
+    private String buildKey(String prefix, String calculatorId, int days) {
+        return ANALYTICS_PREFIX + prefix + ":" + calculatorId + ":" + days;
     }
 
-    private String buildKey(String prefix, String calculatorId, String tenantId,
+    private String buildKey(String prefix, String calculatorId,
                             String frequency, int days) {
-        return ANALYTICS_PREFIX + prefix + ":" + calculatorId + ":" + tenantId
+        return ANALYTICS_PREFIX + prefix + ":" + calculatorId
                 + ":" + frequency + ":" + days;
     }
 
-    private String buildIndexKey(String calculatorId, String tenantId) {
-        return ANALYTICS_INDEX_PREFIX + calculatorId + ":" + tenantId;
+    private String buildIndexKey(String calculatorId) {
+        return ANALYTICS_INDEX_PREFIX + calculatorId;
     }
 
     private void trackKey(String indexKey, String key) {

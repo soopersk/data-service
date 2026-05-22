@@ -60,7 +60,7 @@ class RegionalBatchServiceTest {
                         Instant.parse("2026-04-17T06:00:00Z"),
                         null)
         );
-        when(repository.findRegionalBatchRuns(TENANT, DATE, null)).thenReturn(runs);
+        when(repository.findRegionalBatchRuns(DATE, null)).thenReturn(runs);
 
         List<RegionalBatchTiming> cachedHistory = List.of(
                 new RegionalBatchTiming("AMER", DATE.minusDays(1),
@@ -70,14 +70,14 @@ class RegionalBatchServiceTest {
                         Instant.parse("2026-04-16T06:00:00Z"),
                         Instant.parse("2026-04-16T18:00:00Z"))
         );
-        when(cacheService.getHistory(TENANT, DATE, null)).thenReturn(cachedHistory);
+        when(cacheService.getHistory(DATE, null)).thenReturn(cachedHistory);
 
-        service.getRegionalBatchStatus(TENANT, DATE);
+        service.getRegionalBatchStatus(DATE);
 
         // History was served from cache — DB method must NOT be called
-        verify(repository, never()).findRegionalBatchHistory(anyString(), any(), anyInt(), any());
+        verify(repository, never()).findRegionalBatchHistory(any(), anyInt(), any());
         // Cache should NOT be written again (it was a hit)
-        verify(cacheService, never()).putHistory(any(), any(), any(), any());
+        verify(cacheService, never()).putHistory(any(), any(), any());
     }
 
     @Test
@@ -87,39 +87,39 @@ class RegionalBatchServiceTest {
                 batchRun("run-amer", "AMER", RunStatus.RUNNING,
                         Instant.parse("2026-04-17T05:00:00Z"), null)
         );
-        when(repository.findRegionalBatchRuns(TENANT, DATE, null)).thenReturn(runs);
-        when(cacheService.getHistory(TENANT, DATE, null)).thenReturn(null);
+        when(repository.findRegionalBatchRuns(DATE, null)).thenReturn(runs);
+        when(cacheService.getHistory(DATE, null)).thenReturn(null);
 
         List<RegionalBatchTiming> dbHistory = List.of(
                 new RegionalBatchTiming("AMER", DATE.minusDays(1),
                         Instant.parse("2026-04-16T05:00:00Z"),
                         Instant.parse("2026-04-16T17:00:00Z"))
         );
-        when(repository.findRegionalBatchHistory(TENANT, DATE, 7, null)).thenReturn(dbHistory);
+        when(repository.findRegionalBatchHistory(DATE, 7, null)).thenReturn(dbHistory);
 
-        service.getRegionalBatchStatus(TENANT, DATE);
+        service.getRegionalBatchStatus(DATE);
 
-        verify(repository).findRegionalBatchHistory(TENANT, DATE, 7, null);
-        verify(cacheService).putHistory(TENANT, DATE, null, dbHistory);
+        verify(repository).findRegionalBatchHistory(DATE, 7, null);
+        verify(cacheService).putHistory(DATE, null, dbHistory);
     }
 
     @Test
     void getRegionalBatchStatus_historyLoadedOnlyOnce_evenWhenBothEstimationsNeedIt() {
         // No runs started yet → both estimatedStart AND estimatedEnd need history
-        when(repository.findRegionalBatchRuns(TENANT, DATE, null)).thenReturn(List.of());
-        when(cacheService.getHistory(TENANT, DATE, null)).thenReturn(null);
+        when(repository.findRegionalBatchRuns(DATE, null)).thenReturn(List.of());
+        when(cacheService.getHistory(DATE, null)).thenReturn(null);
 
         List<RegionalBatchTiming> dbHistory = List.of(
                 new RegionalBatchTiming("AMER", DATE.minusDays(1),
                         Instant.parse("2026-04-16T05:00:00Z"),
                         Instant.parse("2026-04-16T17:00:00Z"))
         );
-        when(repository.findRegionalBatchHistory(TENANT, DATE, 7, null)).thenReturn(dbHistory);
+        when(repository.findRegionalBatchHistory(DATE, 7, null)).thenReturn(dbHistory);
 
-        service.getRegionalBatchStatus(TENANT, DATE);
+        service.getRegionalBatchStatus(DATE);
 
         // DB must be hit exactly once even though both median computations need history
-        verify(repository, times(1)).findRegionalBatchHistory(anyString(), any(), anyInt(), any());
+        verify(repository, times(1)).findRegionalBatchHistory(any(), anyInt(), any());
     }
 
     @Test
@@ -133,12 +133,12 @@ class RegionalBatchServiceTest {
                         Instant.parse("2026-04-17T06:00:00Z"),
                         Instant.parse("2026-04-17T17:00:00Z"))
         );
-        when(repository.findRegionalBatchRuns(TENANT, DATE, null)).thenReturn(runs);
+        when(repository.findRegionalBatchRuns(DATE, null)).thenReturn(runs);
 
-        service.getRegionalBatchStatus(TENANT, DATE);
+        service.getRegionalBatchStatus(DATE);
 
-        verify(cacheService, never()).getHistory(any(), any(), any());
-        verify(repository, never()).findRegionalBatchHistory(anyString(), any(), anyInt(), any());
+        verify(cacheService, never()).getHistory(any(), any());
+        verify(repository, never()).findRegionalBatchHistory(any(), anyInt(), any());
     }
 
     // ── Status counts and SLA logic ─────────────────────────────────────────
@@ -153,10 +153,10 @@ class RegionalBatchServiceTest {
                         Instant.parse("2026-04-17T14:00:00Z"))
                 // EURO has no run → NOT_STARTED
         );
-        when(repository.findRegionalBatchRuns(TENANT, DATE, null)).thenReturn(runs);
+        when(repository.findRegionalBatchRuns(DATE, null)).thenReturn(runs);
 
         RegionalBatchService.RegionalBatchResult result =
-                service.getRegionalBatchStatus(TENANT, DATE);
+                service.getRegionalBatchStatus(DATE);
 
         assertThat(result.completedRegions()).isEqualTo(1);
         assertThat(result.runningRegions()).isEqualTo(0);
@@ -179,10 +179,10 @@ class RegionalBatchServiceTest {
                         Instant.parse("2026-04-17T06:00:00Z"),
                         Instant.parse("2026-04-17T10:00:00Z"))
         );
-        when(repository.findRegionalBatchRuns(TENANT, DATE, null)).thenReturn(runs);
+        when(repository.findRegionalBatchRuns(DATE, null)).thenReturn(runs);
 
         RegionalBatchService.RegionalBatchResult result =
-                service.getRegionalBatchStatus(TENANT, DATE);
+                service.getRegionalBatchStatus(DATE);
 
         assertThat(result.entries().get(0).status()).isEqualTo("DELAYED");
         assertThat(result.slaBreachedRegions()).containsExactly("AMER");

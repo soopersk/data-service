@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS sla_breach_events (
     run_id          VARCHAR(100)    NOT NULL UNIQUE,
     calculator_id   VARCHAR(100)    NOT NULL,
     calculator_name VARCHAR(255)    NOT NULL,
-    tenant_id       VARCHAR(50)     NOT NULL,
+    tenant_id       VARCHAR(50),
     reporting_date  DATE,
     breach_type     VARCHAR(50)     NOT NULL,
     expected_value  BIGINT,

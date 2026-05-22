@@ -12,7 +12,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  */
 public record CalculatorProfile(
         String calculatorId,
-        String tenantId,
         String frequency,
         long avgDurationMs,
         int avgStartMinUtc,
@@ -22,14 +21,12 @@ public record CalculatorProfile(
     @JsonCreator
     public CalculatorProfile(
             @JsonProperty("calculatorId") String calculatorId,
-            @JsonProperty("tenantId") String tenantId,
             @JsonProperty("frequency") String frequency,
             @JsonProperty("avgDurationMs") long avgDurationMs,
             @JsonProperty("avgStartMinUtc") int avgStartMinUtc,
             @JsonProperty("avgEndMinUtc") int avgEndMinUtc,
             @JsonProperty("totalRuns") int totalRuns) {
         this.calculatorId = calculatorId;
-        this.tenantId = tenantId;
         this.frequency = frequency;
         this.avgDurationMs = avgDurationMs;
         this.avgStartMinUtc = avgStartMinUtc;
@@ -38,14 +35,14 @@ public record CalculatorProfile(
     }
 
     /** Build from summed aggregate columns, computing averages (0 when no runs). */
-    public static CalculatorProfile fromSums(String calculatorId, String tenantId, String frequency,
+    public static CalculatorProfile fromSums(String calculatorId, String frequency,
                                              long sumDurationMs, long sumStartMinUtc, long sumEndMinUtc,
                                              int totalRuns) {
         if (totalRuns <= 0) {
-            return new CalculatorProfile(calculatorId, tenantId, frequency, 0, 0, 0, 0);
+            return new CalculatorProfile(calculatorId, frequency, 0, 0, 0, 0);
         }
         return new CalculatorProfile(
-                calculatorId, tenantId, frequency,
+                calculatorId, frequency,
                 sumDurationMs / totalRuns,
                 (int) (sumStartMinUtc / totalRuns),
                 (int) (sumEndMinUtc / totalRuns),

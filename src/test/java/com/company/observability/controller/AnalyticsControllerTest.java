@@ -45,7 +45,7 @@ class AnalyticsControllerTest {
                 List.of(new RuntimeAnalyticsResponse.DailyDataPoint(
                         LocalDate.parse("2026-02-21"), 1200, 2, 2)));
 
-        when(analyticsService.getRuntimeAnalytics("calc-1", "tenant-a", 30, CalculatorFrequency.MONTHLY))
+        when(analyticsService.getRuntimeAnalytics("calc-1", 30, CalculatorFrequency.MONTHLY))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/runtime")
@@ -58,7 +58,7 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.calculatorId").value("calc-1"))
                 .andExpect(jsonPath("$.frequency").value("MONTHLY"));
 
-        verify(analyticsService).getRuntimeAnalytics("calc-1", "tenant-a", 30, CalculatorFrequency.MONTHLY);
+        verify(analyticsService).getRuntimeAnalytics("calc-1", 30, CalculatorFrequency.MONTHLY);
     }
 
     @Test
@@ -70,7 +70,7 @@ class AnalyticsControllerTest {
                         null, null, Instant.parse("2026-02-22T06:20:00Z"))),
                 0, 20, 1, 1, null);
 
-        when(analyticsService.getSlaBreachDetails("calc-1", "tenant-a", 7, null, 0, 20, null))
+        when(analyticsService.getSlaBreachDetails("calc-1", 7, null, 0, 20, null))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/sla-breaches")
@@ -82,7 +82,7 @@ class AnalyticsControllerTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-cache")))
                 .andExpect(jsonPath("$.content[0].runId").value("run-1"));
 
-        verify(analyticsService).getSlaBreachDetails("calc-1", "tenant-a", 7, null, 0, 20, null);
+        verify(analyticsService).getSlaBreachDetails("calc-1", 7, null, 0, 20, null);
     }
 
     @Test
@@ -109,7 +109,7 @@ class AnalyticsControllerTest {
                 Instant.parse("2026-02-21T04:00:00Z"),
                 Instant.parse("2026-02-21T06:15:00Z"));
 
-        when(analyticsService.getRunPerformanceData("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY))
+        when(analyticsService.getRunPerformanceData("calc-1", 30, CalculatorFrequency.DAILY))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/run-performance")
@@ -122,12 +122,12 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.runs[0].slaStatus").value("ON_TIME"))
                 .andExpect(jsonPath("$.runs[1].slaStatus").value("ON_TIME"));
 
-        verify(analyticsService).getRunPerformanceData("calc-1", "tenant-a", 30, CalculatorFrequency.DAILY);
+        verify(analyticsService).getRunPerformanceData("calc-1", 30, CalculatorFrequency.DAILY);
     }
 
     @Test
     void getSlaSummary_returnsCacheableResponse() throws Exception {
-        when(analyticsService.getSlaSummary("calc-1", "tenant-a", 14))
+        when(analyticsService.getSlaSummary("calc-1", 14))
                 .thenReturn(new SlaSummaryResponse("calc-1", 14, 2, 10, 2, 2, null, null));
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/sla-summary")
@@ -138,7 +138,7 @@ class AnalyticsControllerTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("private")))
                 .andExpect(jsonPath("$.totalBreaches").value(2));
 
-        verify(analyticsService).getSlaSummary("calc-1", "tenant-a", 14);
+        verify(analyticsService).getSlaSummary("calc-1", 14);
     }
 
     @Test
@@ -146,7 +146,7 @@ class AnalyticsControllerTest {
         TrendAnalyticsResponse response = new TrendAnalyticsResponse(
                 "calc-1", 30, List.of());
 
-        when(analyticsService.getTrends("calc-1", "tenant-a", 30))
+        when(analyticsService.getTrends("calc-1", 30))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/trends")
@@ -157,7 +157,7 @@ class AnalyticsControllerTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("private")))
                 .andExpect(jsonPath("$.calculatorId").value("calc-1"));
 
-        verify(analyticsService).getTrends("calc-1", "tenant-a", 30);
+        verify(analyticsService).getTrends("calc-1", 30);
     }
 
     @Test
@@ -184,7 +184,7 @@ class AnalyticsControllerTest {
                 Instant.parse("2026-05-11T04:00:00Z"),
                 Instant.parse("2026-05-11T06:30:00Z"));
 
-        when(analyticsService.getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, null))
+        when(analyticsService.getRunExecutionsByName("capitalcalc", 30, CalculatorFrequency.DAILY, null))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/calculators/capitalcalc/executions")
@@ -199,12 +199,12 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.runs[1].runId").value("run-split-2"))
                 .andExpect(jsonPath("$.runs[0].subRunIds").doesNotExist());
 
-        verify(analyticsService).getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, null);
+        verify(analyticsService).getRunExecutionsByName("capitalcalc", 30, CalculatorFrequency.DAILY, null);
     }
 
     @Test
     void getRunExecutions_withRunNumber_passesRunNumberToService() throws Exception {
-        when(analyticsService.getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, "1"))
+        when(analyticsService.getRunExecutionsByName("capitalcalc", 30, CalculatorFrequency.DAILY, "1"))
                 .thenReturn(new RunPerformanceData("capitalcalc", "capitalcalc", "DAILY", 30, 0L,
                         0, 0, 0, 0, 0, List.of(), null, null));
 
@@ -214,20 +214,28 @@ class AnalyticsControllerTest {
                         .param("run_number", "1"))
                 .andExpect(status().isOk());
 
-        verify(analyticsService).getRunExecutionsByName("capitalcalc", "tenant-a", 30, CalculatorFrequency.DAILY, "1");
+        verify(analyticsService).getRunExecutionsByName("capitalcalc", 30, CalculatorFrequency.DAILY, "1");
     }
 
     @Test
-    void getRunExecutions_missingTenantId_returnsBadRequest() throws Exception {
+    void getRunExecutions_missingTenantId_succeeds() throws Exception {
+        when(analyticsService.getRunExecutionsByName("capitalcalc", 30, CalculatorFrequency.DAILY, null))
+                .thenReturn(new RunPerformanceData("capitalcalc", "capitalcalc", "DAILY", 30, 0L,
+                        0, 0, 0, 0, 0, List.of(), null, null));
+
         mockMvc.perform(get("/api/v1/analytics/calculators/capitalcalc/executions")
                         .param("days", "30"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk());
     }
 
     @Test
-    void missingTenantIdHeader_returnsBadRequest() throws Exception {
+    void missingTenantIdHeader_succeeds() throws Exception {
+        when(analyticsService.getRuntimeAnalytics("calc-1", 30, CalculatorFrequency.DAILY))
+                .thenReturn(new RuntimeAnalyticsResponse(
+                        "calc-1", 30, "DAILY", 0, 0, 0, 0, 0.0, List.of()));
+
         mockMvc.perform(get("/api/v1/analytics/calculators/calc-1/runtime")
                         .param("days", "30"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk());
     }
 }

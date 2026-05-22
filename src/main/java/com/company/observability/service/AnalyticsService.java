@@ -50,20 +50,20 @@ public class AnalyticsService {
     // ================================================================
 
     public RuntimeAnalyticsResponse getRuntimeAnalytics(
-            String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
+            String calculatorId, int days, CalculatorFrequency frequency) {
 
         RuntimeAnalyticsResponse cached = cacheService.getFromCache(
-                CACHE_RUNTIME, calculatorId, tenantId, frequency.name(), days,
+                CACHE_RUNTIME, calculatorId, frequency.name(), days,
                 RuntimeAnalyticsResponse.class);
         if (cached != null) return cached;
 
         List<DailyAggregate> aggregates = dailyAggregateRepository
-                .findRecentAggregates(calculatorId, tenantId, days);
+                .findRecentAggregates(calculatorId, days);
 
         RuntimeAnalyticsResponse response = buildRuntimeResponse(
                 calculatorId, days, frequency, aggregates);
 
-        cacheService.putInCache(CACHE_RUNTIME, calculatorId, tenantId,
+        cacheService.putInCache(CACHE_RUNTIME, calculatorId,
                 frequency.name(), days, response);
         return response;
     }
@@ -117,18 +117,18 @@ public class AnalyticsService {
     // ================================================================
 
     public SlaSummaryResponse getSlaSummary(
-            String calculatorId, String tenantId, int days) {
+            String calculatorId, int days) {
 
         SlaSummaryResponse cached = cacheService.getFromCache(
-                CACHE_SLA_SUMMARY, calculatorId, tenantId, days,
+                CACHE_SLA_SUMMARY, calculatorId, days,
                 SlaSummaryResponse.class);
         if (cached != null) return cached;
 
-        SlaCoreData coreData = getSlaCoreData(calculatorId, tenantId, days);
+        SlaCoreData coreData = getSlaCoreData(calculatorId, days);
         SlaSummaryResponse response = buildSlaSummaryResponse(
                 calculatorId, days, coreData);
 
-        cacheService.putInCache(CACHE_SLA_SUMMARY, calculatorId, tenantId,
+        cacheService.putInCache(CACHE_SLA_SUMMARY, calculatorId,
                 days, response);
         return response;
     }
@@ -162,18 +162,18 @@ public class AnalyticsService {
     // ================================================================
 
     public TrendAnalyticsResponse getTrends(
-            String calculatorId, String tenantId, int days) {
+            String calculatorId, int days) {
 
         TrendAnalyticsResponse cached = cacheService.getFromCache(
-                CACHE_TRENDS, calculatorId, tenantId, days,
+                CACHE_TRENDS, calculatorId, days,
                 TrendAnalyticsResponse.class);
         if (cached != null) return cached;
 
-        SlaCoreData coreData = getSlaCoreData(calculatorId, tenantId, days);
+        SlaCoreData coreData = getSlaCoreData(calculatorId, days);
         TrendAnalyticsResponse response = buildTrendResponse(
                 calculatorId, days, coreData);
 
-        cacheService.putInCache(CACHE_TRENDS, calculatorId, tenantId,
+        cacheService.putInCache(CACHE_TRENDS, calculatorId,
                 days, response);
         return response;
     }
@@ -201,7 +201,7 @@ public class AnalyticsService {
     // ================================================================
 
     public PagedResponse<SlaBreachDetailResponse> getSlaBreachDetails(
-            String calculatorId, String tenantId, int days,
+            String calculatorId, int days,
             String severity, int page, int size, String cursor) {
 
         boolean legacyPageMode = (cursor == null || cursor.isBlank()) && page > 0;
@@ -211,11 +211,11 @@ public class AnalyticsService {
             int offset = page * size;
             log.debug("event=sla_breach.query outcome=success mode=legacy_offset page={} size={}", page, size);
             pageRows = slaBreachEventRepository.findByCalculatorIdPaginated(
-                    calculatorId, tenantId, days, severity, offset, size + 1);
+                    calculatorId, days, severity, offset, size + 1);
         } else {
             KeysetCursor keysetCursor = decodeCursor(cursor);
             pageRows = slaBreachEventRepository
-                    .findByCalculatorIdKeyset(calculatorId, tenantId, days, severity,
+                    .findByCalculatorIdKeyset(calculatorId, days, severity,
                             keysetCursor != null ? keysetCursor.createdAt() : null,
                             keysetCursor != null ? keysetCursor.breachId() : null,
                             size + 1);
@@ -226,7 +226,7 @@ public class AnalyticsService {
                 ? pageRows.subList(0, size)
                 : pageRows;
         long total = slaBreachEventRepository
-                .countByCalculatorIdAndPeriod(calculatorId, tenantId, days, severity);
+                .countByCalculatorIdAndPeriod(calculatorId, days, severity);
 
         List<SlaBreachDetailResponse> content = breaches.stream()
                 .map(this::toBreachDetail)
@@ -255,20 +255,20 @@ public class AnalyticsService {
     // ================================================================
 
     public RunPerformanceData getRunPerformanceData(
-            String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
+            String calculatorId, int days, CalculatorFrequency frequency) {
 
         RunPerformanceData cached = cacheService.getFromCache(
-                CACHE_RUN_PERF, calculatorId, tenantId, frequency.name(), days,
+                CACHE_RUN_PERF, calculatorId, frequency.name(), days,
                 RunPerformanceData.class);
         if (cached != null) return cached;
 
         List<RunWithSlaStatus> runs = calculatorRunRepository
-                .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days);
+                .findRunsWithSlaStatus(calculatorId, frequency, days);
 
         RunPerformanceData response = buildRunPerformanceData(
                 calculatorId, days, frequency, runs);
 
-        cacheService.putInCache(CACHE_RUN_PERF, calculatorId, tenantId,
+        cacheService.putInCache(CACHE_RUN_PERF, calculatorId,
                 frequency.name(), days, response);
         return response;
     }
@@ -356,17 +356,17 @@ public class AnalyticsService {
     // ================================================================
 
     public RunPerformanceData getRunExecutions(
-            String calculatorId, String tenantId, int days, CalculatorFrequency frequency) {
-        return getRunExecutions(calculatorId, tenantId, days, frequency, null);
+            String calculatorId, int days, CalculatorFrequency frequency) {
+        return getRunExecutions(calculatorId, days, frequency, null);
     }
 
     public RunPerformanceData getRunExecutions(
-            String calculatorId, String tenantId, int days, CalculatorFrequency frequency, String runNumber) {
+            String calculatorId, int days, CalculatorFrequency frequency, String runNumber) {
 
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
-                .findRunsWithSlaStatus(calculatorId, tenantId, frequency, days, runNumber);
+                .findRunsWithSlaStatus(calculatorId, frequency, days, runNumber);
 
-        return buildExecutionsResponse(calculatorId, tenantId, rawRuns, days, frequency);
+        return buildExecutionsResponse(calculatorId, rawRuns, days, frequency);
     }
 
     /**
@@ -375,17 +375,16 @@ public class AnalyticsService {
      * so no upstream UUID appears in the response.
      */
     public RunPerformanceData getRunExecutionsByName(
-            String calculatorName, String tenantId, int days, CalculatorFrequency frequency, String runNumber) {
+            String calculatorName, int days, CalculatorFrequency frequency, String runNumber) {
 
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
-                .findRunsWithSlaStatusByName(calculatorName, tenantId, frequency, days, runNumber);
+                .findRunsWithSlaStatusByName(calculatorName, frequency, days, runNumber);
 
-        return buildExecutionsResponse(calculatorName, tenantId, rawRuns, days, frequency);
+        return buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
     }
 
     private RunPerformanceData buildExecutionsResponse(
             String calculatorKey,
-            String tenantId,
             List<RunWithSlaStatus> rawRuns,
             int days,
             CalculatorFrequency frequency) {
@@ -419,12 +418,11 @@ public class AnalyticsService {
                 })
                 .toList();
 
-        return buildRunPerformanceDataEnvelope(calculatorKey, tenantId, rawRuns, dataPoints, days, frequency);
+        return buildRunPerformanceDataEnvelope(calculatorKey, rawRuns, dataPoints, days, frequency);
     }
 
     private RunPerformanceData buildRunPerformanceDataEnvelope(
             String calculatorId,
-            String tenantId,
             List<RunWithSlaStatus> rawRuns,
             List<RunPerformanceData.RunDataPoint> dataPoints,
             int days,
@@ -458,7 +456,7 @@ public class AnalyticsService {
 
         long meanDuration = completedCount > 0 ? totalDuration / completedCount : 0;
 
-        ReferenceLines refLines = resolveReferenceLines(latestRaw, tenantId, frequency);
+        ReferenceLines refLines = resolveReferenceLines(latestRaw, frequency);
 
         return new RunPerformanceData(
                 calculatorId,
@@ -482,10 +480,10 @@ public class AnalyticsService {
      * falls back to the most recent run's stored values. Per-run RunDataPoints keep their own values.
      */
     private ReferenceLines resolveReferenceLines(
-            RunWithSlaStatus latestRaw, String tenantId, CalculatorFrequency frequency) {
+            RunWithSlaStatus latestRaw, CalculatorFrequency frequency) {
 
         CalculatorProfile profile = calculatorProfileService.getProfile(
-                latestRaw.calculatorId(), tenantId, frequency);
+                latestRaw.calculatorId(), frequency);
 
         if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
             java.time.Instant estStart = com.company.observability.util.TimeUtils
@@ -522,22 +520,22 @@ public class AnalyticsService {
         return mapSeverityToTrafficLight(worstSeverity);
     }
 
-    private SlaCoreData getSlaCoreData(String calculatorId, String tenantId, int days) {
+    private SlaCoreData getSlaCoreData(String calculatorId, int days) {
         SlaCoreData cached = cacheService.getFromCache(
-                CACHE_SLA_CORE, calculatorId, tenantId, days, SlaCoreData.class
+                CACHE_SLA_CORE, calculatorId, days, SlaCoreData.class
         );
         if (cached != null) {
             return cached;
         }
 
         List<DailyAggregate> aggregates = dailyAggregateRepository
-                .findRecentAggregates(calculatorId, tenantId, days);
+                .findRecentAggregates(calculatorId, days);
         Map<String, Integer> bySeverity = slaBreachEventRepository
-                .countBySeverity(calculatorId, tenantId, days);
+                .countBySeverity(calculatorId, days);
         Map<String, Integer> byType = slaBreachEventRepository
-                .countByType(calculatorId, tenantId, days);
+                .countByType(calculatorId, days);
         Map<LocalDate, String> worstSeverityByDay = slaBreachEventRepository
-                .findWorstSeverityByDay(calculatorId, tenantId, days);
+                .findWorstSeverityByDay(calculatorId, days);
 
         int totalBreaches = bySeverity.values().stream()
                 .mapToInt(Integer::intValue)
@@ -551,7 +549,7 @@ public class AnalyticsService {
                 .totalBreaches(totalBreaches)
                 .build();
 
-        cacheService.putInCache(CACHE_SLA_CORE, calculatorId, tenantId, days, coreData);
+        cacheService.putInCache(CACHE_SLA_CORE, calculatorId, days, coreData);
         return coreData;
     }
 

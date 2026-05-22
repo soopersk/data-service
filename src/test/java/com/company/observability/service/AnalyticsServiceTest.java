@@ -68,18 +68,18 @@ class AnalyticsServiceTest {
         Instant t3 = Instant.parse("2026-02-20T08:00:00Z");
 
         when(slaBreachEventRepository.findByCalculatorIdKeyset(
-                eq("calc-1"), eq("tenant-1"), eq(30), isNull(),
+                eq("calc-1"), eq(30), isNull(),
                 isNull(), isNull(), eq(3)))
                 .thenReturn(List.of(
                         breach(101L, t1),
                         breach(100L, t2),
                         breach(99L, t3)
                 ));
-        when(slaBreachEventRepository.countByCalculatorIdAndPeriod("calc-1", "tenant-1", 30, null))
+        when(slaBreachEventRepository.countByCalculatorIdAndPeriod("calc-1", 30, null))
                 .thenReturn(3L);
 
         PagedResponse<SlaBreachDetailResponse> response = service.getSlaBreachDetails(
-                "calc-1", "tenant-1", 30, null, 0, 2, null
+                "calc-1", 30, null, 0, 2, null
         );
 
         assertEquals(2, response.content().size());
@@ -89,35 +89,35 @@ class AnalyticsServiceTest {
     @Test
     void getSlaBreachDetails_usesLegacyOffsetModeForExplicitPageWithoutCursor() {
         when(slaBreachEventRepository.findByCalculatorIdPaginated(
-                eq("calc-1"), eq("tenant-1"), eq(30), isNull(), eq(2), eq(3)))
+                eq("calc-1"), eq(30), isNull(), eq(2), eq(3)))
                 .thenReturn(List.of());
-        when(slaBreachEventRepository.countByCalculatorIdAndPeriod("calc-1", "tenant-1", 30, null))
+        when(slaBreachEventRepository.countByCalculatorIdAndPeriod("calc-1", 30, null))
                 .thenReturn(0L);
 
-        service.getSlaBreachDetails("calc-1", "tenant-1", 30, null, 1, 2, null);
+        service.getSlaBreachDetails("calc-1", 30, null, 1, 2, null);
 
         verify(slaBreachEventRepository).findByCalculatorIdPaginated(
-                "calc-1", "tenant-1", 30, null, 2, 3);
-        verify(slaBreachEventRepository).countByCalculatorIdAndPeriod("calc-1", "tenant-1", 30, null);
+                "calc-1", 30, null, 2, 3);
+        verify(slaBreachEventRepository).countByCalculatorIdAndPeriod("calc-1", 30, null);
     }
 
     @Test
     void getSlaSummary_usesAggregatedBreachQueriesAndBuildsSummary() {
         LocalDate day = LocalDate.of(2026, 2, 20);
         DailyAggregate aggregate = new DailyAggregate(
-                "calc-1", "tenant-1", day,
+                "calc-1", day,
                 5, 4, 1, 1200L, 360, 390, null);
 
-        when(dailyAggregateRepository.findRecentAggregates("calc-1", "tenant-1", 30))
+        when(dailyAggregateRepository.findRecentAggregates("calc-1", 30))
                 .thenReturn(List.of(aggregate));
-        when(slaBreachEventRepository.countBySeverity("calc-1", "tenant-1", 30))
+        when(slaBreachEventRepository.countBySeverity("calc-1", 30))
                 .thenReturn(Map.of("HIGH", 2));
-        when(slaBreachEventRepository.countByType("calc-1", "tenant-1", 30))
+        when(slaBreachEventRepository.countByType("calc-1", 30))
                 .thenReturn(Map.of("TIME_EXCEEDED", 2));
-        when(slaBreachEventRepository.findWorstSeverityByDay("calc-1", "tenant-1", 30))
+        when(slaBreachEventRepository.findWorstSeverityByDay("calc-1", 30))
                 .thenReturn(Map.of(day, "HIGH"));
 
-        SlaSummaryResponse response = service.getSlaSummary("calc-1", "tenant-1", 30);
+        SlaSummaryResponse response = service.getSlaSummary("calc-1", 30);
 
         assertEquals(2, response.totalBreaches());
         assertEquals(1, response.redDays());
@@ -127,19 +127,19 @@ class AnalyticsServiceTest {
     void getTrends_usesAggregatedWorstSeverityByDay() {
         LocalDate day = LocalDate.of(2026, 2, 20);
         DailyAggregate aggregate = new DailyAggregate(
-                "calc-1", "tenant-1", day,
+                "calc-1", day,
                 3, 3, 1, 800L, 360, 372, null);
 
-        when(dailyAggregateRepository.findRecentAggregates("calc-1", "tenant-1", 7))
+        when(dailyAggregateRepository.findRecentAggregates("calc-1", 7))
                 .thenReturn(List.of(aggregate));
-        when(slaBreachEventRepository.countBySeverity("calc-1", "tenant-1", 7))
+        when(slaBreachEventRepository.countBySeverity("calc-1", 7))
                 .thenReturn(Map.of("MEDIUM", 1));
-        when(slaBreachEventRepository.countByType("calc-1", "tenant-1", 7))
+        when(slaBreachEventRepository.countByType("calc-1", 7))
                 .thenReturn(Map.of("TIME_EXCEEDED", 1));
-        when(slaBreachEventRepository.findWorstSeverityByDay("calc-1", "tenant-1", 7))
+        when(slaBreachEventRepository.findWorstSeverityByDay("calc-1", 7))
                 .thenReturn(Map.of(day, "MEDIUM"));
 
-        TrendAnalyticsResponse response = service.getTrends("calc-1", "tenant-1", 7);
+        TrendAnalyticsResponse response = service.getTrends("calc-1", 7);
 
         assertEquals(1, response.trends().size());
         assertEquals("AMBER", response.trends().get(0).slaStatus());
@@ -171,11 +171,11 @@ class AnalyticsServiceTest {
                 RunStatus.RUNNING, false, null, null, null, null, null);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30))
+                "calc-1", CalculatorFrequency.DAILY, 30))
                 .thenReturn(List.of(slaMetRun, breachedRun, runningRun));
 
         RunPerformanceData result = service.getRunPerformanceData(
-                "calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
+                "calc-1", 30, CalculatorFrequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
         assertEquals("Calculator One", result.calculatorName());
@@ -215,11 +215,11 @@ class AnalyticsServiceTest {
     @Test
     void getRunPerformanceData_emptyRuns_returnsZeroedResponse() {
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 7))
+                "calc-1", CalculatorFrequency.DAILY, 7))
                 .thenReturn(List.of());
 
         RunPerformanceData result = service.getRunPerformanceData(
-                "calc-1", "tenant-1", 7, CalculatorFrequency.DAILY);
+                "calc-1", 7, CalculatorFrequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
         assertNull(result.calculatorName());
@@ -253,14 +253,14 @@ class AnalyticsServiceTest {
                 RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH, "corr-1", "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30, null))
+                "calc-1", CalculatorFrequency.DAILY, 30, null))
                 .thenReturn(List.of(split1, split2));
         // No usable profile → envelope reference lines fall back to latest-run values.
-        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+        when(calculatorProfileService.getProfile("calc-1", CalculatorFrequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
-                        "calc-1", "tenant-1", "DAILY", 0, 0, 0, 0));
+                        "calc-1", "DAILY", 0, 0, 0, 0));
 
-        RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
+        RunPerformanceData result = service.getRunExecutions("calc-1", 30, CalculatorFrequency.DAILY);
 
         assertEquals(2, result.runs().size());
         assertNull(result.runs().get(0).subRunIds());
@@ -278,10 +278,10 @@ class AnalyticsServiceTest {
     @Test
     void getRunExecutions_emptyRuns_returnsZeroedResponse() {
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 7, null))
+                "calc-1", CalculatorFrequency.DAILY, 7, null))
                 .thenReturn(List.of());
 
-        RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 7, CalculatorFrequency.DAILY);
+        RunPerformanceData result = service.getRunExecutions("calc-1", 7, CalculatorFrequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
         assertNull(result.calculatorName());
@@ -305,14 +305,14 @@ class AnalyticsServiceTest {
                 RunStatus.SUCCESS, false, null, null, null, "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 30, null))
+                "calc-1", CalculatorFrequency.DAILY, 30, null))
                 .thenReturn(List.of(run));
         // avg start = 270 min UTC (04:30); avg duration = 1h; 10 samples → trusted.
-        when(calculatorProfileService.getProfile("calc-1", "tenant-1", CalculatorFrequency.DAILY))
+        when(calculatorProfileService.getProfile("calc-1", CalculatorFrequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
-                        "calc-1", "tenant-1", "DAILY", 3_600_000L, 270, 330, 10));
+                        "calc-1", "DAILY", 3_600_000L, 270, 330, 10));
 
-        RunPerformanceData result = service.getRunExecutions("calc-1", "tenant-1", 30, CalculatorFrequency.DAILY);
+        RunPerformanceData result = service.getRunExecutions("calc-1", 30, CalculatorFrequency.DAILY);
 
         // estStart = day @ 04:30 UTC; buffered = 3_600_000*1.2 + 15m = 72m + 15m = 87m
         Instant expectedStart = Instant.parse("2026-05-11T04:30:00Z");

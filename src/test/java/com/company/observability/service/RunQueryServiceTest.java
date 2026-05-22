@@ -56,7 +56,7 @@ class RunQueryServiceTest {
                 List.of());
 
         when(redisCache.getBatchStatusResponses(
-                List.of("calc-1", "calc-2"), "tenant-1", CalculatorFrequency.DAILY, 2))
+                List.of("calc-1", "calc-2"), CalculatorFrequency.DAILY, 2))
                 .thenReturn(Map.of("calc-1", cachedResponse));
 
         CalculatorRun dbRun = CalculatorRun.builder()
@@ -74,20 +74,19 @@ class RunQueryServiceTest {
                 .createdAt(Instant.now())
                 .build();
 
-        when(runRepository.findBatchRecentRunsDbOnly(anyList(), eq("tenant-1"), eq(CalculatorFrequency.DAILY), anyInt()))
+        when(runRepository.findBatchRecentRunsDbOnly(anyList(), eq(CalculatorFrequency.DAILY), anyInt()))
                 .thenReturn(Map.of("calc-2", List.of(dbRun)));
 
         List<CalculatorStatusResponse> result = service.getBatchCalculatorStatus(
                 List.of("calc-1", "calc-2"),
-                "tenant-1",
                 CalculatorFrequency.DAILY,
                 2,
                 true
         );
 
         assertEquals(2, result.size());
-        verify(runRepository).findBatchRecentRunsDbOnly(anyList(), eq("tenant-1"), eq(CalculatorFrequency.DAILY), eq(3));
-        verify(runRepository, never()).findBatchRecentRuns(anyList(), eq("tenant-1"), eq(CalculatorFrequency.DAILY), anyInt());
+        verify(runRepository).findBatchRecentRunsDbOnly(anyList(), eq(CalculatorFrequency.DAILY), eq(3));
+        verify(runRepository, never()).findBatchRecentRuns(anyList(), eq(CalculatorFrequency.DAILY), anyInt());
     }
 
     // ---------------------------------------------------------------
@@ -97,35 +96,35 @@ class RunQueryServiceTest {
     @Test
     void getStatus_cacheHit_repositoryNeverQueried() {
         CalculatorStatusResponse cached = statusResponse("calc-1");
-        when(redisCache.getStatusResponse("calc-1", "tenant-1", CalculatorFrequency.DAILY, 5))
+        when(redisCache.getStatusResponse("calc-1", CalculatorFrequency.DAILY, 5))
                 .thenReturn(java.util.Optional.of(cached));
 
         CalculatorStatusResponse result = service.getCalculatorStatus(
-                "calc-1", "tenant-1", CalculatorFrequency.DAILY, 5, false);
+                "calc-1", CalculatorFrequency.DAILY, 5, false);
 
         assertThat(result).isEqualTo(cached);
-        verify(runRepository, never()).findRecentRuns(anyString(), anyString(), any(), anyInt());
+        verify(runRepository, never()).findRecentRuns(anyString(), any(), anyInt());
     }
 
     @Test
     void getStatus_bypassCache_alwaysQueriesDb_andNeverReadsCache() {
         CalculatorRun run = dbRun("calc-1", "run-1");
-        when(runRepository.findRecentRuns("calc-1", "tenant-1", CalculatorFrequency.DAILY, 6))
+        when(runRepository.findRecentRuns("calc-1", CalculatorFrequency.DAILY, 6))
                 .thenReturn(List.of(run));
 
-        service.getCalculatorStatus("calc-1", "tenant-1", CalculatorFrequency.DAILY, 5, true);
+        service.getCalculatorStatus("calc-1", CalculatorFrequency.DAILY, 5, true);
 
-        verify(redisCache, never()).getStatusResponse(anyString(), anyString(), any(), anyInt());
-        verify(runRepository).findRecentRuns("calc-1", "tenant-1", CalculatorFrequency.DAILY, 6);
+        verify(redisCache, never()).getStatusResponse(anyString(), any(), anyInt());
+        verify(runRepository).findRecentRuns("calc-1", CalculatorFrequency.DAILY, 6);
     }
 
     @Test
     void getStatus_emptyDbResult_throwsDomainNotFoundException() {
-        when(runRepository.findRecentRuns(anyString(), anyString(), any(), anyInt()))
+        when(runRepository.findRecentRuns(anyString(), any(), anyInt()))
                 .thenReturn(List.of());
 
         assertThatThrownBy(() ->
-                service.getCalculatorStatus("unknown", "tenant-1", CalculatorFrequency.DAILY, 5, true))
+                service.getCalculatorStatus("unknown", CalculatorFrequency.DAILY, 5, true))
                 .isInstanceOf(DomainNotFoundException.class)
                 .hasMessageContaining("unknown");
     }
@@ -138,43 +137,43 @@ class RunQueryServiceTest {
     void getBatch_allCacheHits_dbNeverQueried() {
         CalculatorStatusResponse r1 = statusResponse("calc-1");
         CalculatorStatusResponse r2 = statusResponse("calc-2");
-        when(redisCache.getBatchStatusResponses(List.of("calc-1", "calc-2"), "tenant-1",
+        when(redisCache.getBatchStatusResponses(List.of("calc-1", "calc-2"),
                 CalculatorFrequency.DAILY, 5))
                 .thenReturn(Map.of("calc-1", r1, "calc-2", r2));
 
         List<CalculatorStatusResponse> result = service.getBatchCalculatorStatus(
-                List.of("calc-1", "calc-2"), "tenant-1", CalculatorFrequency.DAILY, 5, true);
+                List.of("calc-1", "calc-2"), CalculatorFrequency.DAILY, 5, true);
 
         assertThat(result).hasSize(2);
-        verify(runRepository, never()).findBatchRecentRunsDbOnly(anyList(), anyString(), any(), anyInt());
+        verify(runRepository, never()).findBatchRecentRunsDbOnly(anyList(), any(), anyInt());
     }
 
     @Test
     void getBatch_allMisses_queriesDbAndCachesResults() {
-        when(redisCache.getBatchStatusResponses(anyList(), anyString(), any(), anyInt()))
+        when(redisCache.getBatchStatusResponses(anyList(), any(), anyInt()))
                 .thenReturn(Map.of()); // no cache hits
         CalculatorRun run = dbRun("calc-1", "run-1");
-        when(runRepository.findBatchRecentRunsDbOnly(anyList(), anyString(), any(), anyInt()))
+        when(runRepository.findBatchRecentRunsDbOnly(anyList(), any(), anyInt()))
                 .thenReturn(Map.of("calc-1", List.of(run)));
 
         service.getBatchCalculatorStatus(
-                List.of("calc-1"), "tenant-1", CalculatorFrequency.DAILY, 5, true);
+                List.of("calc-1"), CalculatorFrequency.DAILY, 5, true);
 
         verify(runRepository).findBatchRecentRunsDbOnly(
-                eq(List.of("calc-1")), eq("tenant-1"), eq(CalculatorFrequency.DAILY), eq(6));
-        verify(redisCache).cacheBatchStatusResponses(any(), eq("tenant-1"), eq(CalculatorFrequency.DAILY), eq(5));
+                eq(List.of("calc-1")), eq(CalculatorFrequency.DAILY), eq(6));
+        verify(redisCache).cacheBatchStatusResponses(any(), eq(CalculatorFrequency.DAILY), eq(5));
     }
 
     @Test
     void getBatch_unknownCalculators_silentlyAbsent() {
-        when(redisCache.getBatchStatusResponses(anyList(), anyString(), any(), anyInt()))
+        when(redisCache.getBatchStatusResponses(anyList(), any(), anyInt()))
                 .thenReturn(Map.of());
         // DB returns nothing for "calc-unknown"
-        when(runRepository.findBatchRecentRunsDbOnly(anyList(), anyString(), any(), anyInt()))
+        when(runRepository.findBatchRecentRunsDbOnly(anyList(), any(), anyInt()))
                 .thenReturn(Map.of());
 
         List<CalculatorStatusResponse> result = service.getBatchCalculatorStatus(
-                List.of("calc-unknown"), "tenant-1", CalculatorFrequency.DAILY, 5, true);
+                List.of("calc-unknown"), CalculatorFrequency.DAILY, 5, true);
 
         assertThat(result).isEmpty();
     }

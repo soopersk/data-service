@@ -176,7 +176,7 @@ class RedisCalculatorCacheTest {
 
             cache.cacheRunOnWrite(run);
 
-            String expectedMember = run.getCalculatorId() + ":" + run.getTenantId() + ":DAILY";
+            String expectedMember = run.getCalculatorId() + ":DAILY";
             verify(setOps).add(eq("obs:running"), eq(expectedMember));
         }
 
@@ -186,7 +186,7 @@ class RedisCalculatorCacheTest {
 
             cache.cacheRunOnWrite(run);
 
-            String expectedMember = run.getCalculatorId() + ":" + run.getTenantId() + ":DAILY";
+            String expectedMember = run.getCalculatorId() + ":DAILY";
             verify(setOps).remove(eq("obs:running"), eq(expectedMember));
         }
     }
@@ -215,7 +215,7 @@ class RedisCalculatorCacheTest {
                 .thenThrow(new RuntimeException("Redis connection refused"));
 
         Optional<java.util.List<CalculatorRun>> result =
-                cache.getRecentRuns("calc-1", "tenant-1", CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns("calc-1", CalculatorFrequency.DAILY, 5);
 
         assertThat(result).isEmpty();
     }
@@ -225,7 +225,7 @@ class RedisCalculatorCacheTest {
         when(zSetOps.reverseRange(anyString(), anyLong(), anyLong())).thenReturn(null);
 
         Optional<java.util.List<CalculatorRun>> result =
-                cache.getRecentRuns("calc-1", "tenant-1", CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns("calc-1", CalculatorFrequency.DAILY, 5);
 
         assertThat(result).isEmpty();
     }
@@ -235,7 +235,7 @@ class RedisCalculatorCacheTest {
         when(zSetOps.reverseRange(anyString(), anyLong(), anyLong())).thenReturn(Set.of());
 
         Optional<java.util.List<CalculatorRun>> result =
-                cache.getRecentRuns("calc-1", "tenant-1", CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns("calc-1", CalculatorFrequency.DAILY, 5);
 
         assertThat(result).isEmpty();
     }
@@ -268,11 +268,11 @@ class RedisCalculatorCacheTest {
 
     @Test
     void evictAllFrequencies_deletesBothFrequencyHashKeys() {
-        cache.evictAllFrequencies("calc-1", "tenant-1");
+        cache.evictAllFrequencies("calc-1");
 
         // Should delete the status hash key for both DAILY and MONTHLY
-        verify(redisTemplate).delete(eq("obs:status:hash:calc-1:tenant-1:DAILY"));
-        verify(redisTemplate).delete(eq("obs:status:hash:calc-1:tenant-1:MONTHLY"));
+        verify(redisTemplate).delete(eq("obs:status:hash:calc-1:DAILY"));
+        verify(redisTemplate).delete(eq("obs:status:hash:calc-1:MONTHLY"));
     }
 
     // ---------------------------------------------------------------
@@ -283,7 +283,7 @@ class RedisCalculatorCacheTest {
     void isRunning_onRedisException_returnsFalse() {
         when(setOps.isMember(anyString(), any())).thenThrow(new RuntimeException("timeout"));
 
-        boolean result = cache.isRunning("calc-1", "tenant-1", CalculatorFrequency.DAILY);
+        boolean result = cache.isRunning("calc-1", CalculatorFrequency.DAILY);
 
         assertThat(result).isFalse();
     }
@@ -298,7 +298,7 @@ class RedisCalculatorCacheTest {
 
         cache.updateRunInCache(run);
 
-        String expectedKey = "obs:runs:zset:calc-1:tenant-1:DAILY";
+        String expectedKey = "obs:runs:zset:calc-1:DAILY";
         verify(zSetOps).remove(eq(expectedKey), eq(run));
         verify(zSetOps).add(eq(expectedKey), eq(run), anyDouble());
     }

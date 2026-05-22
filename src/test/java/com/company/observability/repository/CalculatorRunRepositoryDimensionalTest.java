@@ -22,7 +22,7 @@ class CalculatorRunRepositoryDimensionalTest {
     @Test
     void findAllRunsByDateAndDimension_returnsEmptyForUnknownCalculator() {
         List<CalculatorRun> runs = repository.findAllRunsByDateAndDimension(
-                "test-tenant", LocalDate.of(2026, 3, 6),
+                LocalDate.of(2026, 3, 6),
                 CalculatorFrequency.DAILY, "1",
                 List.of("unknown-calc-xyz-does-not-exist"));
 
@@ -32,7 +32,7 @@ class CalculatorRunRepositoryDimensionalTest {
     @Test
     void findAllRunsByDateAndDimension_returnsEmptyForEmptyCalculatorList() {
         List<CalculatorRun> runs = repository.findAllRunsByDateAndDimension(
-                "test-tenant", LocalDate.of(2026, 3, 6),
+                LocalDate.of(2026, 3, 6),
                 CalculatorFrequency.DAILY, "1",
                 List.of());
 

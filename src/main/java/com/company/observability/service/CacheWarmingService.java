@@ -79,7 +79,7 @@ public class CacheWarmingService {
         Map<String, String> snapshot = MdcContextUtil.setCalculatorContext(run.getCalculatorId(), "-");
         try {
             redisCache.updateRunInCache(run);
-            redisCache.evictStatusResponse(run.getCalculatorId(), run.getTenantId(), run.getFrequency());
+            redisCache.evictStatusResponse(run.getCalculatorId(), run.getFrequency());
         } finally {
             MdcContextUtil.restoreContext(snapshot);
         }
@@ -90,15 +90,14 @@ public class CacheWarmingService {
      */
     private void evictCacheForRun(CalculatorRun run) {
         String calculatorId = run.getCalculatorId();
-        String tenantId = run.getTenantId();
         var frequency = run.getFrequency();
 
         log.debug("event=cache.evict outcome=success freq={}", frequency);
 
         // Evict response caches for this calculator+frequency
-        redisCache.evictStatusResponse(calculatorId, tenantId, frequency);
+        redisCache.evictStatusResponse(calculatorId, frequency);
         // Evict recent runs ZSET for this frequency
-        redisCache.evictRecentRuns(calculatorId, tenantId, frequency);
+        redisCache.evictRecentRuns(calculatorId, frequency);
     }
 
     /**
@@ -107,13 +106,12 @@ public class CacheWarmingService {
      */
     private void warmCacheForRun(CalculatorRun run) {
         String calculatorId = run.getCalculatorId();
-        String tenantId = run.getTenantId();
         var frequency = run.getFrequency();
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             // Warm recent runs ZSET via repository (write-through cache)
-            runRepository.findRecentRuns(calculatorId, tenantId, frequency, 20);
+            runRepository.findRecentRuns(calculatorId, frequency, 20);
 
             sample.stop(meterRegistry.timer(CACHE_WARM_DURATION, "event", "completed"));
             log.debug("event=cache.warm outcome=success freq={}", frequency);

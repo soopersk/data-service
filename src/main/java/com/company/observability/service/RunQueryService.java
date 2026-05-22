@@ -33,25 +33,25 @@ public class RunQueryService {
     private final MeterRegistry meterRegistry;
 
     public CalculatorStatusResponse getCalculatorStatus(
-            String calculatorId, String tenantId, CalculatorFrequency frequency,
+            String calculatorId, CalculatorFrequency frequency,
             int historyLimit, boolean bypassCache) {
 
         var prev = MdcContextUtil.setCalculatorContext(calculatorId, "-");
         try {
-            return doGetCalculatorStatus(calculatorId, tenantId, frequency, historyLimit, bypassCache);
+            return doGetCalculatorStatus(calculatorId, frequency, historyLimit, bypassCache);
         } finally {
             MdcContextUtil.restoreContext(prev);
         }
     }
 
     private CalculatorStatusResponse doGetCalculatorStatus(
-            String calculatorId, String tenantId, CalculatorFrequency frequency,
+            String calculatorId, CalculatorFrequency frequency,
             int historyLimit, boolean bypassCache) {
 
         // Check cache (unless bypassed)
         if (!bypassCache) {
             Optional<CalculatorStatusResponse> cachedResponse =
-                    redisCache.getStatusResponse(calculatorId, tenantId, frequency, historyLimit);
+                    redisCache.getStatusResponse(calculatorId, frequency, historyLimit);
 
             if (cachedResponse.isPresent()) {
                 meterRegistry.counter(QUERY_STATUS_CACHE_HIT,
@@ -63,7 +63,7 @@ public class RunQueryService {
 
         // Query with partition pruning
         List<CalculatorRun> runs = runRepository.findRecentRuns(
-                calculatorId, tenantId, frequency, historyLimit + 1);
+                calculatorId, frequency, historyLimit + 1);
 
         if (runs.isEmpty()) {
             throw new DomainNotFoundException("Calculator not found: " + calculatorId);
@@ -83,7 +83,7 @@ public class RunQueryService {
 
         // Cache (unless bypassed)
         if (!bypassCache) {
-            redisCache.cacheStatusResponse(calculatorId, tenantId, frequency, historyLimit, response);
+            redisCache.cacheStatusResponse(calculatorId, frequency, historyLimit, response);
         }
 
         meterRegistry.counter(QUERY_STATUS_CACHE_MISS,
@@ -94,14 +94,14 @@ public class RunQueryService {
     }
 
     public List<CalculatorStatusResponse> getBatchCalculatorStatus(
-            List<String> calculatorIds, String tenantId, CalculatorFrequency frequency,
+            List<String> calculatorIds, CalculatorFrequency frequency,
             int historyLimit, boolean allowStale) {
 
         Timer.Sample sample = Timer.start(meterRegistry);
 
         // 1. Determine cached responses (effectively final)
         final Map<String, CalculatorStatusResponse> cachedResponses = allowStale
-                ? redisCache.getBatchStatusResponses(calculatorIds, tenantId, frequency, historyLimit)
+                ? redisCache.getBatchStatusResponses(calculatorIds, frequency, historyLimit)
                 : Collections.emptyMap();
 
         // 2. Determine misses based on the hits (effectively final)
@@ -117,7 +117,7 @@ public class RunQueryService {
 
         if (!cacheMisses.isEmpty()) {
             Map<String, List<CalculatorRun>> runsByCalculator =
-                    runRepository.findBatchRecentRunsDbOnly(cacheMisses, tenantId, frequency, historyLimit + 1);
+                    runRepository.findBatchRecentRunsDbOnly(cacheMisses, frequency, historyLimit + 1);
 
             for (String calcId : cacheMisses) {
                 List<CalculatorRun> runs = runsByCalculator.get(calcId);
@@ -144,7 +144,7 @@ public class RunQueryService {
 
             // Cache if stale data is acceptable
             if (allowStale) {
-                redisCache.cacheBatchStatusResponses(freshResponses, tenantId, frequency, historyLimit);
+                redisCache.cacheBatchStatusResponses(freshResponses, frequency, historyLimit);
             }
         }
 

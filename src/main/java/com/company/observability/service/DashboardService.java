@@ -53,7 +53,7 @@ public class DashboardService {
     // ── Public API ────────────────────────────────────────────────────────────
 
     public DashboardResult buildDashboard(
-            String tenantId, LocalDate reportingDate, String frequency, int runNumber) {
+            LocalDate reportingDate, String frequency, int runNumber) {
 
         long lateThreshold = dashboardProperties.getLateThresholdMs();
         String frequencyStr = CalculatorFrequency.from(frequency).name();
@@ -73,12 +73,12 @@ public class DashboardService {
         Map<String, CalculatorRun> runsByCalcId = allCalcIds.isEmpty()
                 ? Map.of()
                 : calculatorRunRepository.findDashboardCalculatorRuns(
-                        tenantId, reportingDate, frequencyStr, runNumberStr, allCalcIds);
+                        reportingDate, frequencyStr, runNumberStr, allCalcIds);
 
         Map<String, List<HistoricalRunStatus>> historyByCalcId = allCalcIds.isEmpty()
                 ? Map.of()
                 : calculatorRunRepository.findDashboardCalculatorHistory(
-                            tenantId, reportingDate, HISTORY_LOOKBACK_DAYS,
+                            reportingDate, HISTORY_LOOKBACK_DAYS,
                             frequencyStr, runNumberStr, allCalcIds)
                         .stream()
                         .collect(Collectors.groupingBy(HistoricalRunStatus::calculatorId));
@@ -86,14 +86,14 @@ public class DashboardService {
         Map<String, Instant> nextRunByCalcId = allCalcIds.isEmpty()
                 ? Map.of()
                 : calculatorRunRepository.findNextRunEstimatedStarts(
-                        tenantId, reportingDate, frequencyStr, runNumberStr, allCalcIds);
+                        reportingDate, frequencyStr, runNumberStr, allCalcIds);
 
         // 4. Regional matrix data (uses its own cache internally)
         boolean regionalNeeded = applicableSections.stream()
                 .flatMap(s -> s.getNodes().stream())
                 .anyMatch(this::isRegionMatrix);
         RegionalBatchResult regional = regionalNeeded
-                ? regionalBatchService.getRegionalBatchStatus(tenantId, reportingDate, runNumberStr)
+                ? regionalBatchService.getRegionalBatchStatus(reportingDate, runNumberStr)
                 : null;
 
         // 5. Build sections, accumulating summaries for dependency resolution
@@ -108,8 +108,8 @@ public class DashboardService {
             sections.add(sectionResult);
         }
 
-        log.debug("event=dashboard.build tenant_id={} reporting_date={} frequency={} run_number={} sections={}",
-                tenantId, reportingDate, frequencyStr, runNumber, sections.size());
+        log.debug("event=dashboard.build reporting_date={} frequency={} run_number={} sections={}",
+                reportingDate, frequencyStr, runNumber, sections.size());
 
         return new DashboardResult(reportingDate, frequencyStr, runNumber, Instant.now(), sections);
     }

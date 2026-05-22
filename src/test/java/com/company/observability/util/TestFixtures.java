@@ -134,7 +134,6 @@ public final class TestFixtures {
     public static DailyAggregate aDailyAggregate() {
         return new DailyAggregate(
                 DEFAULT_CALC_ID,
-                DEFAULT_TENANT_ID,
                 DEFAULT_DATE,
                 5,           // totalRuns
                 4,           // successRuns

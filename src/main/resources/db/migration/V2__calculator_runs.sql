@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS calculator_runs (
     -- Calculator metadata
     calculator_id        VARCHAR(100)   NOT NULL,
     calculator_name      VARCHAR(255)   NOT NULL,
-    tenant_id            VARCHAR(50)    NOT NULL,
+    tenant_id            VARCHAR(50),
     frequency            VARCHAR(20)    NOT NULL,
 
     -- Partition key

@@ -29,14 +29,13 @@ public class CalculatorStateService {
             RunStatus.RUNNING, RunStatus.FAILED, RunStatus.TIMEOUT, RunStatus.CANCELLED, RunStatus.SUCCESS);
 
     public Map<String, CalculatorEntry> getState(
-            String tenantId,
             LocalDate reportingDate,
             CalculatorFrequency frequency,
             String runNumber,
             List<String> calculatorNames) {
 
         Map<String, List<CalculatorRun>> runsByName = runRepository
-                .findAllRunsByDateAndDimension(tenantId, reportingDate, frequency, runNumber, calculatorNames)
+                .findAllRunsByDateAndDimension(reportingDate, frequency, runNumber, calculatorNames)
                 .stream()
                 .collect(Collectors.groupingBy(CalculatorRun::getCalculatorName));
 

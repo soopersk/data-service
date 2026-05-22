@@ -59,8 +59,8 @@ public class RegionalBatchCacheService {
      * Returns the cached 7-day history for the given tenant + date, or {@code null} on miss.
      * Backward-compatible overload — uses no run_number in the key.
      */
-    public List<RegionalBatchTiming> getHistory(String tenantId, LocalDate reportingDate) {
-        return getHistory(tenantId, reportingDate, null);
+    public List<RegionalBatchTiming> getHistory(LocalDate reportingDate) {
+        return getHistory(reportingDate, null);
     }
 
     /**
@@ -69,8 +69,8 @@ public class RegionalBatchCacheService {
      *
      * @param runNumber "1", "2", or null (null means no run_number filter was applied)
      */
-    public List<RegionalBatchTiming> getHistory(String tenantId, LocalDate reportingDate, String runNumber) {
-        String key = historyKey(tenantId, reportingDate, runNumber);
+    public List<RegionalBatchTiming> getHistory(LocalDate reportingDate, String runNumber) {
+        String key = historyKey(reportingDate, runNumber);
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
@@ -88,9 +88,9 @@ public class RegionalBatchCacheService {
      * Stores the 7-day history for the given tenant + date with a 24-hour TTL.
      * Backward-compatible overload — uses no run_number in the key.
      */
-    public void putHistory(String tenantId, LocalDate reportingDate,
+    public void putHistory(LocalDate reportingDate,
                            List<RegionalBatchTiming> history) {
-        putHistory(tenantId, reportingDate, null, history);
+        putHistory(reportingDate, null, history);
     }
 
     /**
@@ -98,9 +98,9 @@ public class RegionalBatchCacheService {
      *
      * @param runNumber "1", "2", or null
      */
-    public void putHistory(String tenantId, LocalDate reportingDate, String runNumber,
+    public void putHistory(LocalDate reportingDate, String runNumber,
                            List<RegionalBatchTiming> history) {
-        String key = historyKey(tenantId, reportingDate, runNumber);
+        String key = historyKey(reportingDate, runNumber);
         try {
             redisTemplate.opsForValue().set(key, history, HISTORY_TTL);
             log.debug("event=cache.write outcome=success key={}", key);
@@ -115,8 +115,8 @@ public class RegionalBatchCacheService {
      * Returns the cached {@link RegionalBatchStatusResponse} for the given tenant + date,
      * or {@code null} on miss.
      */
-    public RegionalBatchStatusResponse getStatusResponse(String tenantId, LocalDate reportingDate) {
-        String key = statusKey(tenantId, reportingDate, null);
+    public RegionalBatchStatusResponse getStatusResponse(LocalDate reportingDate) {
+        String key = statusKey(reportingDate, null);
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
@@ -134,9 +134,9 @@ public class RegionalBatchCacheService {
      * Stores the {@link RegionalBatchStatusResponse} with a TTL determined by the
      * current region completion state.
      */
-    public void putStatusResponse(String tenantId, LocalDate reportingDate,
+    public void putStatusResponse(LocalDate reportingDate,
                                   RegionalBatchStatusResponse response) {
-        String key = statusKey(tenantId, reportingDate, null);
+        String key = statusKey(reportingDate, null);
         Duration ttl = determineTtl(response);
         try {
             redisTemplate.opsForValue().set(key, response, ttl);
@@ -174,13 +174,13 @@ public class RegionalBatchCacheService {
 
     // ── Key builders ─────────────────────────────────────────────────────────
 
-    private String historyKey(String tenantId, LocalDate reportingDate, String runNumber) {
-        String base = HISTORY_KEY_PREFIX + tenantId + ":" + reportingDate;
+    private String historyKey(LocalDate reportingDate, String runNumber) {
+        String base = HISTORY_KEY_PREFIX + reportingDate;
         return runNumber != null ? base + ":" + runNumber : base;
     }
 
-    private String statusKey(String tenantId, LocalDate reportingDate, String runNumber) {
-        String base = STATUS_KEY_PREFIX + tenantId + ":" + reportingDate;
+    private String statusKey(LocalDate reportingDate, String runNumber) {
+        String base = STATUS_KEY_PREFIX + reportingDate;
         return runNumber != null ? base + ":" + runNumber : base;
     }
 }
