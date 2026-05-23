@@ -1,6 +1,6 @@
 package com.company.observability.dto.request;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -31,7 +31,7 @@ public class StartRunRequest {
     private String calculatorName;
 
     @NotNull(message = "Frequency is required (DAILY or MONTHLY)")
-    private CalculatorFrequency frequency;
+    private Frequency frequency;
 
     @NotNull(message = "Reporting date is required")
     @Schema(example = "2026-02-06")

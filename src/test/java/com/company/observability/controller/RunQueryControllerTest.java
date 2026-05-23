@@ -1,7 +1,7 @@
 package com.company.observability.controller;
 
 import com.company.observability.config.TestMetricsConfig;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
@@ -57,7 +57,7 @@ class RunQueryControllerTest {
     void getCalculatorStatus_returnsCacheableResponse_whenBypassCacheFalse() throws Exception {
         CalculatorStatusResponse response = sampleStatusResponse("Calculator One");
         when(queryService.getCalculatorStatus("calc-1",
-                CalculatorFrequency.DAILY, 5, false)).thenReturn(response);
+                Frequency.DAILY, 5, false)).thenReturn(response);
 
         mockMvc.perform(get("/api/v1/calculators/calc-1/status")
                         .header(TENANT_HEADER, "tenant-a")
@@ -71,14 +71,14 @@ class RunQueryControllerTest {
                 .andExpect(jsonPath("$.current.status").value("RUNNING"));
 
         verify(queryService).getCalculatorStatus("calc-1",
-                CalculatorFrequency.DAILY, 5, false);
+                Frequency.DAILY, 5, false);
     }
 
     @Test
     void getCalculatorStatus_returnsNoCache_whenBypassCacheTrue() throws Exception {
         CalculatorStatusResponse response = sampleStatusResponse("Calculator Monthly");
         when(queryService.getCalculatorStatus("calc-1",
-                CalculatorFrequency.MONTHLY, 3, true)).thenReturn(response);
+                Frequency.MONTHLY, 3, true)).thenReturn(response);
 
         mockMvc.perform(get("/api/v1/calculators/calc-1/status")
                         .header(TENANT_HEADER, "tenant-a")
@@ -89,7 +89,7 @@ class RunQueryControllerTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-cache")));
 
         verify(queryService).getCalculatorStatus("calc-1",
-                CalculatorFrequency.MONTHLY, 3, true);
+                Frequency.MONTHLY, 3, true);
     }
 
     @Test
@@ -100,7 +100,7 @@ class RunQueryControllerTest {
         );
         when(queryService.getBatchCalculatorStatus(
                 List.of("calc-a", "calc-b"),
-                CalculatorFrequency.DAILY, 5, true)).thenReturn(response);
+                Frequency.DAILY, 5, true)).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/calculators/batch/status")
                         .header(TENANT_HEADER, "tenant-a")
@@ -116,7 +116,7 @@ class RunQueryControllerTest {
 
         verify(queryService).getBatchCalculatorStatus(
                 List.of("calc-a", "calc-b"),
-                CalculatorFrequency.DAILY, 5, true);
+                Frequency.DAILY, 5, true);
     }
 
     @Test
@@ -124,7 +124,7 @@ class RunQueryControllerTest {
         List<CalculatorStatusResponse> response = List.of(sampleStatusResponse("Calc Fresh"));
         when(queryService.getBatchCalculatorStatus(
                 List.of("calc-fresh"),
-                CalculatorFrequency.DAILY, 5, false)).thenReturn(response);
+                Frequency.DAILY, 5, false)).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/calculators/batch/status")
                         .header(TENANT_HEADER, "tenant-a")
@@ -139,13 +139,13 @@ class RunQueryControllerTest {
 
         verify(queryService).getBatchCalculatorStatus(
                 List.of("calc-fresh"),
-                CalculatorFrequency.DAILY, 5, false);
+                Frequency.DAILY, 5, false);
     }
 
     @Test
     void getCalculatorStatus_missingTenantIdHeader_succeeds() throws Exception {
         when(queryService.getCalculatorStatus("calc-1",
-                CalculatorFrequency.DAILY, 5, false))
+                Frequency.DAILY, 5, false))
                 .thenReturn(sampleStatusResponse("Calculator One"));
 
         mockMvc.perform(get("/api/v1/calculators/calc-1/status")
@@ -158,7 +158,7 @@ class RunQueryControllerTest {
     @Test
     void getBatchStatus_missingTenantIdHeader_succeeds() throws Exception {
         when(queryService.getBatchCalculatorStatus(
-                List.of("calc-1"), CalculatorFrequency.DAILY, 5, true))
+                List.of("calc-1"), Frequency.DAILY, 5, true))
                 .thenReturn(List.of(sampleStatusResponse("Calc A")));
 
         mockMvc.perform(post("/api/v1/calculators/batch/status")
@@ -173,7 +173,7 @@ class RunQueryControllerTest {
     void batchRuns_returns200WithMapKeyedByCalculatorName() throws Exception {
         var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capitalcalc", List.of());
         when(calculatorStateService.getState(eq(LocalDate.of(2026, 3, 6)),
-                eq(CalculatorFrequency.DAILY), eq("1"), eq(List.of("capitalcalc"))))
+                eq(Frequency.DAILY), eq("1"), eq(List.of("capitalcalc"))))
                 .thenReturn(Map.of("capitalcalc", entry));
 
         mockMvc.perform(get("/api/v1/calculators/batch/runs")
@@ -218,7 +218,7 @@ class RunQueryControllerTest {
     void batchRuns_omittedRunNumberPassesNullToService() throws Exception {
         var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", List.of());
         when(calculatorStateService.getState(eq(LocalDate.of(2026, 3, 6)),
-                eq(CalculatorFrequency.DAILY), isNull(), eq(List.of("capital"))))
+                eq(Frequency.DAILY), isNull(), eq(List.of("capital"))))
                 .thenReturn(Map.of("capital", entry));
 
         mockMvc.perform(get("/api/v1/calculators/batch/runs")
@@ -232,13 +232,16 @@ class RunQueryControllerTest {
     }
 
     @Test
-    void batchRuns_rejectsInvalidRunNumberWhenProvided() throws Exception {
+    void batchRuns_acceptsArbitraryRunNumber() throws Exception {
+        // @Pattern restriction removed — any run_number value is now accepted (blank→null normalised in service)
+        when(calculatorStateService.getState(any(), any(), eq("3"), any()))
+                .thenReturn(Map.of());
         mockMvc.perform(get("/api/v1/calculators/batch/runs")
                         .param("reporting_date", "2026-03-06")
                         .param("run_number", "3")
                         .param("keys", "capital")
                         .header(TENANT_HEADER, "t1"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk());
     }
 
     private static CalculatorStatusResponse sampleStatusResponse(String calculatorName) {

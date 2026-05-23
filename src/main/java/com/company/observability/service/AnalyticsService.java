@@ -5,7 +5,7 @@ import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.SlaBreachEvent;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.enums.SlaStatus;
 import com.company.observability.dto.response.*;
@@ -44,13 +44,14 @@ public class AnalyticsService {
     private static final String CACHE_SLA_SUMMARY = "sla-summary";
     private static final String CACHE_TRENDS = "trends";
     private static final String CACHE_RUN_PERF = "run-perf";
+    private static final String CACHE_EXECUTIONS = "executions";
 
     // ================================================================
     // Runtime Analytics
     // ================================================================
 
     public RuntimeAnalyticsResponse getRuntimeAnalytics(
-            String calculatorId, int days, CalculatorFrequency frequency) {
+            String calculatorId, int days, Frequency frequency) {
 
         RuntimeAnalyticsResponse cached = cacheService.getFromCache(
                 CACHE_RUNTIME, calculatorId, frequency.name(), days,
@@ -69,7 +70,7 @@ public class AnalyticsService {
     }
 
     private RuntimeAnalyticsResponse buildRuntimeResponse(
-            String calculatorId, int days, CalculatorFrequency frequency,
+            String calculatorId, int days, Frequency frequency,
             List<DailyAggregate> aggregates) {
 
         if (aggregates.isEmpty()) {
@@ -255,7 +256,7 @@ public class AnalyticsService {
     // ================================================================
 
     public RunPerformanceData getRunPerformanceData(
-            String calculatorId, int days, CalculatorFrequency frequency) {
+            String calculatorId, int days, Frequency frequency) {
 
         RunPerformanceData cached = cacheService.getFromCache(
                 CACHE_RUN_PERF, calculatorId, frequency.name(), days,
@@ -274,7 +275,7 @@ public class AnalyticsService {
     }
 
     private RunPerformanceData buildRunPerformanceData(
-            String calculatorId, int days, CalculatorFrequency frequency,
+            String calculatorId, int days, Frequency frequency,
             List<RunWithSlaStatus> runs) {
 
         if (runs.isEmpty()) {
@@ -356,12 +357,12 @@ public class AnalyticsService {
     // ================================================================
 
     public RunPerformanceData getRunExecutions(
-            String calculatorId, int days, CalculatorFrequency frequency) {
+            String calculatorId, int days, Frequency frequency) {
         return getRunExecutions(calculatorId, days, frequency, null);
     }
 
     public RunPerformanceData getRunExecutions(
-            String calculatorId, int days, CalculatorFrequency frequency, String runNumber) {
+            String calculatorId, int days, Frequency frequency, String runNumber) {
 
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
                 .findRunsWithSlaStatus(calculatorId, frequency, days, runNumber);
@@ -370,24 +371,41 @@ public class AnalyticsService {
     }
 
     /**
-     * Name-keyed variant of {@link #getRunExecutions(String, String, int, CalculatorFrequency, String)}.
+     * Name-keyed variant of {@link #getRunExecutions(String, String, int, Frequency, String)}.
      * Queries by calculator_name; the envelope's calculatorId field carries the same name,
      * so no upstream UUID appears in the response.
      */
     public RunPerformanceData getRunExecutionsByName(
-            String calculatorName, int days, CalculatorFrequency frequency, String runNumber) {
+            String calculatorName, int days, Frequency frequency, String runNumber) {
+
+        // Normalize blank → null so empty ?run_number= means "all runs" (not filter on empty string)
+        String rn = (runNumber == null || runNumber.isBlank()) ? null : runNumber;
+
+        RunPerformanceData cached = cacheService.getFromCache(
+                CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn,
+                RunPerformanceData.class);
+        if (cached != null) {
+            log.debug("event=executions.cache outcome=hit calculatorName={} frequency={} days={} runNumber={}",
+                    calculatorName, frequency, days, rn);
+            return cached;
+        }
+
+        log.debug("event=executions.db_fetch outcome=start calculatorName={} frequency={} days={} runNumber={}",
+                calculatorName, frequency, days, rn);
 
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
-                .findRunsWithSlaStatusByName(calculatorName, frequency, days, runNumber);
+                .findRunsWithSlaStatusByName(calculatorName, frequency, days, rn);
 
-        return buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
+        RunPerformanceData response = buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
+        cacheService.putInCache(CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn, response);
+        return response;
     }
 
     private RunPerformanceData buildExecutionsResponse(
             String calculatorKey,
             List<RunWithSlaStatus> rawRuns,
             int days,
-            CalculatorFrequency frequency) {
+            Frequency frequency) {
 
         if (rawRuns.isEmpty()) {
             return new RunPerformanceData(
@@ -426,7 +444,7 @@ public class AnalyticsService {
             List<RunWithSlaStatus> rawRuns,
             List<RunPerformanceData.RunDataPoint> dataPoints,
             int days,
-            CalculatorFrequency frequency) {
+            Frequency frequency) {
 
         RunWithSlaStatus latestRaw = rawRuns.get(rawRuns.size() - 1);
 
@@ -480,7 +498,7 @@ public class AnalyticsService {
      * falls back to the most recent run's stored values. Per-run RunDataPoints keep their own values.
      */
     private ReferenceLines resolveReferenceLines(
-            RunWithSlaStatus latestRaw, CalculatorFrequency frequency) {
+            RunWithSlaStatus latestRaw, Frequency frequency) {
 
         CalculatorProfile profile = calculatorProfileService.getProfile(
                 latestRaw.calculatorId(), frequency);

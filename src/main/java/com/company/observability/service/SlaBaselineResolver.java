@@ -2,7 +2,7 @@ package com.company.observability.service;
 
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorProfile;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.request.StartRunRequest;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
@@ -49,7 +49,7 @@ public class SlaBaselineResolver {
      * @return the derived SLA deadline (LATE-band edge), or {@code null} when no baseline is
      *         available and the run should not be graded.
      */
-    public Instant resolveDeadline(StartRunRequest request, CalculatorFrequency frequency, CalculatorProfile profile) {
+    public Instant resolveDeadline(StartRunRequest request, Frequency frequency, CalculatorProfile profile) {
         // Feature disabled → legacy passthrough of the upstream-supplied deadline.
         if (!props.isEnabled()) {
             return request.getSlaTime();

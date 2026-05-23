@@ -20,21 +20,23 @@ On any Redis failure, all reads fall back to PostgreSQL transparently. Redis wri
 
 | Key Pattern | Structure | TTL | Purpose |
 |-------------|-----------|-----|---------|
-| `obs:runs:zset:{calcId}:{tenantId}:{frequency}` | Sorted Set | 5m / 15m / 1h / 4h | Recent run objects, scored by `createdAt` epoch ms, capped at 100 members |
-| `obs:status:hash:{calcId}:{tenantId}:{frequency}` | Hash | 30s / 60s | `CalculatorStatusResponse` objects, keyed by `historyLimit` integer |
-| `obs:running` | Set | 2h | `{calcId}:{tenantId}:{frequency}` strings for currently RUNNING runs |
+| `obs:runs:zset:{calcId}:{frequency}` | Sorted Set | 5m / 15m / 1h / 4h | Recent run objects, scored by `createdAt` epoch ms, capped at 100 members |
+| `obs:status:hash:{calcId}:{frequency}` | Hash | 30s / 60s | `CalculatorStatusResponse` objects, keyed by `historyLimit` integer |
+| `obs:running` | Set | 2h | `{calcId}:{frequency}` strings for currently RUNNING runs |
 | `obs:active:bloom` | Set | 24h | Calculator IDs seen in last 24h (simulated bloom filter) |
 | `obs:sla:deadlines` | Sorted Set | 24h | Member = `{tenantId}:{runId}:{reportingDate}`, score = SLA deadline epoch ms |
 | `obs:sla:run_info` | Hash | 24h | Field = runKey, value = JSON `{runId, calcId, tenantId, reportingDate, startTime, slaTime}` |
-| `obs:analytics:{prefix}:{calcId}:{tenantId}:{days}` | String (JSON) | 5m | Analytics responses without frequency dimension |
-| `obs:analytics:{prefix}:{calcId}:{tenantId}:{freq}:{days}` | String (JSON) | 5m | Analytics responses with frequency dimension |
-| `obs:analytics:index:{calcId}:{tenantId}` | Set | 1h | Tracks all analytics keys for bulk invalidation |
-| `obs:profile:{calcId}:{tenantId}:{frequency}` | String (JSON) | 26h / 60m | Cached `CalculatorProfile` (avg duration + avg start/end minute). 26h when samples exist; 60m "empty" sentinel otherwise |
-| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` | String (JSON) | 24h | 7-day regional batch timing history — immutable once written |
-| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 24h | Run-number-scoped history variant |
-| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` | String (JSON) | 30s–4h | Full `RegionalBatchStatusResponse` — smart TTL |
-| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 30s–4h | Run-number-scoped status variant |
-| `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}` | String (JSON) | 30s–4h | Full `CalculatorDashboardResponse` — smart TTL |
+| `obs:analytics:{prefix}:{calcId}:{days}` | String (JSON) | 5m | Analytics responses without frequency dimension |
+| `obs:analytics:{prefix}:{calcId}:{freq}:{days}` | String (JSON) | 5m | Analytics responses with frequency dimension |
+| `obs:analytics:executions:{name}:{freq}:{days}:{runNumber\|all}` | String (JSON) | 5m | `/executions` responses keyed by `calculatorName`; `runNumber` or `all` for unfiltered |
+| `obs:analytics:index:{calcId\|name}` | Set | 1h | Tracks all analytics keys for a calculator. Keyed by either `calculatorId` (UUID) or `calculatorName` — events evict both indices. |
+| `obs:profile:{calcId}:{frequency}` | String (JSON) | 26h / 60m | Cached `CalculatorProfile` (avg duration + avg start/end minute). 26h when samples exist; 60m "empty" sentinel otherwise |
+| `obs:state:{calculatorName}:{reportingDate}:{frequency}:{runNumber\|all}` | String (JSON) | 30s / 60s / 5m / 4h | `CalculatorEntry` for `/batch/runs` — state-aware TTL (see below) |
+| `obs:analytics:regional-batch:history:{reportingDate}` | String (JSON) | 24h | 7-day regional batch timing history — immutable once written |
+| `obs:analytics:regional-batch:history:{reportingDate}:{runNumber}` | String (JSON) | 24h | Run-number-scoped history variant |
+| `obs:analytics:regional-batch:status:{reportingDate}` | String (JSON) | 30s–4h | Full `RegionalBatchStatusResponse` — smart TTL |
+| `obs:analytics:regional-batch:status:{reportingDate}:{runNumber}` | String (JSON) | 30s–4h | Run-number-scoped status variant |
+| `obs:analytics:dashboard:status:{reportingDate}:{frequency}:{runNumber}` | String (JSON) | 30s–4h | Full `CalculatorDashboardResponse` — smart TTL |
 
 ---
 
@@ -111,8 +113,8 @@ Both keys have a 24-hour TTL.
 **Purpose:** Tracks which calculators currently have a RUNNING run. Used for bloom-filter-style existence checks.
 
 **Write path:** `RedisCalculatorCache.cacheRunOnWrite()`
-- `SADD obs:running {calcId}:{tenantId}:{frequency}` when `status == RUNNING` (2h TTL)
-- `SREM obs:running {calcId}:{tenantId}:{frequency}` when status is anything else
+- `SADD obs:running {calcId}:{frequency}` when `status == RUNNING` (2h TTL)
+- `SREM obs:running {calcId}:{frequency}` when status is anything else
 
 ---
 
@@ -132,18 +134,19 @@ Both keys have a 24-hour TTL.
 **Purpose:** Avoids repeated aggregation queries for frequently-accessed analytics.
 
 - TTL: **5 minutes** on all analytics keys
-- `run-performance` keys are invalidated on `RunStartedEvent`
+- `run-performance` and `executions` keys are invalidated on `RunStartedEvent`
 - All analytics keys are invalidated on `RunCompletedEvent` and `SlaBreachedEvent`
-- `obs:analytics:index:{calcId}:{tenantId}` tracks all analytics keys for bulk invalidation (1h TTL)
+- `obs:analytics:index:{calcId|name}` tracks all analytics keys for bulk invalidation (1h TTL); events evict both the UUID-keyed index and the name-keyed index to cover all entry variants
 
 **Key prefixes by endpoint:**
 
-| Endpoint | Cache Key Prefix |
-|----------|-----------------|
-| `/runtime` | `obs:analytics:runtime:` |
-| `/sla-summary` | `obs:analytics:sla-summary:` |
-| `/trends` | `obs:analytics:trends:` |
-| `/run-performance` | `obs:analytics:run-perf:` |
+| Endpoint | Cache Key Prefix | Key shape |
+|----------|-----------------|-----------|
+| `/runtime` | `obs:analytics:runtime:` | `{calcId}:{freq}:{days}` |
+| `/sla-summary` | `obs:analytics:sla-summary:` | `{calcId}:{days}` |
+| `/trends` | `obs:analytics:trends:` | `{calcId}:{days}` |
+| `/run-performance` | `obs:analytics:run-perf:` | `{calcId}:{freq}:{days}` |
+| `/executions` | `obs:analytics:executions:` | `{calculatorName}:{freq}:{days}:{runNumber\|all}` |
 
 ---
 
@@ -152,7 +155,7 @@ Both keys have a 24-hour TTL.
 **Purpose:** Serves slowly-changing per-calculator rolling profiles (avg duration + avg start/end minute) so the run-start hot path resolves the SLA baseline and estimated start/end from Redis instead of querying the DB on every `/runs/start`.
 
 **Managed by:** `CalculatorProfileService` (cache-aside).
-- **Read:** `getProfile(calcId, tenantId, frequency)` → `GET obs:profile:{calcId}:{tenantId}:{freq}`; on miss, reads `calculator_sli_daily` once via `findProfile(...)` and caches the result.
+- **Read:** `getProfile(calcId, frequency)` → `GET obs:profile:{calcId}:{freq}`; on miss, reads `calculator_sli_daily` once via `findProfile(...)` and caches the result.
 - **Warm:** the nightly `DailyAggregationJob` recomputes the aggregate and calls `warm(profile)` for every active calculator (one `findAllProfiles` query per frequency).
 - **TTL:** `profile-cache-ttl-hours` (default 26h) for profiles with samples; `empty-profile-cache-ttl-minutes` (default 60m) for the zero-sample sentinel so newly-active calculators are picked up sooner.
 - **Resilience:** Redis errors degrade to a DB read and never throw (same posture as the analytics cache).
@@ -161,18 +164,42 @@ Consumers: `SlaBaselineResolver` (avg duration → baseline), `RunIngestionServi
 
 ---
 
+### `obs:state:*` — Calculator State Cache (`/batch/runs`)
+
+Managed by `CalculatorStateCacheService`. All Redis exceptions are swallowed — caching is best-effort.
+
+- **Key:** `obs:state:{calculatorName}:{reportingDate}:{frequency}:{runNumber|all}`
+- **Granularity:** per calculator name × reporting date × frequency × run-number (or `all` for unfiltered)
+- **Content:** `CalculatorEntry` JSON (list of `RunEntry` objects for that calculator)
+- **Invalidation:** TTL-only (no event listeners — state-aware TTL bounds staleness to ≤30s while any run is active)
+
+**TTL tiers (set at write time by `determineTtl()`):**
+
+| State | Condition | TTL |
+|-------|-----------|-----|
+| Any RUNNING | ≥1 run with status `RUNNING` | 30 seconds |
+| NOT_STARTED / empty | runs list empty, or all `NOT_STARTED` | 60 seconds |
+| Terminal with failure/breach | all terminal, any `FAILED`/`TIMEOUT`/`slaBreached` | 5 minutes |
+| Terminal clean | all terminal, no failures or breaches | 4 hours |
+
+**Read path:** `getEntries(date, freq, runNumber, names)` — individual `GET` per name; hits returned as map. Misses are absent.
+
+**Write path:** `putEntries(date, freq, runNumber, entries)` — individual `SET` per entry with its own TTL. Empty entries (names with no DB rows) are also cached (60s) to prevent repeated DB hits.
+
+---
+
 ### `obs:analytics:regional-batch:*` — Regional Batch Two-Tier Cache
 
 Managed by `RegionalBatchCacheService`. All Redis exceptions are swallowed — caching is best-effort.
 
 **Tier 1 — History Cache:**
-- Key: `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` (or `:{runNumber}` for run-scoped)
+- Key: `obs:analytics:regional-batch:history:{reportingDate}` (or `:{runNumber}` for run-scoped)
 - TTL: 24 hours (historical timing data is immutable once all runs complete)
 - Content: `List<RegionalBatchTiming>` — 7 days of `(region, reportingDate, startTime, endTime)` rows
 - Written once on first cache miss; the 7-partition DB scan fires at most once per reporting date
 
 **Tier 2 — Status Response Cache:**
-- Key: `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` (or `:{runNumber}`)
+- Key: `obs:analytics:regional-batch:status:{reportingDate}` (or `:{runNumber}`)
 - Content: Full serialized `RegionalBatchStatusResponse`
 - TTL selected dynamically by `RegionalBatchCacheService.determineTtl()`:
 
@@ -189,7 +216,7 @@ Managed by `RegionalBatchCacheService`. All Redis exceptions are swallowed — c
 
 Managed by `DashboardCacheService`. Same smart TTL tiers as the regional batch status cache above.
 
-- Key: `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}`
+- Key: `obs:analytics:dashboard:status:{reportingDate}:{frequency}:{runNumber}`
 - Content: Full serialized `CalculatorDashboardResponse`
 - `frequency` and `runNumber` are always part of the key (Run 1 and Run 2 are separate cache entries)
 

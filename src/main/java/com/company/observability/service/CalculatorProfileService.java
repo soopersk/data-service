@@ -3,7 +3,7 @@ package com.company.observability.service;
 import com.company.observability.config.AggregationProperties;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorProfile;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.repository.DailyAggregateRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -39,7 +39,7 @@ public class CalculatorProfileService {
     private static final String PROFILE_PREFIX = "obs:profile:";
 
     /** Cache-aside read. Never throws; falls back to a DB read (and a zero-sample profile on error). */
-    public CalculatorProfile getProfile(String calculatorId, CalculatorFrequency frequency) {
+    public CalculatorProfile getProfile(String calculatorId, Frequency frequency) {
         String key = key(calculatorId, frequency);
 
         CalculatorProfile cached = readFromCache(key);
@@ -58,7 +58,7 @@ public class CalculatorProfileService {
     /** Warm a precomputed profile into the cache (called by the nightly job). */
     public void warm(CalculatorProfile profile) {
         writeToCache(key(profile.calculatorId(),
-                CalculatorFrequency.from(profile.frequency())), profile);
+                Frequency.from(profile.frequency())), profile);
     }
 
     private CalculatorProfile readFromCache(String key) {
@@ -85,7 +85,7 @@ public class CalculatorProfileService {
         }
     }
 
-    private String key(String calculatorId, CalculatorFrequency frequency) {
+    private String key(String calculatorId, Frequency frequency) {
         return PROFILE_PREFIX + calculatorId + ":" + frequency.name();
     }
 }

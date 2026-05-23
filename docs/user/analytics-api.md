@@ -16,9 +16,9 @@ X-Tenant-Id: <tenant>
 - Redis analytics cache TTL: 5 minutes
 
 Cache invalidation:
-- Run started: evict `run-performance` cache keys only
-- Run completed: evict all analytics cache keys for calculator+tenant
-- SLA breached: evict all analytics cache keys for calculator+tenant
+- Run started: evict `run-performance` and `executions` cache keys only
+- Run completed: evict all analytics cache keys for the calculator (both UUID-index and name-index)
+- SLA breached: evict all analytics cache keys for the calculator (both UUID-index and name-index)
 
 !!! note "End-of-day freshness"
     The aggregate-backed endpoints — `/runtime`, `/sla-summary`, `/trends` — read from `calculator_sli_daily`, which is now rebuilt by a **nightly batch** (`DailyAggregationJob`) rather than on every run completion. They therefore reflect data **through the last completed day**; the current day's runs appear after the next nightly run. Live, per-run views (`/run-performance`, `/executions`, and the query API) read raw `calculator_runs` and are unaffected.
@@ -157,7 +157,7 @@ Raw run-by-run execution history for the performance card. Two key differences f
 Query params:
 - `days` (optional, 1-365, default `30`)
 - `frequency` (optional, `DAILY` or `MONTHLY`, default `DAILY`)
-- `run_number` (optional, `1` or `2`; omit for all buckets)
+- `run_number` (optional, any value; omit or pass `""` for all buckets; a value filters to that run_number only)
 
 Response shape is identical to `/run-performance` (same `RunPerformanceData` envelope). The envelope's `calculatorId` and `calculatorName` fields both carry the readable name; no UUID appears because the lookup is by name. Each `RunDataPoint` includes:
 
@@ -173,7 +173,7 @@ The two **top-level** fields are chart reference lines for the performance card 
 
 If the calculator has insufficient history (fewer than `min-sample-size` runs), the envelope falls back to the **most recent run's** stored `estimatedStartTime` / `slaTime`. Per-run values in each `RunDataPoint` are always that run's own.
 
-Cache: `max-age=60, private`. The per-run rows come from raw `calculator_runs` (live); the envelope reference lines come from the profile cache (refreshed nightly).
+Cache: `max-age=60, private` (HTTP). The response is also cached in Redis via `AnalyticsCacheService` with a **5-minute TTL** keyed by `obs:analytics:executions:{calculatorName}:{frequency}:{days}:{runNumber|all}`. Cache is invalidated on `RunStartedEvent` (evicts executions prefix) and on `RunCompletedEvent` / `SlaBreachedEvent` (evicts all analytics keys for the calculator). The per-run rows come from raw `calculator_runs` (live); the envelope reference lines come from the profile cache (refreshed nightly).
 
 ### cURL Example
 

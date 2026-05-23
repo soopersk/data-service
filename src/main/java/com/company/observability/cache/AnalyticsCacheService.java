@@ -33,6 +33,7 @@ public class AnalyticsCacheService {
     private static final String ANALYTICS_PREFIX = "obs:analytics:";
     private static final String ANALYTICS_INDEX_PREFIX = "obs:analytics:index:";
     private static final String RUN_PERF_CACHE_PREFIX = ANALYTICS_PREFIX + "run-perf:";
+    static final String RUN_EXECUTIONS_CACHE_PREFIX = ANALYTICS_PREFIX + "executions:";
     private static final Duration DEFAULT_TTL = Duration.ofMinutes(5);
     private static final Duration INDEX_TTL = Duration.ofHours(1);
 
@@ -98,6 +99,45 @@ public class AnalyticsCacheService {
         }
     }
 
+    /**
+     * runNumber-aware get — for executions cache keyed by calculatorName.
+     * Key: obs:analytics:executions:{name}:{freq}:{days}:{runNumber|all}
+     */
+    public <T> T getFromCache(String keyPrefix, String calculatorKey,
+                              String frequency, int days, String runNumber,
+                              Class<T> responseType) {
+        String key = buildKeyWithRunNumber(keyPrefix, calculatorKey, frequency, days, runNumber);
+        try {
+            Object cached = redisTemplate.opsForValue().get(key);
+            if (cached != null) {
+                meterRegistry.counter(CACHE_ANALYTICS_HIT, "prefix", keyPrefix).increment();
+                log.debug("event=cache.read outcome=hit key={}", key);
+                return convertCached(cached, responseType);
+            }
+        } catch (Exception e) {
+            log.warn("event=cache.read outcome=failure key={} error={}", key, e.getMessage());
+        }
+        meterRegistry.counter(CACHE_ANALYTICS_MISS, "prefix", keyPrefix).increment();
+        return null;
+    }
+
+    /**
+     * runNumber-aware put — for executions cache keyed by calculatorName.
+     */
+    public void putInCache(String keyPrefix, String calculatorKey,
+                           String frequency, int days, String runNumber, Object response) {
+        String key = buildKeyWithRunNumber(keyPrefix, calculatorKey, frequency, days, runNumber);
+        // Track under both calculatorKey (name) index so eviction covers name-keyed entries
+        String indexKey = buildIndexKey(calculatorKey);
+        try {
+            redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
+            trackKey(indexKey, key);
+            log.debug("event=cache.write outcome=success key={}", key);
+        } catch (Exception e) {
+            log.warn("event=cache.write outcome=failure key={} error={}", key, e.getMessage());
+        }
+    }
+
     // ================================================================
     // Event-driven invalidation
     // ================================================================
@@ -106,6 +146,7 @@ public class AnalyticsCacheService {
     @Async
     public void onRunStarted(RunStartedEvent event) {
         evictForCalculatorByPrefix(event.getRun(), RUN_PERF_CACHE_PREFIX);
+        evictForCalculatorByPrefix(event.getRun(), RUN_EXECUTIONS_CACHE_PREFIX);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -121,7 +162,15 @@ public class AnalyticsCacheService {
     }
 
     private void evictForCalculator(CalculatorRun run) {
-        String indexKey = buildIndexKey(run.getCalculatorId());
+        // Evict under both id-index (run-perf, runtime, sla-summary, trends) and
+        // name-index (executions — keyed by calculatorName, not UUID)
+        evictIndex(buildIndexKey(run.getCalculatorId()), run.getCalculatorId());
+        if (run.getCalculatorName() != null && !run.getCalculatorName().equals(run.getCalculatorId())) {
+            evictIndex(buildIndexKey(run.getCalculatorName()), run.getCalculatorName());
+        }
+    }
+
+    private void evictIndex(String indexKey, String calculatorKey) {
         try {
             Set<Object> indexedKeys = redisTemplate.opsForSet().members(indexKey);
             if (indexedKeys != null && !indexedKeys.isEmpty()) {
@@ -131,17 +180,24 @@ public class AnalyticsCacheService {
                 keysToDelete.add(indexKey);
                 redisTemplate.delete(keysToDelete);
                 meterRegistry.counter(CACHE_ANALYTICS_EVICTION).increment();
-                log.debug("event=cache.evict outcome=success calculatorId={} keysEvicted={}",
-                        run.getCalculatorId(), indexedKeys.size());
+                log.debug("event=cache.evict outcome=success calculatorKey={} keysEvicted={}",
+                        calculatorKey, indexedKeys.size());
             }
         } catch (Exception e) {
-            log.warn("event=cache.evict outcome=failure calculatorId={} error={}",
-                    run.getCalculatorId(), e.getMessage());
+            log.warn("event=cache.evict outcome=failure calculatorKey={} error={}",
+                    calculatorKey, e.getMessage());
         }
     }
 
     private void evictForCalculatorByPrefix(CalculatorRun run, String fullKeyPrefix) {
-        String indexKey = buildIndexKey(run.getCalculatorId());
+        // Evict under both id-index and name-index
+        evictIndexByPrefix(buildIndexKey(run.getCalculatorId()), fullKeyPrefix, run.getCalculatorId());
+        if (run.getCalculatorName() != null && !run.getCalculatorName().equals(run.getCalculatorId())) {
+            evictIndexByPrefix(buildIndexKey(run.getCalculatorName()), fullKeyPrefix, run.getCalculatorName());
+        }
+    }
+
+    private void evictIndexByPrefix(String indexKey, String fullKeyPrefix, String calculatorKey) {
         try {
             Set<Object> indexedKeys = redisTemplate.opsForSet().members(indexKey);
             if (indexedKeys == null || indexedKeys.isEmpty()) {
@@ -157,12 +213,12 @@ public class AnalyticsCacheService {
                 redisTemplate.delete(keysToDelete);
                 redisTemplate.opsForSet().remove(indexKey, keysToDelete.toArray());
                 meterRegistry.counter(CACHE_ANALYTICS_EVICTION).increment();
-                log.debug("event=cache.evict outcome=success calculatorId={} keysEvicted={} mode=prefix",
-                        run.getCalculatorId(), keysToDelete.size());
+                log.debug("event=cache.evict outcome=success calculatorKey={} keysEvicted={} mode=prefix",
+                        calculatorKey, keysToDelete.size());
             }
         } catch (Exception e) {
-            log.warn("event=cache.evict outcome=failure calculatorId={} mode=prefix error={}",
-                    run.getCalculatorId(), e.getMessage());
+            log.warn("event=cache.evict outcome=failure calculatorKey={} mode=prefix error={}",
+                    calculatorKey, e.getMessage());
         }
     }
 
@@ -178,6 +234,13 @@ public class AnalyticsCacheService {
                             String frequency, int days) {
         return ANALYTICS_PREFIX + prefix + ":" + calculatorId
                 + ":" + frequency + ":" + days;
+    }
+
+    private String buildKeyWithRunNumber(String prefix, String calculatorKey,
+                                         String frequency, int days, String runNumber) {
+        String rn = (runNumber == null) ? "all" : runNumber;
+        return ANALYTICS_PREFIX + prefix + ":" + calculatorKey
+                + ":" + frequency + ":" + days + ":" + rn;
     }
 
     private String buildIndexKey(String calculatorId) {

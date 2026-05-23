@@ -2,7 +2,7 @@ package com.company.observability.scheduled;
 
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.CalculatorRunRepository;
@@ -61,7 +61,7 @@ class LiveSlaBreachDetectionJobTest {
 
         CalculatorRun completedRun = CalculatorRun.builder()
                 .runId("run-1").calculatorId("calc-1").calculatorName("Calculator 1")
-                .tenantId("tenant-1").frequency(CalculatorFrequency.DAILY).reportingDate(date)
+                .tenantId("tenant-1").frequency(Frequency.DAILY).reportingDate(date)
                 .startTime(Instant.parse("2026-04-10T04:00:00Z")).status(RunStatus.SUCCESS)
                 .slaTime(Instant.now().minusSeconds(600)).slaBreached(false)
                 .createdAt(Instant.parse("2026-04-10T04:00:00Z")).build();
@@ -82,7 +82,7 @@ class LiveSlaBreachDetectionJobTest {
 
         CalculatorRun alreadyBreached = CalculatorRun.builder()
                 .runId("run-1").calculatorId("calc-1").calculatorName("Calculator 1")
-                .tenantId("tenant-1").frequency(CalculatorFrequency.DAILY).reportingDate(date)
+                .tenantId("tenant-1").frequency(Frequency.DAILY).reportingDate(date)
                 .startTime(Instant.parse("2026-04-10T04:00:00Z")).status(RunStatus.RUNNING)
                 .slaTime(Instant.now().minusSeconds(600)).slaBreached(true)
                 .slaBreachReason("Already breached at start")
@@ -229,7 +229,7 @@ class LiveSlaBreachDetectionJobTest {
                 .calculatorId("calc-1")
                 .calculatorName("Calculator 1")
                 .tenantId("tenant-1")
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .reportingDate(date)
                 .startTime(Instant.parse("2026-04-10T04:00:00Z"))
                 .status(RunStatus.RUNNING)

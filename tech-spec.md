@@ -423,20 +423,22 @@ The expression `reporting_date = (DATE_TRUNC('month', reporting_date) + INTERVAL
 
 | Key Pattern | Data Structure | TTL | Purpose |
 |------------|----------------|-----|---------|
-| `obs:runs:zset:{calcId}:{tenantId}:{frequency}` | ZSET | 5m (RUNNING) / 15m (completed <30m ago) / 1h (DAILY older) / 4h (MONTHLY older) | Recent run objects, scored by `createdAt.toEpochMilli()`, capped at 100 members |
-| `obs:status:hash:{calcId}:{tenantId}:{frequency}` | Hash | 30s (RUNNING current) / 60s (completed) | `CalculatorStatusResponse` objects, keyed by `historyLimit` integer |
-| `obs:running` | Set | 2h | Members = `{calcId}:{tenantId}:{frequency}` — tracks all currently RUNNING runs. Written by `cacheRunOnWrite()`: SADD on RUNNING, SREM on completion. |
+| `obs:runs:zset:{calcId}:{frequency}` | ZSET | 5m (RUNNING) / 15m (completed <30m ago) / 1h (DAILY older) / 4h (MONTHLY older) | Recent run objects, scored by `createdAt.toEpochMilli()`, capped at 100 members |
+| `obs:status:hash:{calcId}:{frequency}` | Hash | 30s (RUNNING current) / 60s (completed) | `CalculatorStatusResponse` objects, keyed by `historyLimit` integer |
+| `obs:running` | Set | 2h | Members = `{calcId}:{frequency}` — tracks all currently RUNNING runs. Written by `cacheRunOnWrite()`: SADD on RUNNING, SREM on completion. |
 | `obs:active:bloom` | Set | 24h | Simulated bloom filter — set of calculator IDs seen in last 24h |
 | `obs:sla:deadlines` | ZSET | 24h | Member = `{tenantId}:{runId}:{reportingDate}`, score = SLA deadline epoch ms |
 | `obs:sla:run_info` | Hash | 24h | Field = runKey, value = JSON `{runId, calcId, tenantId, reportingDate, startTime, slaTime}` |
-| `obs:analytics:{prefix}:{calcId}:{tenantId}:{days}` | String (JSON) | 5m | Analytics responses without frequency |
-| `obs:analytics:{prefix}:{calcId}:{tenantId}:{freq}:{days}` | String (JSON) | 5m | Analytics responses with frequency |
-| `obs:analytics:index:{calcId}:{tenantId}` | Set | 1h | Tracks all analytics keys for bulk invalidation |
-| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` | String (JSON) | 24h | 7-day history for median estimation — immutable once written |
-| `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 24h | Run-number-scoped history variant |
-| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` | String (JSON) | 30s / 60s / 5m / 4h | Full `RegionalBatchStatusResponse` — smart TTL (see §5.4) |
-| `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}:{runNumber}` | String (JSON) | 30s / 60s / 5m / 4h | Run-number-scoped status variant |
-| `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}` | String (JSON) | 30s / 60s / 5m / 4h | Full `CalculatorDashboardResponse` — smart TTL (see §5.4) |
+| `obs:analytics:{prefix}:{calcId}:{days}` | String (JSON) | 5m | Analytics responses without frequency |
+| `obs:analytics:{prefix}:{calcId}:{freq}:{days}` | String (JSON) | 5m | Analytics responses with frequency |
+| `obs:analytics:executions:{name}:{freq}:{days}:{runNumber\|all}` | String (JSON) | 5m | `/executions` responses keyed by `calculatorName` |
+| `obs:analytics:index:{calcId\|name}` | Set | 1h | Tracks all analytics keys for bulk invalidation. Events evict both UUID-keyed and name-keyed indices. |
+| `obs:state:{calculatorName}:{reportingDate}:{freq}:{runNumber\|all}` | String (JSON) | 30s / 60s / 5m / 4h | `CalculatorEntry` for `/batch/runs` — state-aware TTL (see §4.1) |
+| `obs:analytics:regional-batch:history:{reportingDate}` | String (JSON) | 24h | 7-day history for median estimation — immutable once written |
+| `obs:analytics:regional-batch:history:{reportingDate}:{runNumber}` | String (JSON) | 24h | Run-number-scoped history variant |
+| `obs:analytics:regional-batch:status:{reportingDate}` | String (JSON) | 30s / 60s / 5m / 4h | Full `RegionalBatchStatusResponse` — smart TTL (see §5.4) |
+| `obs:analytics:regional-batch:status:{reportingDate}:{runNumber}` | String (JSON) | 30s / 60s / 5m / 4h | Run-number-scoped status variant |
+| `obs:analytics:dashboard:status:{reportingDate}:{frequency}:{runNumber}` | String (JSON) | 30s / 60s / 5m / 4h | Full `CalculatorDashboardResponse` — smart TTL (see §5.4) |
 
 ### Key Details per Structure
 
@@ -552,7 +554,7 @@ Validation errors (field-level):
 | `runId` | String | `@NotBlank` | Must be globally unique per tenant |
 | `calculatorId` | String | `@NotBlank` | |
 | `calculatorName` | String | `@NotBlank` | Immutable after first insert |
-| `frequency` | CalculatorFrequency | `@NotNull` | `DAILY`/`D` or `MONTHLY`/`M` |
+| `frequency` | Frequency | `@NotNull` | `DAILY`/`D` or `MONTHLY`/`M` |
 | `reportingDate` | LocalDate | `@NotNull` | Partition key — must always be provided |
 | `startTime` | Instant | `@NotNull` | UTC; example: `2026-02-06T23:22:32Z` |
 | `slaTime` | Instant | optional | UTC. Weakest baseline fallback only — the graded deadline is derived from avg runtime |
@@ -630,7 +632,7 @@ Validation errors (field-level):
 }
 ```
 
-**Cache behavior:** Redis hash `obs:status:hash:{calcId}:{tenantId}:{freq}` keyed by `historyLimit`. Miss → DB query with partition-pruned window.
+**Cache behavior:** Redis hash `obs:status:hash:{calcId}:{freq}` keyed by `historyLimit`. Miss → DB query with partition-pruned window.
 
 **Classification:** OLTP-safe. O(historyLimit) rows from at most 4 partitions (DAILY) or ~395 (MONTHLY).
 
@@ -713,7 +715,7 @@ ORDER BY reporting_date DESC
 (The SLA baseline / estimate **profile** reads the same table frequency-scoped via `findProfile`/`findAllProfiles`.)
 
 **Partition safety:** `calculator_sli_daily` is not partitioned — no partition concern.
-**Cache:** `obs:analytics:runtime:{calcId}:{tenantId}:{freq}:{days}` — 5-minute TTL.
+**Cache:** `obs:analytics:runtime:{calcId}:{freq}:{days}` — 5-minute TTL.
 **Classification:** OLTP-safe. Reads from pre-aggregated table; cost = O(days) rows.
 
 ---
@@ -755,7 +757,7 @@ AND created_at >= NOW() - CAST(? AS INTEGER) * INTERVAL '1 day'
 ORDER BY created_at DESC
 ```
 
-**Cache:** `obs:analytics:sla-summary:{calcId}:{tenantId}:{days}` — 5-minute TTL.
+**Cache:** `obs:analytics:sla-summary:{calcId}:{days}` — 5-minute TTL.
 **Classification:** OLTP-safe. O(days) rows from each table. Two queries, no joins.
 
 ---
@@ -790,7 +792,7 @@ ORDER BY created_at DESC
 
 **Per-day SLA status:** GREEN if `sla_breaches == 0`; otherwise classified by worst severity from `buildSlaSummaryResponse()`.
 
-**Cache:** `obs:analytics:trends:{calcId}:{tenantId}:{days}` — 5-minute TTL.
+**Cache:** `obs:analytics:trends:{calcId}:{days}` — 5-minute TTL.
 **Classification:** OLTP-safe. O(days) rows.
 
 ---
@@ -900,10 +902,43 @@ ORDER BY cr.reporting_date ASC, cr.created_at ASC
 }
 ```
 
-**Cache:** `obs:analytics:run-perf:{calcId}:{tenantId}:{freq}:{days}` — 5-minute TTL.
-- `RunStartedEvent` evicts only run-perf keys for calculator+tenant.
-- `RunCompletedEvent` and `SlaBreachedEvent` evict all analytics keys for calculator+tenant.
+**Cache:** `obs:analytics:run-perf:{calcId}:{freq}:{days}` — 5-minute TTL.
+- `RunStartedEvent` evicts only run-perf and executions keys for the calculator.
+- `RunCompletedEvent` and `SlaBreachedEvent` evict all analytics keys for the calculator (both UUID-index and name-index).
 **Classification:** OLTP-safe for `days <= 90`. Borderline for large `days` windows due to raw-row JOIN query cost.
+
+---
+
+#### `GET /api/v1/analytics/calculators/{calculatorName}/executions`
+
+**Purpose:** Raw run-by-run execution history. Unlike `/run-performance`, split runs with a shared `correlation_id` appear as separate rows. Path variable is the readable `calculator_name` (not UUID). Optional `run_number` filter; omitting or passing empty returns all buckets.
+
+**Service:** `AnalyticsService.getRunExecutionsByName()` — queries `findRunsWithSlaStatusByName()` (by name, not UUID).
+
+**Cache:** `obs:analytics:executions:{calculatorName}:{freq}:{days}:{runNumber|all}` — 5-minute TTL.
+- `RunStartedEvent` evicts executions keys (alongside run-perf keys).
+- `RunCompletedEvent` and `SlaBreachedEvent` evict all analytics keys for the calculator (name-index).
+**HTTP:** `Cache-Control: max-age=60, private`
+
+---
+
+#### `GET /api/v1/calculators/batch/runs`
+
+**Purpose:** Point-in-time dimensional run state per calculator for a reporting date. Powers the multi-section dashboard. Identifies calculators by `calculator_name`, not UUID.
+
+**Service:** `CalculatorStateService.getState()` — two-phase deduplication (split collapse + sequential rerun dedup by dimension). Partial cache hits supported.
+
+**Cache:** `obs:state:{calculatorName}:{reportingDate}:{frequency}:{runNumber|all}` — state-aware TTL.
+
+| State | TTL |
+|-------|-----|
+| Any RUNNING | 30 seconds |
+| NOT_STARTED / empty | 60 seconds |
+| Terminal with failure or SLA breach | 5 minutes |
+| Terminal clean | 4 hours |
+
+Invalidation: TTL-only. Absent calculators (no DB rows) cached as empty entries (60s). Managed by `CalculatorStateCacheService`.
+**HTTP:** `Cache-Control: max-age=30, private`
 
 ---
 
@@ -943,7 +978,7 @@ sections that render multiple UI rows from a single calculator run (e.g. Portfol
 3. `DashboardProjection` formats the domain result into `CalculatorDashboardResponse`.
 4. Response stored in cache with smart TTL.
 
-**Cache key:** `obs:analytics:dashboard:status:{tenantId}:{reportingDate}:{frequency}:{runNumber}`
+**Cache key:** `obs:analytics:dashboard:status:{reportingDate}:{frequency}:{runNumber}`
 **HTTP:** `Cache-Control: max-age=30, private`
 
 ---
@@ -988,7 +1023,7 @@ reduce DB load:
 
 | Property | Value |
 |----------|-------|
-| Redis key | `obs:analytics:regional-batch:history:{tenantId}:{reportingDate}` |
+| Redis key | `obs:analytics:regional-batch:history:{reportingDate}` |
 | TTL | 24 hours |
 | Content | List of `(region, reportingDate, startTime, endTime)` for last 7 days |
 | Rationale | Historical data is immutable; the 7-partition scan fires at most once per date |
@@ -997,7 +1032,7 @@ reduce DB load:
 
 | Property | Value |
 |----------|-------|
-| Redis key | `obs:analytics:regional-batch:status:{tenantId}:{reportingDate}` (or `:{runNumber}` suffix when run-number-scoped) |
+| Redis key | `obs:analytics:regional-batch:status:{reportingDate}` (or `:{runNumber}` suffix when run-number-scoped) |
 | Content | Serialized `RegionalBatchStatusResponse` DTO |
 | TTL | Smart — depends on run state |
 
@@ -1041,7 +1076,7 @@ All endpoints annotated with `@Tag` groupings:
 
 2. MONTHLY validation: warn if reportingDate is not end-of-month (non-blocking)
 
-3. Fetch cached profile: profile = calculatorProfileService.getProfile(calcId, tenantId, frequency)
+3. Fetch cached profile: profile = calculatorProfileService.getProfile(calcId, frequency)
 
 4. Derive & freeze the SLA deadline (DAILY and MONTHLY; no start-time breach):
    slaDeadline = slaBaselineResolver.resolveDeadline(request, frequency, profile)
@@ -1543,7 +1578,7 @@ All analytics endpoints have a 5-minute Redis cache. Under heavy load, cache mis
 
 ### Adding a New Calculator Frequency
 
-1. Add value to `CalculatorFrequency` enum with appropriate `lookbackDays`.
+1. Add value to `Frequency` enum (`com.company.observability.domain.enums.Frequency`) with appropriate `lookbackDays`.
 2. Update `buildPartitionPrunedQuery()` in `CalculatorRunRepository` to handle the new frequency's date window.
 3. Update `SlaMonitoringCache.registerForSlaMonitoring()` if the new frequency needs live SLA monitoring.
 4. Update Redis TTL logic in `RedisCalculatorCache.cacheRunOnWrite()`.
@@ -1636,9 +1671,9 @@ Queries without a `reporting_date` predicate **MUST NOT be added** to production
 
 ---
 
-### TD-6: `CalculatorFrequency.lookbackDays` Is Dead Code
+### TD-6: `Frequency.lookbackDays` Is Dead Code
 
-The enum declares `lookbackDays` (2 for DAILY, 10 for MONTHLY) via a constructor parameter and `getLookbackDays()` method. No repository SQL uses these values — the actual query windows are hardcoded (3 days DAILY, 13 months MONTHLY). The discrepancy (3 days vs 2 days for DAILY) is a latent bug if `getLookbackDays()` is ever used in a query.
+The `Frequency` enum (`com.company.observability.domain.enums.Frequency`) declares `lookbackDays` (2 for DAILY, 10 for MONTHLY) via a constructor parameter and `getLookbackDays()` method. No repository SQL uses these values — the actual query windows are hardcoded (3 days DAILY, 13 months MONTHLY). The discrepancy (3 days vs 2 days for DAILY) is a latent bug if `getLookbackDays()` is ever used in a query.
 
 **Fix:** Either remove the field and method, or replace all hardcoded intervals with `getLookbackDays()`.
 
@@ -1690,7 +1725,7 @@ All API endpoints track request counts via counters, but only `query.batch_statu
 
 4. **Multi-tenant isolation enforcement:** `tenantId` is passed as a caller-supplied header. There is no authentication token that cryptographically binds a caller to a tenantId. A caller can supply any `tenantId` value. Is this acceptable for the current trust model?
 
-5. **~~`obs:running` Set population~~** — **RESOLVED.** `RedisCalculatorCache.cacheRunOnWrite()` writes to `obs:running`: adds `{calcId}:{tenantId}:{frequency}` when status=RUNNING (with 2h TTL), removes when status is anything else. The Set is fully populated during normal operation.
+5. **~~`obs:running` Set population~~** — **RESOLVED.** `RedisCalculatorCache.cacheRunOnWrite()` writes to `obs:running`: adds `{calcId}:{frequency}` when status=RUNNING (with 2h TTL), removes when status is anything else. The Set is fully populated during normal operation.
 
 6. **`calculator_sli_daily` vs `calculator_runs` for run-performance:** The `run-performance` endpoint queries `calculator_runs` directly (with a JOIN to `sla_breach_events`) rather than `calculator_sli_daily`. For large `days` windows, this returns many raw run rows. Should some views be pre-aggregated to reduce raw-table pressure?
 

@@ -2,7 +2,7 @@ package com.company.observability.cache;
 
 import com.company.observability.config.RedisCacheConfig;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
 import com.company.observability.util.TestFixtures;
@@ -83,7 +83,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         cache.cacheRunOnWrite(run);
 
         Optional<List<CalculatorRun>> result =
-                cache.getRecentRuns(run.getCalculatorId(), CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns(run.getCalculatorId(), Frequency.DAILY, 5);
 
         assertThat(result).isPresent();
         assertThat(result.get()).hasSize(1);
@@ -103,7 +103,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
                     .runId("run-" + i)
                     .calculatorId(TestFixtures.DEFAULT_CALC_ID)
                     .tenantId(TestFixtures.DEFAULT_TENANT_ID)
-                    .frequency(CalculatorFrequency.DAILY)
+                    .frequency(Frequency.DAILY)
                     .reportingDate(TestFixtures.DEFAULT_DATE)
                     .startTime(base)
                     .status(com.company.observability.domain.enums.RunStatus.RUNNING)
@@ -116,7 +116,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         // retrieving 200 to get all; ZSet should have trimmed to 100
         Optional<List<CalculatorRun>> result =
                 cache.getRecentRuns(TestFixtures.DEFAULT_CALC_ID,
-                        CalculatorFrequency.DAILY, 200);
+                        Frequency.DAILY, 200);
 
         assertThat(result).isPresent();
         assertThat(result.get()).hasSize(100);
@@ -134,7 +134,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         cache.cacheRunOnWrite(running);
 
         assertThat(cache.isRunning(
-                running.getCalculatorId(), CalculatorFrequency.DAILY))
+                running.getCalculatorId(), Frequency.DAILY))
                 .isTrue();
 
         // Now cache the same calculator as completed
@@ -143,7 +143,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         cache.cacheRunOnWrite(completed);
 
         assertThat(cache.isRunning(
-                running.getCalculatorId(), CalculatorFrequency.DAILY))
+                running.getCalculatorId(), Frequency.DAILY))
                 .isFalse();
     }
 
@@ -212,11 +212,11 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
 
         cache.cacheBatchStatusResponses(
                 Map.of("calc-1", r1, "calc-2", r2),
-                CalculatorFrequency.DAILY, 5);
+                Frequency.DAILY, 5);
 
         Map<String, CalculatorStatusResponse> hits = cache.getBatchStatusResponses(
                 List.of("calc-1", "calc-2"),
-                CalculatorFrequency.DAILY, 5);
+                Frequency.DAILY, 5);
 
         assertThat(hits).containsKeys("calc-1", "calc-2");
         assertThat(hits.get("calc-1").calculatorName()).isEqualTo("Calculator calc-1");
@@ -227,11 +227,11 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
     void batchStatusResponsePipeline_missingId_notInResult() {
         cache.cacheBatchStatusResponses(
                 Map.of("calc-1", statusResponse("calc-1")),
-                CalculatorFrequency.DAILY, 5);
+                Frequency.DAILY, 5);
 
         Map<String, CalculatorStatusResponse> hits = cache.getBatchStatusResponses(
                 List.of("calc-1", "calc-missing"),
-                CalculatorFrequency.DAILY, 5);
+                Frequency.DAILY, 5);
 
         assertThat(hits).containsKey("calc-1");
         assertThat(hits).doesNotContainKey("calc-missing");

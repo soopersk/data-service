@@ -5,7 +5,7 @@ import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.BreachType;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.Severity;
 
@@ -99,7 +99,7 @@ public final class TestFixtures {
     public static CalculatorRun aMonthlyRun() {
         LocalDate eom = LocalDate.of(2026, 3, 31);
         return baseRunBuilder()
-                .frequency(CalculatorFrequency.MONTHLY)
+                .frequency(Frequency.MONTHLY)
                 .reportingDate(eom)
                 .status(RunStatus.RUNNING)
                 .slaBreached(false)
@@ -155,7 +155,7 @@ public final class TestFixtures {
                 .calculatorId(DEFAULT_CALC_ID)
                 .calculatorName(DEFAULT_CALC_NAME)
                 .tenantId(DEFAULT_TENANT_ID)
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .reportingDate(DEFAULT_DATE)
                 .startTime(DEFAULT_START)
                 .slaTime(DEFAULT_SLA_TIME)

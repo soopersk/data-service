@@ -1,6 +1,6 @@
 package com.company.observability.config;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -46,8 +46,8 @@ public class DurationBasedSlaProperties {
         return (long) (veryLateBandMinutes - lateBandMinutes) * 60_000L;
     }
 
-    public int lookbackDays(CalculatorFrequency frequency) {
-        return frequency == CalculatorFrequency.MONTHLY
+    public int lookbackDays(Frequency frequency) {
+        return frequency == Frequency.MONTHLY
                 ? lookback.getMonthlyDays()
                 : lookback.getDailyDays();
     }

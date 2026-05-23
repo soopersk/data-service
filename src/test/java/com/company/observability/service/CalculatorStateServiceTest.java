@@ -1,10 +1,12 @@
 package com.company.observability.service;
 
+import com.company.observability.cache.CalculatorStateCacheService;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
+import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
 import com.company.observability.repository.CalculatorRunRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,12 +16,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class CalculatorStateServiceTest {
@@ -27,12 +30,16 @@ class CalculatorStateServiceTest {
     @Mock
     CalculatorRunRepository runRepository;
 
+    @Mock
+    CalculatorStateCacheService stateCache;
+
     // Use a real DurationBasedSlaProperties so bandGapMs() returns a meaningful value (15 min default).
     // A Mockito mock would return 0, making LATE and VERY_LATE indistinguishable.
     CalculatorStateService service;
 
     private static final LocalDate DATE = LocalDate.of(2026, 3, 6);
-    private static final CalculatorFrequency FREQ = CalculatorFrequency.DAILY;
+    private static final Frequency FREQ = Frequency.DAILY;
+    private static final String FREQ_NAME = "DAILY";
     private static final Instant SLA_TIME = Instant.parse("2026-03-06T15:00:00Z");
     private static final Instant T_MINUS_3 = Instant.parse("2026-03-06T12:00:00Z");
     private static final Instant T_MINUS_2 = Instant.parse("2026-03-06T13:00:00Z");
@@ -41,7 +48,10 @@ class CalculatorStateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new CalculatorStateService(runRepository, new DurationBasedSlaProperties());
+        service = new CalculatorStateService(runRepository, new DurationBasedSlaProperties(), stateCache);
+        // Default: cache returns no hits (all misses) so DB is called — matches all pre-existing tests
+        lenient().when(stateCache.getEntries(any(), anyString(), any(), any()))
+                .thenReturn(new HashMap<>());
     }
 
     @Test
@@ -198,6 +208,63 @@ class CalculatorStateServiceTest {
 
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).expectedDurationMs()).isEqualTo(7_200_000L);
+    }
+
+    // ── Cache behaviour ─────────────────────────────────────────────────────
+
+    @Test
+    void fullCacheHit_skipsDbCall() {
+        CalculatorEntry cachedEntry = new CalculatorEntry("cap", List.of());
+        when(stateCache.getEntries(eq(DATE), eq(FREQ_NAME), isNull(), eq(List.of("cap"))))
+                .thenReturn(Map.of("cap", cachedEntry));
+
+        Map<String, CalculatorEntry> result = service.getState(DATE, FREQ, null, List.of("cap"));
+
+        assertThat(result).containsKey("cap");
+        verifyNoInteractions(runRepository);
+    }
+
+    @Test
+    void partialCacheHit_queriesDbOnlyForMisses() {
+        CalculatorRun run = buildRun("other", "r-1", RunStatus.SUCCESS, "WMAP", null, "1",
+                null, T_MINUS_3, T_MINUS_1, SLA_TIME);
+        CalculatorEntry cachedEntry = new CalculatorEntry("cap", List.of());
+
+        when(stateCache.getEntries(eq(DATE), eq(FREQ_NAME), eq("1"), eq(List.of("cap", "other"))))
+                .thenReturn(new HashMap<>(Map.of("cap", cachedEntry)));
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), eq(List.of("other"))))
+                .thenReturn(List.of(run));
+
+        Map<String, CalculatorEntry> result = service.getState(DATE, FREQ, "1", List.of("cap", "other"));
+
+        assertThat(result).containsKey("cap");
+        assertThat(result).containsKey("other");
+        // DB was only called for the miss ("other"), not for "cap"
+        verify(runRepository).findAllRunsByDateAndDimension(DATE, FREQ, "1", List.of("other"));
+    }
+
+    @Test
+    void absentCalculator_cachedAsEmptyEntry_toPreventRepeatDbHits() {
+        when(runRepository.findAllRunsByDateAndDimension(any(), any(), any(), any()))
+                .thenReturn(List.of());
+
+        service.getState(DATE, FREQ, null, List.of("missing-calc"));
+
+        // The empty-runs entry must be stored so a subsequent request hits cache, not DB
+        verify(stateCache).putEntries(eq(DATE), eq(FREQ_NAME), isNull(), argThat(m ->
+                m.containsKey("missing-calc") && m.get("missing-calc").runs().isEmpty()));
+    }
+
+    @Test
+    void blankRunNumber_treatedAsNull_cachesUnder_all_sentinel() {
+        when(runRepository.findAllRunsByDateAndDimension(any(), any(), isNull(), any()))
+                .thenReturn(List.of());
+
+        service.getState(DATE, FREQ, "  ", List.of("calc"));
+
+        // Blank must normalise to null before reaching cache and repo
+        verify(stateCache).getEntries(eq(DATE), eq(FREQ_NAME), isNull(), any());
+        verify(runRepository).findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), isNull(), any());
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

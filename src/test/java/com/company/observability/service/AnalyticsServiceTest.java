@@ -5,7 +5,7 @@ import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.BreachType;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.dto.response.PagedResponse;
@@ -28,10 +28,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 
 @ExtendWith(MockitoExtension.class)
 class AnalyticsServiceTest {
@@ -155,27 +154,27 @@ class AnalyticsServiceTest {
         RunWithSlaStatus slaMetRun = new RunWithSlaStatus(
                 "run-1", "calc-1", "Calculator One", day,
                 start, end, 180000L,
-                slaTime, start, CalculatorFrequency.DAILY,
+                slaTime, start, Frequency.DAILY,
                 RunStatus.SUCCESS, false, null, null, null, null, null);
 
         RunWithSlaStatus breachedRun = new RunWithSlaStatus(
                 "run-2", "calc-1", "Calculator One", day.plusDays(1),
                 start, end, 180000L,
-                slaTime, start, CalculatorFrequency.DAILY,
+                slaTime, start, Frequency.DAILY,
                 RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH, null, null, null);
 
         RunWithSlaStatus runningRun = new RunWithSlaStatus(
                 "run-3", "calc-1", "Calculator One", day.plusDays(2),
                 start, null, null,
-                slaTime, start, CalculatorFrequency.DAILY,
+                slaTime, start, Frequency.DAILY,
                 RunStatus.RUNNING, false, null, null, null, null, null);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", CalculatorFrequency.DAILY, 30))
+                "calc-1", Frequency.DAILY, 30))
                 .thenReturn(List.of(slaMetRun, breachedRun, runningRun));
 
         RunPerformanceData result = service.getRunPerformanceData(
-                "calc-1", 30, CalculatorFrequency.DAILY);
+                "calc-1", 30, Frequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
         assertEquals("Calculator One", result.calculatorName());
@@ -215,11 +214,11 @@ class AnalyticsServiceTest {
     @Test
     void getRunPerformanceData_emptyRuns_returnsZeroedResponse() {
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", CalculatorFrequency.DAILY, 7))
+                "calc-1", Frequency.DAILY, 7))
                 .thenReturn(List.of());
 
         RunPerformanceData result = service.getRunPerformanceData(
-                "calc-1", 7, CalculatorFrequency.DAILY);
+                "calc-1", 7, Frequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
         assertNull(result.calculatorName());
@@ -243,24 +242,24 @@ class AnalyticsServiceTest {
         RunWithSlaStatus split1 = new RunWithSlaStatus(
                 "run-split-1", "calc-1", "Portfolio", day,
                 start1, end1, 500000L,
-                slaTime, start1, CalculatorFrequency.DAILY,
+                slaTime, start1, Frequency.DAILY,
                 RunStatus.SUCCESS, false, null, null, "corr-1", "1", 300000L);
 
         RunWithSlaStatus split2 = new RunWithSlaStatus(
                 "run-split-2", "calc-1", "Portfolio", day,
                 start2, end2, 940000L,
-                slaTime, start2, CalculatorFrequency.DAILY,
+                slaTime, start2, Frequency.DAILY,
                 RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH, "corr-1", "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", CalculatorFrequency.DAILY, 30, null))
+                "calc-1", Frequency.DAILY, 30, null))
                 .thenReturn(List.of(split1, split2));
         // No usable profile → envelope reference lines fall back to latest-run values.
-        when(calculatorProfileService.getProfile("calc-1", CalculatorFrequency.DAILY))
+        when(calculatorProfileService.getProfile("calc-1", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
                         "calc-1", "DAILY", 0, 0, 0, 0));
 
-        RunPerformanceData result = service.getRunExecutions("calc-1", 30, CalculatorFrequency.DAILY);
+        RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
 
         assertEquals(2, result.runs().size());
         assertNull(result.runs().get(0).subRunIds());
@@ -278,10 +277,10 @@ class AnalyticsServiceTest {
     @Test
     void getRunExecutions_emptyRuns_returnsZeroedResponse() {
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", CalculatorFrequency.DAILY, 7, null))
+                "calc-1", Frequency.DAILY, 7, null))
                 .thenReturn(List.of());
 
-        RunPerformanceData result = service.getRunExecutions("calc-1", 7, CalculatorFrequency.DAILY);
+        RunPerformanceData result = service.getRunExecutions("calc-1", 7, Frequency.DAILY);
 
         assertEquals("calc-1", result.calculatorId());
         assertNull(result.calculatorName());
@@ -301,23 +300,88 @@ class AnalyticsServiceTest {
         RunWithSlaStatus run = new RunWithSlaStatus(
                 "run-1", "calc-1", "Portfolio", day,
                 start, end, 1_800_000L,
-                runSla, start, CalculatorFrequency.DAILY,
+                runSla, start, Frequency.DAILY,
                 RunStatus.SUCCESS, false, null, null, null, "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
-                "calc-1", CalculatorFrequency.DAILY, 30, null))
+                "calc-1", Frequency.DAILY, 30, null))
                 .thenReturn(List.of(run));
         // avg start = 270 min UTC (04:30); avg duration = 1h; 10 samples → trusted.
-        when(calculatorProfileService.getProfile("calc-1", CalculatorFrequency.DAILY))
+        when(calculatorProfileService.getProfile("calc-1", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
                         "calc-1", "DAILY", 3_600_000L, 270, 330, 10));
 
-        RunPerformanceData result = service.getRunExecutions("calc-1", 30, CalculatorFrequency.DAILY);
+        RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
 
         // estStart = day @ 04:30 UTC; buffered = 3_600_000*1.2 + 15m = 72m + 15m = 87m
         Instant expectedStart = Instant.parse("2026-05-11T04:30:00Z");
         assertEquals(expectedStart, result.estimatedStartTime());
         assertEquals(expectedStart.plusMillis(87L * 60 * 1000), result.slaTime());
+    }
+
+    // ── getRunExecutionsByName — cache behaviour ──────────────────────────────
+
+    @Test
+    void getRunExecutionsByName_cacheHit_skipsDb() {
+        RunPerformanceData cached = new RunPerformanceData(
+                "cap", "Capital", "DAILY", 30, 0L, 0, 0, 0, 0, 0,
+                List.of(), null, null);
+        when(cacheService.getFromCache(
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(),
+                eq(RunPerformanceData.class)))
+                .thenReturn(cached);
+
+        RunPerformanceData result = service.getRunExecutionsByName("cap", 30, Frequency.DAILY, null);
+
+        assertEquals(cached, result);
+        verifyNoInteractions(calculatorRunRepository);
+    }
+
+    @Test
+    void getRunExecutionsByName_cacheMiss_queriesDbAndPopulatesCache() {
+        when(cacheService.getFromCache(any(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(null);
+        when(calculatorRunRepository.findRunsWithSlaStatusByName(
+                eq("cap"), eq(Frequency.DAILY), eq(30), isNull()))
+                .thenReturn(List.of());
+
+        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, null);
+
+        verify(calculatorRunRepository)
+                .findRunsWithSlaStatusByName("cap", Frequency.DAILY, 30, null);
+        verify(cacheService).putInCache(
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any());
+    }
+
+    @Test
+    void getRunExecutionsByName_runNumberDistinguishesKeys() {
+        when(cacheService.getFromCache(any(), any(), any(), anyInt(), eq("2"), any()))
+                .thenReturn(null);
+        when(calculatorRunRepository.findRunsWithSlaStatusByName(
+                eq("cap"), any(), anyInt(), eq("2")))
+                .thenReturn(List.of());
+
+        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, "2");
+
+        verify(cacheService).getFromCache(
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), eq("2"), any());
+        verify(cacheService).putInCache(
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), eq("2"), any());
+    }
+
+    @Test
+    void getRunExecutionsByName_blankRunNumber_normalisedToNull() {
+        when(cacheService.getFromCache(any(), any(), any(), anyInt(), isNull(), any()))
+                .thenReturn(null);
+        when(calculatorRunRepository.findRunsWithSlaStatusByName(any(), any(), anyInt(), isNull()))
+                .thenReturn(List.of());
+
+        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, "  ");
+
+        verify(cacheService).getFromCache(
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any());
+        verify(calculatorRunRepository)
+                .findRunsWithSlaStatusByName("cap", Frequency.DAILY, 30, null);
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

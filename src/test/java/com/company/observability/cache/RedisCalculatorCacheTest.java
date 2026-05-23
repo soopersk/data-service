@@ -1,7 +1,7 @@
 package com.company.observability.cache;
 
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.util.TestFixtures;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -88,7 +88,7 @@ class RedisCalculatorCacheTest {
         @Test
         void completedRecently_returns15MinuteTtl() {
             // endTime = 10 minutes ago → still within the 30-minute "recent" window
-            CalculatorRun run = completedRun(CalculatorFrequency.DAILY,
+            CalculatorRun run = completedRun(Frequency.DAILY,
                     Instant.now().minus(Duration.ofMinutes(10)));
 
             cache.cacheRunOnWrite(run);
@@ -101,7 +101,7 @@ class RedisCalculatorCacheTest {
 
         @Test
         void oldCompletedDaily_returns1HourTtl() {
-            CalculatorRun run = completedRun(CalculatorFrequency.DAILY,
+            CalculatorRun run = completedRun(Frequency.DAILY,
                     Instant.now().minus(Duration.ofHours(2)));
 
             cache.cacheRunOnWrite(run);
@@ -114,7 +114,7 @@ class RedisCalculatorCacheTest {
 
         @Test
         void oldCompletedMonthly_returns4HourTtl() {
-            CalculatorRun run = completedRun(CalculatorFrequency.MONTHLY,
+            CalculatorRun run = completedRun(Frequency.MONTHLY,
                     Instant.now().minus(Duration.ofHours(2)));
 
             cache.cacheRunOnWrite(run);
@@ -132,7 +132,7 @@ class RedisCalculatorCacheTest {
                     .runId(TestFixtures.DEFAULT_RUN_ID)
                     .calculatorId(TestFixtures.DEFAULT_CALC_ID)
                     .tenantId(TestFixtures.DEFAULT_TENANT_ID)
-                    .frequency(CalculatorFrequency.DAILY)
+                    .frequency(Frequency.DAILY)
                     .reportingDate(TestFixtures.DEFAULT_DATE)
                     .startTime(TestFixtures.DEFAULT_START)
                     .status(RunStatus.SUCCESS)
@@ -148,7 +148,7 @@ class RedisCalculatorCacheTest {
             assertThat(zsetTtl).isEqualTo(Duration.ofHours(1));
         }
 
-        private CalculatorRun completedRun(CalculatorFrequency frequency, Instant endTime) {
+        private CalculatorRun completedRun(Frequency frequency, Instant endTime) {
             return CalculatorRun.builder()
                     .runId(TestFixtures.DEFAULT_RUN_ID)
                     .calculatorId(TestFixtures.DEFAULT_CALC_ID)
@@ -215,7 +215,7 @@ class RedisCalculatorCacheTest {
                 .thenThrow(new RuntimeException("Redis connection refused"));
 
         Optional<java.util.List<CalculatorRun>> result =
-                cache.getRecentRuns("calc-1", CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns("calc-1", Frequency.DAILY, 5);
 
         assertThat(result).isEmpty();
     }
@@ -225,7 +225,7 @@ class RedisCalculatorCacheTest {
         when(zSetOps.reverseRange(anyString(), anyLong(), anyLong())).thenReturn(null);
 
         Optional<java.util.List<CalculatorRun>> result =
-                cache.getRecentRuns("calc-1", CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns("calc-1", Frequency.DAILY, 5);
 
         assertThat(result).isEmpty();
     }
@@ -235,7 +235,7 @@ class RedisCalculatorCacheTest {
         when(zSetOps.reverseRange(anyString(), anyLong(), anyLong())).thenReturn(Set.of());
 
         Optional<java.util.List<CalculatorRun>> result =
-                cache.getRecentRuns("calc-1", CalculatorFrequency.DAILY, 5);
+                cache.getRecentRuns("calc-1", Frequency.DAILY, 5);
 
         assertThat(result).isEmpty();
     }
@@ -283,7 +283,7 @@ class RedisCalculatorCacheTest {
     void isRunning_onRedisException_returnsFalse() {
         when(setOps.isMember(anyString(), any())).thenThrow(new RuntimeException("timeout"));
 
-        boolean result = cache.isRunning("calc-1", CalculatorFrequency.DAILY);
+        boolean result = cache.isRunning("calc-1", Frequency.DAILY);
 
         assertThat(result).isFalse();
     }

@@ -6,7 +6,7 @@ import com.company.observability.config.DashboardProperties.MatrixConfig;
 import com.company.observability.config.DashboardProperties.NodeConfig;
 import com.company.observability.config.DashboardProperties.SectionConfig;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.repository.CalculatorRunRepository.HistoricalRunStatus;
 import com.company.observability.service.RegionalBatchService.EstimatedTime;
@@ -56,7 +56,7 @@ public class DashboardService {
             LocalDate reportingDate, String frequency, int runNumber) {
 
         long lateThreshold = dashboardProperties.getLateThresholdMs();
-        String frequencyStr = CalculatorFrequency.from(frequency).name();
+        String frequencyStr = Frequency.from(frequency).name();
         String runNumberStr = String.valueOf(runNumber);
 
         // 1. Filter sections by frequency

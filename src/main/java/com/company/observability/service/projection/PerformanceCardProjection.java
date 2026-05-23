@@ -1,6 +1,6 @@
 package com.company.observability.service.projection;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.PerformanceCardResponse;
 import com.company.observability.dto.response.RunPerformanceData;
 import com.company.observability.service.AnalyticsService;
@@ -25,7 +25,7 @@ public class PerformanceCardProjection {
     private final AnalyticsService analyticsService;
 
     public PerformanceCardResponse getPerformanceCard(
-            String calculatorId, int days, CalculatorFrequency frequency) {
+            String calculatorId, int days, Frequency frequency) {
 
         RunPerformanceData data = analyticsService
                 .getRunPerformanceData(calculatorId, days, frequency);

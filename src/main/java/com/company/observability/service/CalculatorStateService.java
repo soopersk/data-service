@@ -1,14 +1,16 @@
 package com.company.observability.service;
 
+import com.company.observability.cache.CalculatorStateCacheService;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.RunEntry;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.util.RunStatusClassifier;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -19,10 +21,12 @@ import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CalculatorStateService {
 
     private final CalculatorRunRepository runRepository;
     private final DurationBasedSlaProperties slaProps;
+    private final CalculatorStateCacheService stateCache;
 
     // Lower index = worse status (worst-wins ordering mirrors LogicalRunGrouper)
     private static final List<RunStatus> STATUS_PRECEDENCE = List.of(
@@ -30,18 +34,51 @@ public class CalculatorStateService {
 
     public Map<String, CalculatorEntry> getState(
             LocalDate reportingDate,
-            CalculatorFrequency frequency,
+            Frequency frequency,
             String runNumber,
             List<String> calculatorNames) {
 
-        Map<String, List<CalculatorRun>> runsByName = runRepository
-                .findAllRunsByDateAndDimension(reportingDate, frequency, runNumber, calculatorNames)
-                .stream()
-                .collect(Collectors.groupingBy(CalculatorRun::getCalculatorName));
+        // Normalize blank → null so empty ?run_number= means "all runs" (not filter on empty string)
+        String rn = (runNumber == null || runNumber.isBlank()) ? null : runNumber;
+        String freqName = frequency.name();
 
+        // 1. Cache read — partial hits are fine
+        Map<String, CalculatorEntry> cached = stateCache.getEntries(reportingDate, freqName, rn, calculatorNames);
+
+        // 2. Determine misses
+        List<String> missNames = calculatorNames.stream()
+                .filter(name -> !cached.containsKey(name))
+                .toList();
+
+        log.debug("event=batch_runs.state cacheHits={} cacheMisses={} reportingDate={} frequency={}",
+                cached.size(), missNames.size(), reportingDate, freqName);
+
+        // 3. DB call only for misses
+        if (!missNames.isEmpty()) {
+            log.debug("event=batch_runs.db_fetch outcome=start misses={} reportingDate={} frequency={}",
+                    missNames, reportingDate, freqName);
+
+            Map<String, List<CalculatorRun>> runsByName = runRepository
+                    .findAllRunsByDateAndDimension(reportingDate, frequency, rn, missNames)
+                    .stream()
+                    .collect(Collectors.groupingBy(CalculatorRun::getCalculatorName));
+
+            log.debug("event=batch_runs.db_fetch outcome=complete fetchedCalculators={}", runsByName.size());
+
+            Map<String, CalculatorEntry> freshEntries = missNames.stream().collect(Collectors.toMap(
+                    name -> name,
+                    name -> buildEntry(name, runsByName.getOrDefault(name, List.of()))
+            ));
+
+            // 4. Cache fresh entries (including empty-runs entries so absent names don't re-hit DB)
+            stateCache.putEntries(reportingDate, freqName, rn, freshEntries);
+            cached.putAll(freshEntries);
+        }
+
+        // Return in the original requested order
         return calculatorNames.stream().collect(Collectors.toMap(
                 name -> name,
-                name -> buildEntry(name, runsByName.getOrDefault(name, List.of()))
+                cached::get
         ));
     }
 

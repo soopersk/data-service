@@ -1,7 +1,7 @@
 package com.company.observability.service.projection;
 
 import com.company.observability.domain.RunWithSlaStatus;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.dto.enums.SlaStatus;
@@ -27,7 +27,7 @@ class LogicalRunGrouperTest {
         return new RunWithSlaStatus(
                 runId, "calc-1", "Calc One", DATE, start, end,
                 end != null ? end.toEpochMilli() - start.toEpochMilli() : null,
-                SLA, T0, CalculatorFrequency.DAILY, status,
+                SLA, T0, Frequency.DAILY, status,
                 slaBreached, slaBreached ? "breached" : null,
                 severity, correlationId, null, null);
     }
@@ -123,11 +123,11 @@ class LogicalRunGrouperTest {
 
         RunWithSlaStatus a = new RunWithSlaStatus(
                 "run-A", "calc-1", "Calc One", day1, T0, T1, 600_000L,
-                SLA, T0, CalculatorFrequency.DAILY, RunStatus.SUCCESS,
+                SLA, T0, Frequency.DAILY, RunStatus.SUCCESS,
                 false, null, null, "corr-1", null, null);
         RunWithSlaStatus b = new RunWithSlaStatus(
                 "run-B", "calc-1", "Calc One", day2, T2, T3, 600_000L,
-                SLA, T0, CalculatorFrequency.DAILY, RunStatus.SUCCESS,
+                SLA, T0, Frequency.DAILY, RunStatus.SUCCESS,
                 false, null, null, "corr-1", null, null);
 
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(a, b));

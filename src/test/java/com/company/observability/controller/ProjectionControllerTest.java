@@ -1,7 +1,7 @@
 package com.company.observability.controller;
 
 import com.company.observability.config.TestMetricsConfig;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.PerformanceCardResponse;
 import com.company.observability.service.projection.DashboardProjection;
 import com.company.observability.service.projection.PerformanceCardProjection;
@@ -56,7 +56,7 @@ class ProjectionControllerTest {
                         "run-1", LocalDate.of(2026, 2, 20), null, null, 180000L, "ON_TIME", null)),
                 new PerformanceCardResponse.ReferenceLines(6.0, 6.25));
 
-        when(performanceCardProjection.getPerformanceCard("calc-1", 30, CalculatorFrequency.DAILY))
+        when(performanceCardProjection.getPerformanceCard("calc-1", 30, Frequency.DAILY))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/projections/calculators/calc-1/performance-card")
@@ -69,7 +69,7 @@ class ProjectionControllerTest {
                 .andExpect(jsonPath("$.meanDurationMs").value(180000L))
                 .andExpect(jsonPath("$.schedule[0].runKey").value("run1"));
 
-        verify(performanceCardProjection).getPerformanceCard("calc-1", 30, CalculatorFrequency.DAILY);
+        verify(performanceCardProjection).getPerformanceCard("calc-1", 30, Frequency.DAILY);
     }
 
     @Test
@@ -79,7 +79,7 @@ class ProjectionControllerTest {
                 new PerformanceCardResponse.SlaSummaryPct(0, 0, 0, 0, 0.0),
                 List.of(), null);
 
-        when(performanceCardProjection.getPerformanceCard("calc-2", 30, CalculatorFrequency.DAILY))
+        when(performanceCardProjection.getPerformanceCard("calc-2", 30, Frequency.DAILY))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/projections/calculators/calc-2/performance-card")
@@ -88,7 +88,7 @@ class ProjectionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.calculatorId").value("calc-2"));
 
-        verify(performanceCardProjection).getPerformanceCard("calc-2", 30, CalculatorFrequency.DAILY);
+        verify(performanceCardProjection).getPerformanceCard("calc-2", 30, Frequency.DAILY);
     }
 
     @Test
@@ -97,7 +97,7 @@ class ProjectionControllerTest {
                 "calc-1", null, List.of(), 30, 0L,
                 new PerformanceCardResponse.SlaSummaryPct(0, 0, 0, 0, 0.0),
                 List.of(), null);
-        when(performanceCardProjection.getPerformanceCard("calc-1", 30, CalculatorFrequency.DAILY))
+        when(performanceCardProjection.getPerformanceCard("calc-1", 30, Frequency.DAILY))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/projections/calculators/calc-1/performance-card")

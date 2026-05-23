@@ -1,7 +1,7 @@
 package com.company.observability.repository;
 
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,7 +23,7 @@ class CalculatorRunRepositoryDimensionalTest {
     void findAllRunsByDateAndDimension_returnsEmptyForUnknownCalculator() {
         List<CalculatorRun> runs = repository.findAllRunsByDateAndDimension(
                 LocalDate.of(2026, 3, 6),
-                CalculatorFrequency.DAILY, "1",
+                Frequency.DAILY, "1",
                 List.of("unknown-calc-xyz-does-not-exist"));
 
         assertThat(runs).isEmpty();
@@ -33,7 +33,7 @@ class CalculatorRunRepositoryDimensionalTest {
     void findAllRunsByDateAndDimension_returnsEmptyForEmptyCalculatorList() {
         List<CalculatorRun> runs = repository.findAllRunsByDateAndDimension(
                 LocalDate.of(2026, 3, 6),
-                CalculatorFrequency.DAILY, "1",
+                Frequency.DAILY, "1",
                 List.of());
 
         assertThat(runs).isEmpty();

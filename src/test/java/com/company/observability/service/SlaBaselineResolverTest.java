@@ -2,7 +2,7 @@ package com.company.observability.service;
 
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorProfile;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.request.StartRunRequest;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +33,7 @@ class SlaBaselineResolverTest {
                 .runId("run-1")
                 .calculatorId("calc-1")
                 .calculatorName("Calculator 1")
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .reportingDate(LocalDate.of(2026, 2, 22))
                 .startTime(START);
     }
@@ -48,7 +48,7 @@ class SlaBaselineResolverTest {
     void averagePath_derivesDeadlineFromProfileAverage() {
         // avg = 600_000ms (10 min); buffered = *1.2 = 720_000ms (12 min)
         Instant deadline = resolver.resolveDeadline(
-                baseRequest().build(), CalculatorFrequency.DAILY, profile(600_000L, 10));
+                baseRequest().build(), Frequency.DAILY, profile(600_000L, 10));
 
         assertThat(deadline).isEqualTo(START.plusMillis(720_000L + LATE_BAND_MS));
     }
@@ -58,7 +58,7 @@ class SlaBaselineResolverTest {
         StartRunRequest request = baseRequest().expectedDurationMs(300_000L).build(); // 5 min
 
         Instant deadline = resolver.resolveDeadline(
-                request, CalculatorFrequency.DAILY, profile(600_000L, 2)); // below minSampleSize=5
+                request, Frequency.DAILY, profile(600_000L, 2)); // below minSampleSize=5
 
         // buffered = 300_000 * 1.2 = 360_000
         assertThat(deadline).isEqualTo(START.plusMillis(360_000L + LATE_BAND_MS));
@@ -69,7 +69,7 @@ class SlaBaselineResolverTest {
         Instant slaTime = START.plusSeconds(30 * 60); // budget = 1_800_000ms
         StartRunRequest request = baseRequest().slaTime(slaTime).build();
 
-        Instant deadline = resolver.resolveDeadline(request, CalculatorFrequency.DAILY, EMPTY);
+        Instant deadline = resolver.resolveDeadline(request, Frequency.DAILY, EMPTY);
 
         // buffered = 1_800_000 * 1.2 = 2_160_000
         assertThat(deadline).isEqualTo(START.plusMillis(2_160_000L + LATE_BAND_MS));
@@ -77,7 +77,7 @@ class SlaBaselineResolverTest {
 
     @Test
     void noBaselineAtAll_returnsNull() {
-        Instant deadline = resolver.resolveDeadline(baseRequest().build(), CalculatorFrequency.DAILY, EMPTY);
+        Instant deadline = resolver.resolveDeadline(baseRequest().build(), Frequency.DAILY, EMPTY);
         assertThat(deadline).isNull();
     }
 
@@ -85,7 +85,7 @@ class SlaBaselineResolverTest {
     void slaTimeBeforeStart_isUnusable_returnsNull() {
         StartRunRequest request = baseRequest().slaTime(START.minusSeconds(60)).build();
 
-        Instant deadline = resolver.resolveDeadline(request, CalculatorFrequency.DAILY, EMPTY);
+        Instant deadline = resolver.resolveDeadline(request, Frequency.DAILY, EMPTY);
 
         assertThat(deadline).isNull();
     }
@@ -96,7 +96,7 @@ class SlaBaselineResolverTest {
         Instant slaTime = START.plusSeconds(45 * 60);
         StartRunRequest request = baseRequest().slaTime(slaTime).build();
 
-        Instant deadline = resolver.resolveDeadline(request, CalculatorFrequency.DAILY, profile(600_000L, 10));
+        Instant deadline = resolver.resolveDeadline(request, Frequency.DAILY, profile(600_000L, 10));
 
         assertThat(deadline).isEqualTo(slaTime);
     }

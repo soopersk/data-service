@@ -1,6 +1,6 @@
 package com.company.observability.controller;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorDashboardResponse;
 import com.company.observability.dto.response.PerformanceCardResponse;
 import com.company.observability.dto.response.RegionalBatchStatusResponse;
@@ -52,7 +52,7 @@ public class ProjectionController {
             @Parameter(description = "Frequency: DAILY or MONTHLY")
             @RequestParam(defaultValue = "DAILY") String frequency) {
 
-        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+        Frequency freq = Frequency.fromStrict(frequency);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {

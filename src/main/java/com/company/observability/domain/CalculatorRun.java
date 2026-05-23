@@ -1,6 +1,6 @@
 package com.company.observability.domain;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import lombok.*;
 
@@ -31,7 +31,7 @@ public class CalculatorRun implements Serializable {
     private String tenantId;
 
     @Builder.Default
-    private CalculatorFrequency frequency = CalculatorFrequency.DAILY;
+    private Frequency frequency = Frequency.DAILY;
 
     // Partition key - critical for query performance
     private LocalDate reportingDate;
@@ -76,14 +76,14 @@ public class CalculatorRun implements Serializable {
      * Helper to determine if this is a DAILY run
      */
     public boolean isDaily() {
-        return frequency == CalculatorFrequency.DAILY;
+        return frequency == Frequency.DAILY;
     }
 
     /**
      * Helper to determine if this is a MONTHLY run
      */
     public boolean isMonthly() {
-        return frequency == CalculatorFrequency.MONTHLY;
+        return frequency == Frequency.MONTHLY;
     }
 
     /**

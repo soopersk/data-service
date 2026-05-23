@@ -3,7 +3,7 @@ package com.company.observability.service;
 import com.company.observability.config.AggregationProperties;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorProfile;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.repository.DailyAggregateRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -50,7 +50,7 @@ class CalculatorProfileServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(KEY)).thenReturn(profile);
 
-        CalculatorProfile result = service.getProfile("calc-1", CalculatorFrequency.DAILY);
+        CalculatorProfile result = service.getProfile("calc-1", Frequency.DAILY);
 
         assertThat(result.avgDurationMs()).isEqualTo(600_000L);
         verify(dailyAggregateRepository, never()).findProfile(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt());
@@ -62,7 +62,7 @@ class CalculatorProfileServiceTest {
         when(valueOps.get(KEY)).thenReturn(null);
         when(dailyAggregateRepository.findProfile("calc-1", "DAILY", 30)).thenReturn(profile);
 
-        CalculatorProfile result = service.getProfile("calc-1", CalculatorFrequency.DAILY);
+        CalculatorProfile result = service.getProfile("calc-1", Frequency.DAILY);
 
         assertThat(result.avgDurationMs()).isEqualTo(600_000L);
         // non-empty profile → long TTL (26h default)
@@ -76,7 +76,7 @@ class CalculatorProfileServiceTest {
         when(valueOps.get(KEY)).thenReturn(null);
         when(dailyAggregateRepository.findProfile("calc-1", "DAILY", 30)).thenReturn(empty);
 
-        service.getProfile("calc-1", CalculatorFrequency.DAILY);
+        service.getProfile("calc-1", Frequency.DAILY);
 
         verify(valueOps).set(eq(KEY), eq(empty), eq(Duration.ofMinutes(60)));
     }
@@ -87,7 +87,7 @@ class CalculatorProfileServiceTest {
         when(valueOps.get(KEY)).thenThrow(new RuntimeException("redis down"));
         when(dailyAggregateRepository.findProfile("calc-1", "DAILY", 30)).thenReturn(profile);
 
-        CalculatorProfile result = service.getProfile("calc-1", CalculatorFrequency.DAILY);
+        CalculatorProfile result = service.getProfile("calc-1", Frequency.DAILY);
 
         assertThat(result.avgDurationMs()).isEqualTo(600_000L);
     }

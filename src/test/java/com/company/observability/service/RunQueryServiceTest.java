@@ -2,7 +2,7 @@ package com.company.observability.service;
 
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
@@ -56,7 +56,7 @@ class RunQueryServiceTest {
                 List.of());
 
         when(redisCache.getBatchStatusResponses(
-                List.of("calc-1", "calc-2"), CalculatorFrequency.DAILY, 2))
+                List.of("calc-1", "calc-2"), Frequency.DAILY, 2))
                 .thenReturn(Map.of("calc-1", cachedResponse));
 
         CalculatorRun dbRun = CalculatorRun.builder()
@@ -64,7 +64,7 @@ class RunQueryServiceTest {
                 .calculatorId("calc-2")
                 .calculatorName("Calculator 2")
                 .tenantId("tenant-1")
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .reportingDate(LocalDate.now())
                 .status(RunStatus.SUCCESS)
                 .startTime(Instant.now().minusSeconds(120))
@@ -74,19 +74,19 @@ class RunQueryServiceTest {
                 .createdAt(Instant.now())
                 .build();
 
-        when(runRepository.findBatchRecentRunsDbOnly(anyList(), eq(CalculatorFrequency.DAILY), anyInt()))
+        when(runRepository.findBatchRecentRunsDbOnly(anyList(), eq(Frequency.DAILY), anyInt()))
                 .thenReturn(Map.of("calc-2", List.of(dbRun)));
 
         List<CalculatorStatusResponse> result = service.getBatchCalculatorStatus(
                 List.of("calc-1", "calc-2"),
-                CalculatorFrequency.DAILY,
+                Frequency.DAILY,
                 2,
                 true
         );
 
         assertEquals(2, result.size());
-        verify(runRepository).findBatchRecentRunsDbOnly(anyList(), eq(CalculatorFrequency.DAILY), eq(3));
-        verify(runRepository, never()).findBatchRecentRuns(anyList(), eq(CalculatorFrequency.DAILY), anyInt());
+        verify(runRepository).findBatchRecentRunsDbOnly(anyList(), eq(Frequency.DAILY), eq(3));
+        verify(runRepository, never()).findBatchRecentRuns(anyList(), eq(Frequency.DAILY), anyInt());
     }
 
     // ---------------------------------------------------------------
@@ -96,11 +96,11 @@ class RunQueryServiceTest {
     @Test
     void getStatus_cacheHit_repositoryNeverQueried() {
         CalculatorStatusResponse cached = statusResponse("calc-1");
-        when(redisCache.getStatusResponse("calc-1", CalculatorFrequency.DAILY, 5))
+        when(redisCache.getStatusResponse("calc-1", Frequency.DAILY, 5))
                 .thenReturn(java.util.Optional.of(cached));
 
         CalculatorStatusResponse result = service.getCalculatorStatus(
-                "calc-1", CalculatorFrequency.DAILY, 5, false);
+                "calc-1", Frequency.DAILY, 5, false);
 
         assertThat(result).isEqualTo(cached);
         verify(runRepository, never()).findRecentRuns(anyString(), any(), anyInt());
@@ -109,13 +109,13 @@ class RunQueryServiceTest {
     @Test
     void getStatus_bypassCache_alwaysQueriesDb_andNeverReadsCache() {
         CalculatorRun run = dbRun("calc-1", "run-1");
-        when(runRepository.findRecentRuns("calc-1", CalculatorFrequency.DAILY, 6))
+        when(runRepository.findRecentRuns("calc-1", Frequency.DAILY, 6))
                 .thenReturn(List.of(run));
 
-        service.getCalculatorStatus("calc-1", CalculatorFrequency.DAILY, 5, true);
+        service.getCalculatorStatus("calc-1", Frequency.DAILY, 5, true);
 
         verify(redisCache, never()).getStatusResponse(anyString(), any(), anyInt());
-        verify(runRepository).findRecentRuns("calc-1", CalculatorFrequency.DAILY, 6);
+        verify(runRepository).findRecentRuns("calc-1", Frequency.DAILY, 6);
     }
 
     @Test
@@ -124,7 +124,7 @@ class RunQueryServiceTest {
                 .thenReturn(List.of());
 
         assertThatThrownBy(() ->
-                service.getCalculatorStatus("unknown", CalculatorFrequency.DAILY, 5, true))
+                service.getCalculatorStatus("unknown", Frequency.DAILY, 5, true))
                 .isInstanceOf(DomainNotFoundException.class)
                 .hasMessageContaining("unknown");
     }
@@ -138,11 +138,11 @@ class RunQueryServiceTest {
         CalculatorStatusResponse r1 = statusResponse("calc-1");
         CalculatorStatusResponse r2 = statusResponse("calc-2");
         when(redisCache.getBatchStatusResponses(List.of("calc-1", "calc-2"),
-                CalculatorFrequency.DAILY, 5))
+                Frequency.DAILY, 5))
                 .thenReturn(Map.of("calc-1", r1, "calc-2", r2));
 
         List<CalculatorStatusResponse> result = service.getBatchCalculatorStatus(
-                List.of("calc-1", "calc-2"), CalculatorFrequency.DAILY, 5, true);
+                List.of("calc-1", "calc-2"), Frequency.DAILY, 5, true);
 
         assertThat(result).hasSize(2);
         verify(runRepository, never()).findBatchRecentRunsDbOnly(anyList(), any(), anyInt());
@@ -157,11 +157,11 @@ class RunQueryServiceTest {
                 .thenReturn(Map.of("calc-1", List.of(run)));
 
         service.getBatchCalculatorStatus(
-                List.of("calc-1"), CalculatorFrequency.DAILY, 5, true);
+                List.of("calc-1"), Frequency.DAILY, 5, true);
 
         verify(runRepository).findBatchRecentRunsDbOnly(
-                eq(List.of("calc-1")), eq(CalculatorFrequency.DAILY), eq(6));
-        verify(redisCache).cacheBatchStatusResponses(any(), eq(CalculatorFrequency.DAILY), eq(5));
+                eq(List.of("calc-1")), eq(Frequency.DAILY), eq(6));
+        verify(redisCache).cacheBatchStatusResponses(any(), eq(Frequency.DAILY), eq(5));
     }
 
     @Test
@@ -173,7 +173,7 @@ class RunQueryServiceTest {
                 .thenReturn(Map.of());
 
         List<CalculatorStatusResponse> result = service.getBatchCalculatorStatus(
-                List.of("calc-unknown"), CalculatorFrequency.DAILY, 5, true);
+                List.of("calc-unknown"), Frequency.DAILY, 5, true);
 
         assertThat(result).isEmpty();
     }
@@ -195,7 +195,7 @@ class RunQueryServiceTest {
                 .calculatorId(calculatorId)
                 .calculatorName("Calculator " + calculatorId)
                 .tenantId("tenant-1")
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .reportingDate(LocalDate.now())
                 .startTime(Instant.now().minusSeconds(120))
                 .status(RunStatus.RUNNING)

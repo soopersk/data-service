@@ -193,7 +193,7 @@ X-Tenant-Id: <tenant>
 |-----------|------|---------|-------------|-------------|
 | `reporting_date` | Date | Required | ISO `YYYY-MM-DD` | Partition key |
 | `frequency` | String | `DAILY` | `DAILY` or `MONTHLY` | |
-| `run_number` | String | none | `1` or `2` when provided | Omit to return all buckets |
+| `run_number` | String | none | Any value when provided | Omit to return all buckets; `""` (empty) behaves like omitted |
 | `keys` | String | Required | Non-blank | Pipe-separated `calculator_name` values (no wildcards, no UUIDs) |
 
 ### Response
@@ -249,6 +249,21 @@ X-Tenant-Id: <tenant>
 - `isRerun: true` indicates that dimensional run was re-triggered (the UI renders the dimension label with a `*` suffix and a failed icon).
 - Null fields on `RunEntry` are omitted from JSON.
 - `estimatedStartTime` / `estimatedEndTime` / `sla` carry the run's stored values, set at start by precedence: **request value (Airflow) → cached historical profile (avg start / avg duration) → computed (`start + expectedDurationMs`)**. `sla` is the duration-derived deadline (`startTime + avgDuration × (1 + thresholdPercent) + lateBand`), not an upstream-supplied wall-clock time.
+
+### Cache Behaviour
+
+Responses are cached in Redis per `(calculatorName, reportingDate, frequency, runNumber)` by `CalculatorStateCacheService` with state-aware TTL:
+
+| Run State | TTL |
+|-----------|-----|
+| Any RUNNING | 30 seconds |
+| NOT_STARTED or empty | 60 seconds |
+| Terminal with failure or SLA breach | 5 minutes |
+| Terminal clean | 4 hours |
+
+Cache key: `obs:state:{calculatorName}:{reportingDate}:{frequency}:{runNumber|all}`
+
+Partial cache hits are supported — only calculator names absent from cache trigger a DB query. Calculators not found in the DB are cached as empty entries (60s) to prevent repeated queries. Invalidation is TTL-only (no event listeners); the state-aware TTL bounds staleness to ≤30s while any run is active.
 
 ### Server-Side Behaviour
 

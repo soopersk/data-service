@@ -1,6 +1,6 @@
 package com.company.observability.controller;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.*;
 import com.company.observability.service.AnalyticsService;
 import com.company.observability.util.ObservabilityConstants;
@@ -11,7 +11,6 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.CacheControl;
@@ -46,7 +45,7 @@ public class AnalyticsController {
             @Parameter(description = "Frequency: DAILY or MONTHLY")
             @RequestParam(defaultValue = "DAILY") String frequency) {
 
-        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+        Frequency freq = Frequency.fromStrict(frequency);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -164,10 +163,12 @@ public class AnalyticsController {
             @Parameter(description = "Frequency: DAILY or MONTHLY")
             @RequestParam(defaultValue = "DAILY") String frequency,
             @Parameter(description = "Run number bucket: 1 or 2. Omit to return all buckets.")
-            @RequestParam(value = "run_number", required = false)
-            @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2 when provided") String runNumber) {
+            @RequestParam(value = "run_number", required = false) String runNumber) {
 
-        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+        Frequency freq = Frequency.fromStrict(frequency);
+
+        log.info("event=executions.request outcome=accepted calculatorName={} days={} frequency={} runNumber={}",
+                calculatorName, days, freq, runNumber);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -198,7 +199,7 @@ public class AnalyticsController {
             @Parameter(description = "Frequency: DAILY or MONTHLY")
             @RequestParam(defaultValue = "DAILY") String frequency) {
 
-        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+        Frequency freq = Frequency.fromStrict(frequency);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {

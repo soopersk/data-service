@@ -1,6 +1,6 @@
 package com.company.observability.controller;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.service.CalculatorStateService;
@@ -62,7 +62,7 @@ public class RunQueryController {
             @RequestParam(defaultValue = "false") boolean bypassCache) {
 
         // Parse frequency using enum's built-in parser
-        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+        Frequency freq = Frequency.fromStrict(frequency);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -103,7 +103,7 @@ public class RunQueryController {
             @RequestParam(defaultValue = "true") boolean allowStale) {
 
         // Parse frequency using enum
-        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+        Frequency freq = Frequency.fromStrict(frequency);
 
         log.debug("event=query.batch outcome=accepted count={} frequency={} allowStale={}",
                 calculatorIds.size(), freq, allowStale);
@@ -140,8 +140,7 @@ public class RunQueryController {
             @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @RequestParam("reporting_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reportingDate,
             @RequestParam(defaultValue = "DAILY") String frequency,
-            @RequestParam(value = "run_number", required = false)
-            @Pattern(regexp = "^[12]$", message = "run_number must be 1 or 2 when provided") String runNumber,
+            @RequestParam(value = "run_number", required = false) String runNumber,
             @Parameter(description = "Pipe-separated calculator_name values, e.g. capitalcalc|portfoliocalc")
             @RequestParam @NotBlank String keys) {
 
@@ -153,7 +152,10 @@ public class RunQueryController {
             throw new IllegalArgumentException("keys must contain at least one non-blank calculator_name");
         }
 
-        CalculatorFrequency freq = CalculatorFrequency.fromStrict(frequency);
+        Frequency freq = Frequency.fromStrict(frequency);
+
+        log.info("event=batch_runs.request outcome=accepted reportingDate={} frequency={} keyCount={} runNumber={}",
+                reportingDate, freq, calculatorNames.size(), runNumber);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {

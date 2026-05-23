@@ -1,7 +1,7 @@
 package com.company.observability.cache;
 
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.event.RunCompletedEvent;
 import com.company.observability.event.RunStartedEvent;
@@ -58,55 +58,76 @@ class AnalyticsCacheServiceTest {
     }
 
     @Test
-    void onRunStarted_evictsOnlyRunPerfKeys() {
+    void onRunStarted_evictsRunPerfAndExecutionsKeysByPrefix_forBothIdAndNameIndexes() {
+        // run has calculatorId="calc-1", calculatorName="Calculator" (different → both indexes evicted)
         CalculatorRun run = run("calc-1", "tenant-a");
-        String indexKey = "obs:analytics:index:calc-1";
-        Set<Object> indexedKeys = new LinkedHashSet<>(List.of(
-                "obs:analytics:run-perf:calc-1:DAILY:30",
-                "obs:analytics:runtime:calc-1:DAILY:30",
-                "obs:analytics:trends:calc-1:30"
-        ));
-
-        when(setOperations.members(indexKey)).thenReturn(indexedKeys);
-
-        service.onRunStarted(new RunStartedEvent(run));
-
-        verify(redisTemplate).delete(List.of("obs:analytics:run-perf:calc-1:DAILY:30"));
-
-        var removeCaptor = org.mockito.ArgumentCaptor.forClass(Object[].class);
-        verify(setOperations).remove(eq(indexKey), removeCaptor.capture());
-        assertArrayEquals(new Object[]{"obs:analytics:run-perf:calc-1:DAILY:30"}, removeCaptor.getValue());
-    }
-
-    @Test
-    void onRunCompleted_andOnSlaBreached_evictAllIndexedAnalyticsKeys() {
-        CalculatorRun run = run("calc-1", "tenant-a");
-        String indexKey = "obs:analytics:index:calc-1";
-        Set<Object> indexedKeys = new LinkedHashSet<>(List.of(
+        String idIndex   = "obs:analytics:index:calc-1";
+        String nameIndex = "obs:analytics:index:Calculator";
+        Set<Object> idKeys = new LinkedHashSet<>(List.of(
                 "obs:analytics:run-perf:calc-1:DAILY:30",
                 "obs:analytics:runtime:calc-1:DAILY:30"
         ));
+        Set<Object> nameKeys = new LinkedHashSet<>(List.of(
+                "obs:analytics:executions:Calculator:DAILY:30:all"
+        ));
 
-        when(setOperations.members(indexKey)).thenReturn(indexedKeys);
+        when(setOperations.members(idIndex)).thenReturn(idKeys);
+        when(setOperations.members(nameIndex)).thenReturn(nameKeys);
+
+        service.onRunStarted(new RunStartedEvent(run));
+
+        // run-perf prefix evicted from id-index
+        verify(redisTemplate).delete(List.of("obs:analytics:run-perf:calc-1:DAILY:30"));
+        // executions prefix evicted from name-index
+        verify(redisTemplate).delete(List.of("obs:analytics:executions:Calculator:DAILY:30:all"));
+    }
+
+    @Test
+    void onRunCompleted_evictsAllKeys_fromBothIdIndexAndNameIndex() {
+        CalculatorRun run = run("calc-1", "tenant-a");
+        String idIndex   = "obs:analytics:index:calc-1";
+        String nameIndex = "obs:analytics:index:Calculator";
+        Set<Object> idKeys = new LinkedHashSet<>(List.of(
+                "obs:analytics:run-perf:calc-1:DAILY:30",
+                "obs:analytics:runtime:calc-1:DAILY:30"
+        ));
+        Set<Object> nameKeys = new LinkedHashSet<>(List.of(
+                "obs:analytics:executions:Calculator:DAILY:30:all"
+        ));
+
+        when(setOperations.members(idIndex)).thenReturn(idKeys);
+        when(setOperations.members(nameIndex)).thenReturn(nameKeys);
 
         service.onRunCompleted(new RunCompletedEvent(run));
+
+        // id-index: all keys + the index itself deleted
         verify(redisTemplate).delete(List.of(
                 "obs:analytics:run-perf:calc-1:DAILY:30",
                 "obs:analytics:runtime:calc-1:DAILY:30",
-                indexKey
+                idIndex
         ));
+        // name-index: all keys + the index itself deleted
+        verify(redisTemplate).delete(List.of(
+                "obs:analytics:executions:Calculator:DAILY:30:all",
+                nameIndex
+        ));
+    }
 
-        reset(redisTemplate, setOperations);
-        when(redisTemplate.opsForSet()).thenReturn(setOperations);
-        when(setOperations.members(indexKey)).thenReturn(indexedKeys);
+    @Test
+    void onSlaBreached_evictsAllKeys_fromBothIdIndexAndNameIndex() {
+        CalculatorRun run = run("calc-1", "tenant-a");
+        String idIndex   = "obs:analytics:index:calc-1";
+        String nameIndex = "obs:analytics:index:Calculator";
+        Set<Object> idKeys = new LinkedHashSet<>(List.of("obs:analytics:runtime:calc-1:30"));
+        Set<Object> nameKeys = new LinkedHashSet<>(List.of("obs:analytics:executions:Calculator:DAILY:30:all"));
+
+        when(setOperations.members(idIndex)).thenReturn(idKeys);
+        when(setOperations.members(nameIndex)).thenReturn(nameKeys);
 
         service.onSlaBreached(new SlaBreachedEvent(run, new SlaEvaluationResult(true, "b", "HIGH")));
-        verify(redisTemplate).delete(List.of(
-                "obs:analytics:run-perf:calc-1:DAILY:30",
-                "obs:analytics:runtime:calc-1:DAILY:30",
-                indexKey
-        ));
-        verify(setOperations, never()).remove(any(), any());
+
+        verify(redisTemplate).delete(List.of("obs:analytics:runtime:calc-1:30", idIndex));
+        verify(redisTemplate).delete(List.of("obs:analytics:executions:Calculator:DAILY:30:all", nameIndex));
     }
 
     // ---------------------------------------------------------------
@@ -176,7 +197,7 @@ class AnalyticsCacheServiceTest {
                 .calculatorId(calculatorId)
                 .calculatorName("Calculator")
                 .tenantId(tenantId)
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .reportingDate(LocalDate.of(2026, 4, 5))
                 .startTime(Instant.parse("2026-04-05T04:00:00Z"))
                 .status(RunStatus.RUNNING)

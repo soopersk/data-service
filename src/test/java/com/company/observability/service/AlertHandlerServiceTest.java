@@ -5,7 +5,7 @@ import com.company.observability.alert.AlertSender;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.SlaBreachEventRepository;
@@ -137,7 +137,7 @@ class AlertHandlerServiceTest {
                 .calculatorId("calc-1")
                 .calculatorName("Calculator 1")
                 .tenantId("tenant-1")
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .slaTime(Instant.parse("2026-02-22T05:15:00Z"))
                 .endTime(Instant.parse("2026-02-22T05:25:00Z"))
                 .durationMs(600000L)

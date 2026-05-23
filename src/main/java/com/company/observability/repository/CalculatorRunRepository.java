@@ -3,7 +3,7 @@ package com.company.observability.repository;
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.RunWithSlaStatus;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.util.JsonbConverter;
@@ -72,7 +72,7 @@ public class CalculatorRunRepository {
      * MONTHLY: reporting_date = end of month
      */
     public List<CalculatorRun> findRecentRuns(
-            String calculatorId, CalculatorFrequency frequency, int limit) {
+            String calculatorId, Frequency frequency, int limit) {
 
         // Check bloom filter
         if (!redisCache.mightExist(calculatorId)) {
@@ -98,7 +98,7 @@ public class CalculatorRunRepository {
      * Query with partition pruning based on frequency
      */
     private List<CalculatorRun> queryAndCacheRecentRuns(
-            String calculatorId, CalculatorFrequency frequency, int limit) {
+            String calculatorId, Frequency frequency, int limit) {
 
         String sql = buildPartitionPrunedQuery(SELECT_STATUS_BASE, frequency);
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -119,8 +119,8 @@ public class CalculatorRunRepository {
         return runs;
     }
 
-    private String buildPartitionPrunedQuery(String selectBase, CalculatorFrequency frequency) {
-        if (frequency == CalculatorFrequency.DAILY) {
+    private String buildPartitionPrunedQuery(String selectBase, Frequency frequency) {
+        if (frequency == Frequency.DAILY) {
             return selectBase + """
                 WHERE calculator_id = :calculatorId
                 AND frequency = :frequency
@@ -145,7 +145,7 @@ public class CalculatorRunRepository {
      * Batch query with partition pruning
      */
     public Map<String, List<CalculatorRun>> findBatchRecentRuns(
-            List<String> calculatorIds, CalculatorFrequency frequency, int limit) {
+            List<String> calculatorIds, Frequency frequency, int limit) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
             return Collections.emptyMap();
@@ -187,7 +187,7 @@ public class CalculatorRunRepository {
      * Used by RunQueryService after response-cache misses are already known.
      */
     public Map<String, List<CalculatorRun>> findBatchRecentRunsDbOnly(
-            List<String> calculatorIds, CalculatorFrequency frequency, int limit) {
+            List<String> calculatorIds, Frequency frequency, int limit) {
 
         if (calculatorIds == null || calculatorIds.isEmpty()) {
             return Collections.emptyMap();
@@ -205,7 +205,7 @@ public class CalculatorRunRepository {
      * NPJT expands :calculatorIds list into the IN clause automatically.
      */
     private Map<String, List<CalculatorRun>> queryBatchFromDatabase(
-            List<String> calculatorIds, CalculatorFrequency frequency, int limit) {
+            List<String> calculatorIds, Frequency frequency, int limit) {
 
         String partitionFilter = buildPartitionFilter(frequency);
 
@@ -252,8 +252,8 @@ public class CalculatorRunRepository {
     /**
      * Build partition filter based on frequency
      */
-    private String buildPartitionFilter(CalculatorFrequency frequency) {
-        if (frequency == CalculatorFrequency.DAILY) {
+    private String buildPartitionFilter(Frequency frequency) {
+        if (frequency == Frequency.DAILY) {
             return """
                 AND reporting_date >= CURRENT_DATE - INTERVAL '3 days'
                 AND reporting_date <= CURRENT_DATE
@@ -446,7 +446,7 @@ public class CalculatorRunRepository {
      * Find runs with SLA severity for performance card (LEFT JOIN with sla_breach_events)
      */
     public List<RunWithSlaStatus> findRunsWithSlaStatus(
-            String calculatorId, CalculatorFrequency frequency, int days) {
+            String calculatorId, Frequency frequency, int days) {
         return findRunsWithSlaStatus(calculatorId, frequency, days, null);
     }
 
@@ -454,7 +454,7 @@ public class CalculatorRunRepository {
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
     public List<RunWithSlaStatus> findRunsWithSlaStatus(
-            String calculatorId, CalculatorFrequency frequency, int days, String runNumber) {
+            String calculatorId, Frequency frequency, int days, String runNumber) {
 
         StringBuilder sql = new StringBuilder("""
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
@@ -495,7 +495,7 @@ public class CalculatorRunRepository {
                     rs.getObject("duration_ms", Long.class),
                     fromTimestamp(rs.getTimestamp("sla_time")),
                     fromTimestamp(rs.getTimestamp("estimated_start_time")),
-                    CalculatorFrequency.from(rs.getString("frequency")),
+                    Frequency.from(rs.getString("frequency")),
                     RunStatus.fromString(rs.getString("status")),
                     rs.getObject("sla_breached", Boolean.class),
                     rs.getString("sla_breach_reason"),
@@ -511,14 +511,14 @@ public class CalculatorRunRepository {
     }
 
     /**
-     * Name-keyed variant of {@link #findRunsWithSlaStatus(String, String, CalculatorFrequency, int, String)}.
+     * Name-keyed variant of {@link #findRunsWithSlaStatus(String, String, Frequency, int, String)}.
      * Filters by calculator_name (readable, unique-per-tenant) instead of the upstream UUID
      * calculator_id. Used by GET /executions where the path variable is the readable name.
      *
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
     public List<RunWithSlaStatus> findRunsWithSlaStatusByName(
-            String calculatorName, CalculatorFrequency frequency, int days, String runNumber) {
+            String calculatorName, Frequency frequency, int days, String runNumber) {
 
         StringBuilder sql = new StringBuilder("""
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
@@ -546,6 +546,9 @@ public class CalculatorRunRepository {
             params.addValue("runNumber", runNumber);
         }
 
+        log.debug("event=db.query outcome=start query=find_runs_with_sla_by_name calculatorName={} frequency={} days={} runNumber={}",
+                calculatorName, frequency, days, runNumber);
+
         Timer.Sample sample = Timer.start(meterRegistry);
         List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, (rs, rowNum) -> {
             String severityStr = rs.getString("severity"); // nullable from LEFT JOIN
@@ -559,7 +562,7 @@ public class CalculatorRunRepository {
                     rs.getObject("duration_ms", Long.class),
                     fromTimestamp(rs.getTimestamp("sla_time")),
                     fromTimestamp(rs.getTimestamp("estimated_start_time")),
-                    CalculatorFrequency.from(rs.getString("frequency")),
+                    Frequency.from(rs.getString("frequency")),
                     RunStatus.fromString(rs.getString("status")),
                     rs.getObject("sla_breached", Boolean.class),
                     rs.getString("sla_breach_reason"),
@@ -571,6 +574,8 @@ public class CalculatorRunRepository {
         });
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_with_sla_by_name").register(meterRegistry));
 
+        log.debug("event=db.query outcome=complete query=find_runs_with_sla_by_name calculatorName={} frequency={} rows={}",
+                calculatorName, frequency, results.size());
         return results;
     }
 
@@ -769,7 +774,7 @@ public class CalculatorRunRepository {
      */
     public List<CalculatorRun> findAllRunsByDateAndDimension(
             LocalDate reportingDate,
-            CalculatorFrequency frequency,
+            Frequency frequency,
             String runNumber,
             List<String> calculatorNames) {
 
@@ -803,7 +808,16 @@ public class CalculatorRunRepository {
             params.addValue("runNumber", runNumber);
         }
 
-        return jdbcTemplate.query(sql.toString(), params, new CalculatorRunRowMapper(false));
+        log.debug("event=db.query outcome=start query=find_all_runs_by_date_dimension reportingDate={} frequency={} calculatorCount={} runNumber={}",
+                reportingDate, frequency, calculatorNames.size(), runNumber);
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        List<CalculatorRun> results = jdbcTemplate.query(sql.toString(), params, new CalculatorRunRowMapper(false));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_all_runs_by_date_dimension").register(meterRegistry));
+
+        log.debug("event=db.query outcome=complete query=find_all_runs_by_date_dimension reportingDate={} frequency={} rows={}",
+                reportingDate, frequency, results.size());
+        return results;
     }
 
     /**
@@ -948,7 +962,7 @@ public class CalculatorRunRepository {
                         .calculatorId(rs.getString("calculator_id"))
                         .calculatorName(rs.getString("calculator_name"))
                         .tenantId(rs.getString("tenant_id"))
-                        .frequency(CalculatorFrequency.from(rs.getString("frequency")))
+                        .frequency(Frequency.from(rs.getString("frequency")))
                         .reportingDate(rs.getObject("reporting_date", LocalDate.class))
                         .startTime(fromTimestamp(rs.getTimestamp("start_time")))
                         .endTime(fromTimestamp(rs.getTimestamp("end_time")))

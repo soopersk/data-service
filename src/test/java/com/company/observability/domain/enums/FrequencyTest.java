@@ -5,33 +5,33 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
-class CalculatorFrequencyTest {
+class FrequencyTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"D", "DAILY", "daily", "Daily"})
     void fromStrict_daily(String input) {
-        assertEquals(CalculatorFrequency.DAILY, CalculatorFrequency.fromStrict(input));
+        assertEquals(Frequency.DAILY, Frequency.fromStrict(input));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"M", "MONTHLY", "monthly", "Monthly"})
     void fromStrict_monthly(String input) {
-        assertEquals(CalculatorFrequency.MONTHLY, CalculatorFrequency.fromStrict(input));
+        assertEquals(Frequency.MONTHLY, Frequency.fromStrict(input));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"WEEKLY", "X", "123", ""})
     void fromStrict_invalid_throws(String input) {
-        assertThrows(IllegalArgumentException.class, () -> CalculatorFrequency.fromStrict(input));
+        assertThrows(IllegalArgumentException.class, () -> Frequency.fromStrict(input));
     }
 
     @Test
     void fromStrict_null_throws() {
-        assertThrows(IllegalArgumentException.class, () -> CalculatorFrequency.fromStrict(null));
+        assertThrows(IllegalArgumentException.class, () -> Frequency.fromStrict(null));
     }
 
     @Test
     void from_null_defaults_daily() {
-        assertEquals(CalculatorFrequency.DAILY, CalculatorFrequency.from(null));
+        assertEquals(Frequency.DAILY, Frequency.from(null));
     }
 }

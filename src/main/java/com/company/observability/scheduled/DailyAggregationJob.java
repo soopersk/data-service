@@ -3,7 +3,7 @@ package com.company.observability.scheduled;
 import com.company.observability.config.AggregationProperties;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorProfile;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.repository.DailyAggregateRepository;
 import com.company.observability.service.CalculatorProfileService;
 import com.company.observability.util.MdcContextUtil;
@@ -84,7 +84,7 @@ public class DailyAggregationJob {
 
     private long warmProfiles() {
         long count = 0;
-        for (CalculatorFrequency frequency : CalculatorFrequency.values()) {
+        for (Frequency frequency : Frequency.values()) {
             List<CalculatorProfile> profiles = dailyAggregateRepository.findAllProfiles(
                     frequency.name(), slaProperties.lookbackDays(frequency));
             for (CalculatorProfile profile : profiles) {

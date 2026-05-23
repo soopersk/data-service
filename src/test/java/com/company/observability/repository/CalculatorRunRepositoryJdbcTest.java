@@ -3,7 +3,7 @@ package com.company.observability.repository;
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.RunWithSlaStatus;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.util.JsonbConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,7 +67,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         insertRun("run-c2-2", "calc-2", reportDate, base.plusSeconds(150));
 
         Map<String, List<CalculatorRun>> result = repository.findBatchRecentRunsDbOnly(
-                List.of("calc-1", "calc-2"), CalculatorFrequency.DAILY, 2
+                List.of("calc-1", "calc-2"), Frequency.DAILY, 2
         );
 
         assertEquals(2, result.get("calc-1").size());
@@ -95,7 +95,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         );
 
         List<RunWithSlaStatus> result = repository.findRunsWithSlaStatus(
-                "calc-1", CalculatorFrequency.DAILY, 3
+                "calc-1", Frequency.DAILY, 3
         );
 
         assertEquals(1, result.size());
@@ -118,7 +118,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
                 .calculatorId("calc-1")
                 .calculatorName("Original Name")
                 .tenantId("tenant-1")
-                .frequency(com.company.observability.domain.enums.CalculatorFrequency.DAILY)
+                .frequency(com.company.observability.domain.enums.Frequency.DAILY)
                 .reportingDate(date)
                 .startTime(originalStart)
                 .status(RunStatus.RUNNING)
@@ -133,7 +133,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
                 .calculatorId("calc-1")
                 .calculatorName("CHANGED NAME")        // ON CONFLICT DO UPDATE does NOT include this column
                 .tenantId("tenant-1")
-                .frequency(com.company.observability.domain.enums.CalculatorFrequency.DAILY)
+                .frequency(com.company.observability.domain.enums.Frequency.DAILY)
                 .reportingDate(date)
                 .startTime(originalStart.plusSeconds(9999)) // ON CONFLICT DO UPDATE does NOT include this column
                 .status(RunStatus.SUCCESS)              // mutable — should be updated

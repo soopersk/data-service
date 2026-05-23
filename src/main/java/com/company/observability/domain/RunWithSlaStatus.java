@@ -1,6 +1,6 @@
 package com.company.observability.domain;
 
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.Severity;
 
@@ -21,7 +21,7 @@ public record RunWithSlaStatus(
         Long durationMs,
         Instant slaTime,
         Instant estimatedStartTime,
-        CalculatorFrequency frequency,
+        Frequency frequency,
         RunStatus status,
         Boolean slaBreached,
         String slaBreachReason,

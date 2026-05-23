@@ -4,13 +4,13 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 
 import java.time.Duration;
 
-public enum CalculatorFrequency {
+public enum Frequency {
     DAILY(2),    // Look back 2 days for DAILY calculators
     MONTHLY(10); // Look back 10 days for MONTHLY calculators
 
     private final int lookbackDays;
 
-    CalculatorFrequency(int lookbackDays) {
+    Frequency(int lookbackDays) {
         this.lookbackDays = lookbackDays;
     }
 
@@ -29,7 +29,7 @@ public enum CalculatorFrequency {
      * Default is DAILY
      */
     @JsonCreator
-    public static CalculatorFrequency from(String frequency) {
+    public static Frequency from(String frequency) {
         if (frequency == null || frequency.isBlank()) {
             return DAILY;
         }
@@ -42,7 +42,7 @@ public enum CalculatorFrequency {
     /**
      * Strict parsing for query/analytics endpoints. Rejects invalid values with IllegalArgumentException.
      */
-    public static CalculatorFrequency fromStrict(String frequency) {
+    public static Frequency fromStrict(String frequency) {
         if (frequency == null || frequency.isBlank()) {
             throw new IllegalArgumentException("Frequency is required. Valid values: DAILY, D, MONTHLY, M");
         }

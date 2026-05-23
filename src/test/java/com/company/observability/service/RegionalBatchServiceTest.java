@@ -3,7 +3,7 @@ package com.company.observability.service;
 import com.company.observability.cache.RegionalBatchCacheService;
 import com.company.observability.config.RegionalBatchProperties;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.repository.CalculatorRunRepository.RegionalBatchTiming;
@@ -202,7 +202,7 @@ class RegionalBatchServiceTest {
                 .calculatorId("regional-batch-" + region.toLowerCase())
                 .calculatorName("Regional Batch " + region)
                 .tenantId(TENANT)
-                .frequency(CalculatorFrequency.DAILY)
+                .frequency(Frequency.DAILY)
                 .reportingDate(DATE)
                 .startTime(start)
                 .endTime(end)

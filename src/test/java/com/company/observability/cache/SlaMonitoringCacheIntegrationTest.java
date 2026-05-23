@@ -181,7 +181,7 @@ class SlaMonitoringCacheIntegrationTest extends RedisIntegrationTestBase {
                 .calculatorId(TestFixtures.DEFAULT_CALC_ID)
                 .calculatorName(TestFixtures.DEFAULT_CALC_NAME)
                 .tenantId(TestFixtures.DEFAULT_TENANT_ID)
-                .frequency(com.company.observability.domain.enums.CalculatorFrequency.DAILY)
+                .frequency(com.company.observability.domain.enums.Frequency.DAILY)
                 .reportingDate(TestFixtures.DEFAULT_DATE)
                 .startTime(TestFixtures.DEFAULT_START)
                 .status(com.company.observability.domain.enums.RunStatus.RUNNING)

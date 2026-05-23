@@ -3,10 +3,11 @@ package com.company.observability.service;
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.*;
+import com.company.observability.exception.DomainAccessDeniedException;
 import com.company.observability.exception.DomainNotFoundException;
 import com.company.observability.exception.DomainValidationException;
 import com.company.observability.event.*;
@@ -74,8 +75,8 @@ public class RunIngestionService {
         // Validate reporting_date matches frequency expectations
         validateReportingDate(request);
 
-        CalculatorFrequency frequency = Objects.requireNonNullElse(
-                request.getFrequency(), CalculatorFrequency.DAILY);
+        Frequency frequency = Objects.requireNonNullElse(
+                request.getFrequency(), Frequency.DAILY);
 
         // Fetch the calculator's cached rolling profile once (Redis-backed, no DB on warm cache).
         // It feeds both the SLA baseline and the estimated start/end fallbacks.
@@ -141,6 +142,10 @@ public class RunIngestionService {
         }
 
         CalculatorRun run = runOpt.get();
+
+        if (tenantId != null && !tenantId.equals(run.getTenantId())) {
+            throw new DomainAccessDeniedException("Run " + runId + " does not belong to tenant " + tenantId);
+        }
 
         var prev = MdcContextUtil.setCalculatorContext(run.getCalculatorId(), runId);
         try {
@@ -208,7 +213,7 @@ public class RunIngestionService {
      * Validate reporting_date matches frequency expectations
      */
     private void validateReportingDate(StartRunRequest request) {
-        if (request.getFrequency() == CalculatorFrequency.MONTHLY) {
+        if (request.getFrequency() == Frequency.MONTHLY) {
             // MONTHLY runs should have end-of-month reporting date
             LocalDate reportingDate = request.getReportingDate();
             LocalDate nextDay = reportingDate.plusDays(1);

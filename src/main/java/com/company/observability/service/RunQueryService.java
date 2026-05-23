@@ -2,7 +2,7 @@ package com.company.observability.service;
 
 import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.domain.enums.CalculatorFrequency;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.*;
 import com.company.observability.exception.DomainNotFoundException;
 import com.company.observability.repository.CalculatorRunRepository;
@@ -33,7 +33,7 @@ public class RunQueryService {
     private final MeterRegistry meterRegistry;
 
     public CalculatorStatusResponse getCalculatorStatus(
-            String calculatorId, CalculatorFrequency frequency,
+            String calculatorId, Frequency frequency,
             int historyLimit, boolean bypassCache) {
 
         var prev = MdcContextUtil.setCalculatorContext(calculatorId, "-");
@@ -45,7 +45,7 @@ public class RunQueryService {
     }
 
     private CalculatorStatusResponse doGetCalculatorStatus(
-            String calculatorId, CalculatorFrequency frequency,
+            String calculatorId, Frequency frequency,
             int historyLimit, boolean bypassCache) {
 
         // Check cache (unless bypassed)
@@ -94,7 +94,7 @@ public class RunQueryService {
     }
 
     public List<CalculatorStatusResponse> getBatchCalculatorStatus(
-            List<String> calculatorIds, CalculatorFrequency frequency,
+            List<String> calculatorIds, Frequency frequency,
             int historyLimit, boolean allowStale) {
 
         Timer.Sample sample = Timer.start(meterRegistry);
