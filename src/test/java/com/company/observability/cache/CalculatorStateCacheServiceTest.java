@@ -3,13 +3,14 @@ package com.company.observability.cache;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.RunEntry;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
@@ -26,19 +27,21 @@ import static org.mockito.Mockito.*;
 class CalculatorStateCacheServiceTest {
 
     @Mock
-    private RedisTemplate<String, Object> redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @Mock
-    private ValueOperations<String, Object> valueOps;
+    private ValueOperations<String, String> valueOps;
 
     private CalculatorStateCacheService service;
+    private ObjectMapper objectMapper;
 
     private static final LocalDate DATE  = LocalDate.of(2026, 5, 1);
     private static final String    FREQ  = "DAILY";
 
     @BeforeEach
     void setUp() {
-        service = new CalculatorStateCacheService(redisTemplate, new ObjectMapper(), new SimpleMeterRegistry());
+        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        service = new CalculatorStateCacheService(redisTemplate, objectMapper, new SimpleMeterRegistry());
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
     }
 
@@ -77,30 +80,30 @@ class CalculatorStateCacheServiceTest {
     // ── get/put round-trip ────────────────────────────────────────────────────
 
     @Test
-    void putEntries_storesEachWithDynamicTtl() {
+    void putEntries_storesEachWithDynamicTtl() throws Exception {
         CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", false)));
 
         service.putEntries(DATE, FREQ, null, Map.of("cap", entry));
 
         String expectedKey = "obs:state:cap:" + DATE + ":DAILY:all";
-        verify(valueOps).set(eq(expectedKey), eq(entry), eq(TTL_TERMINAL_CLEAN));
+        verify(valueOps).set(eq(expectedKey), anyString(), eq(TTL_TERMINAL_CLEAN));
     }
 
     @Test
-    void putEntries_withRunNumber_includesRunNumberInKey() {
+    void putEntries_withRunNumber_includesRunNumberInKey() throws Exception {
         CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", false)));
 
         service.putEntries(DATE, FREQ, "1", Map.of("cap", entry));
 
         String expectedKey = "obs:state:cap:" + DATE + ":DAILY:1";
-        verify(valueOps).set(eq(expectedKey), eq(entry), eq(TTL_TERMINAL_CLEAN));
+        verify(valueOps).set(eq(expectedKey), anyString(), eq(TTL_TERMINAL_CLEAN));
     }
 
     @Test
-    void getEntries_cacheHit_returnsEntry() {
+    void getEntries_cacheHit_returnsEntry() throws Exception {
         String key = "obs:state:cap:" + DATE + ":DAILY:all";
         CalculatorEntry entry = new CalculatorEntry("cap", List.of());
-        when(valueOps.get(key)).thenReturn(entry);
+        when(valueOps.get(key)).thenReturn(objectMapper.writeValueAsString(entry));
 
         Map<String, CalculatorEntry> result = service.getEntries(DATE, FREQ, null, List.of("cap"));
 

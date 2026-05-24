@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
@@ -26,7 +26,7 @@ import static com.company.observability.util.ObservabilityConstants.*;
 @Slf4j
 public class AnalyticsCacheService {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
@@ -45,11 +45,11 @@ public class AnalyticsCacheService {
                               int days, Class<T> responseType) {
         String key = buildKey(keyPrefix, calculatorId, days);
         try {
-            Object cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
+            String json = redisTemplate.opsForValue().get(key);
+            if (json != null) {
                 meterRegistry.counter(CACHE_ANALYTICS_HIT, "prefix", keyPrefix).increment();
                 log.debug("event=cache.read outcome=hit key={}", key);
-                return convertCached(cached, responseType);
+                return objectMapper.readValue(json, responseType);
             }
         } catch (Exception e) {
             log.warn("event=cache.read outcome=failure key={} error={}", key, e.getMessage());
@@ -61,11 +61,11 @@ public class AnalyticsCacheService {
                               String frequency, int days, Class<T> responseType) {
         String key = buildKey(keyPrefix, calculatorId, frequency, days);
         try {
-            Object cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
+            String json = redisTemplate.opsForValue().get(key);
+            if (json != null) {
                 meterRegistry.counter(CACHE_ANALYTICS_HIT, "prefix", keyPrefix).increment();
                 log.debug("event=cache.read outcome=hit key={}", key);
-                return convertCached(cached, responseType);
+                return objectMapper.readValue(json, responseType);
             }
         } catch (Exception e) {
             log.warn("event=cache.read outcome=failure key={} error={}", key, e.getMessage());
@@ -78,7 +78,7 @@ public class AnalyticsCacheService {
         String key = buildKey(keyPrefix, calculatorId, days);
         String indexKey = buildIndexKey(calculatorId);
         try {
-            redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
+            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(response), DEFAULT_TTL);
             trackKey(indexKey, key);
             log.debug("event=cache.write outcome=success key={}", key);
         } catch (Exception e) {
@@ -91,7 +91,7 @@ public class AnalyticsCacheService {
         String key = buildKey(keyPrefix, calculatorId, frequency, days);
         String indexKey = buildIndexKey(calculatorId);
         try {
-            redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
+            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(response), DEFAULT_TTL);
             trackKey(indexKey, key);
             log.debug("event=cache.write outcome=success key={}", key);
         } catch (Exception e) {
@@ -108,11 +108,11 @@ public class AnalyticsCacheService {
                               Class<T> responseType) {
         String key = buildKeyWithRunNumber(keyPrefix, calculatorKey, frequency, days, runNumber);
         try {
-            Object cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
+            String json = redisTemplate.opsForValue().get(key);
+            if (json != null) {
                 meterRegistry.counter(CACHE_ANALYTICS_HIT, "prefix", keyPrefix).increment();
                 log.debug("event=cache.read outcome=hit key={}", key);
-                return convertCached(cached, responseType);
+                return objectMapper.readValue(json, responseType);
             }
         } catch (Exception e) {
             log.warn("event=cache.read outcome=failure key={} error={}", key, e.getMessage());
@@ -130,7 +130,7 @@ public class AnalyticsCacheService {
         // Track under both calculatorKey (name) index so eviction covers name-keyed entries
         String indexKey = buildIndexKey(calculatorKey);
         try {
-            redisTemplate.opsForValue().set(key, response, DEFAULT_TTL);
+            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(response), DEFAULT_TTL);
             trackKey(indexKey, key);
             log.debug("event=cache.write outcome=success key={}", key);
         } catch (Exception e) {
@@ -172,7 +172,7 @@ public class AnalyticsCacheService {
 
     private void evictIndex(String indexKey, String calculatorKey) {
         try {
-            Set<Object> indexedKeys = redisTemplate.opsForSet().members(indexKey);
+            Set<String> indexedKeys = redisTemplate.opsForSet().members(indexKey);
             if (indexedKeys != null && !indexedKeys.isEmpty()) {
                 List<String> keysToDelete = indexedKeys.stream()
                         .map(Object::toString)
@@ -199,7 +199,7 @@ public class AnalyticsCacheService {
 
     private void evictIndexByPrefix(String indexKey, String fullKeyPrefix, String calculatorKey) {
         try {
-            Set<Object> indexedKeys = redisTemplate.opsForSet().members(indexKey);
+            Set<String> indexedKeys = redisTemplate.opsForSet().members(indexKey);
             if (indexedKeys == null || indexedKeys.isEmpty()) {
                 return;
             }
@@ -252,10 +252,4 @@ public class AnalyticsCacheService {
         redisTemplate.expire(indexKey, INDEX_TTL);
     }
 
-    private <T> T convertCached(Object cached, Class<T> responseType) {
-        if (responseType.isInstance(cached)) {
-            return responseType.cast(cached);
-        }
-        return objectMapper.convertValue(cached, responseType);
-    }
 }

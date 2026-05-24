@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -40,7 +40,7 @@ import static com.company.observability.util.ObservabilityConstants.*;
 @Slf4j
 public class CalculatorStateCacheService {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
@@ -65,9 +65,9 @@ public class CalculatorStateCacheService {
         for (String name : calculatorNames) {
             String key = buildKey(name, reportingDate, frequency, runNumber);
             try {
-                Object cached = redisTemplate.opsForValue().get(key);
-                if (cached != null) {
-                    CalculatorEntry entry = objectMapper.convertValue(cached, CalculatorEntry.class);
+                String json = redisTemplate.opsForValue().get(key);
+                if (json != null) {
+                    CalculatorEntry entry = objectMapper.readValue(json, CalculatorEntry.class);
                     hits.put(name, entry);
                     meterRegistry.counter(CACHE_STATE_HIT, "calculator", name).increment();
                     log.debug("event=state.cache.read outcome=hit key={}", key);
@@ -96,7 +96,8 @@ public class CalculatorStateCacheService {
             String key = buildKey(name, reportingDate, frequency, runNumber);
             Duration ttl = determineTtl(entry);
             try {
-                redisTemplate.opsForValue().set(key, entry, ttl);
+                String json = objectMapper.writeValueAsString(entry);
+                redisTemplate.opsForValue().set(key, json, ttl);
                 log.debug("event=state.cache.write outcome=success key={} ttl={}", key, ttl);
             } catch (Exception e) {
                 log.warn("event=state.cache.write outcome=failure key={} error={}", key, e.getMessage());
