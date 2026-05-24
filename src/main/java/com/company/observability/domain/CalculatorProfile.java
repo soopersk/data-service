@@ -11,7 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * <p>{@code totalRuns == 0} is a valid "no history" sentinel.
  */
 public record CalculatorProfile(
-        String calculatorId,
+        String calculatorName,
         String frequency,
         long avgDurationMs,
         int avgStartMinUtc,
@@ -20,13 +20,13 @@ public record CalculatorProfile(
 ) {
     @JsonCreator
     public CalculatorProfile(
-            @JsonProperty("calculatorId") String calculatorId,
+            @JsonProperty("calculatorName") String calculatorName,
             @JsonProperty("frequency") String frequency,
             @JsonProperty("avgDurationMs") long avgDurationMs,
             @JsonProperty("avgStartMinUtc") int avgStartMinUtc,
             @JsonProperty("avgEndMinUtc") int avgEndMinUtc,
             @JsonProperty("totalRuns") int totalRuns) {
-        this.calculatorId = calculatorId;
+        this.calculatorName = calculatorName;
         this.frequency = frequency;
         this.avgDurationMs = avgDurationMs;
         this.avgStartMinUtc = avgStartMinUtc;
@@ -35,14 +35,14 @@ public record CalculatorProfile(
     }
 
     /** Build from summed aggregate columns, computing averages (0 when no runs). */
-    public static CalculatorProfile fromSums(String calculatorId, String frequency,
+    public static CalculatorProfile fromSums(String calculatorName, String frequency,
                                              long sumDurationMs, long sumStartMinUtc, long sumEndMinUtc,
                                              int totalRuns) {
         if (totalRuns <= 0) {
-            return new CalculatorProfile(calculatorId, frequency, 0, 0, 0, 0);
+            return new CalculatorProfile(calculatorName, frequency, 0, 0, 0, 0);
         }
         return new CalculatorProfile(
-                calculatorId, frequency,
+                calculatorName, frequency,
                 sumDurationMs / totalRuns,
                 (int) (sumStartMinUtc / totalRuns),
                 (int) (sumEndMinUtc / totalRuns),

@@ -946,6 +946,29 @@ public class CalculatorRunRepository {
         return jdbcTemplate.queryForList("SELECT * FROM get_partition_statistics()", EmptySqlParameterSource.INSTANCE);
     }
 
+    /**
+     * Returns the most recent run with a non-null {@code expected_duration_ms} for the given
+     * calculator name and frequency, across any reporting_date. Used as a fallback estimator
+     * when {@code CalculatorProfile} has insufficient samples (new/infrequent calculators).
+     *
+     * <p>Uses index: {@code calculator_runs_name_date_idx (calculator_name, reporting_date DESC)}.
+     */
+    public Optional<CalculatorRun> findLatestRunEstimatesByName(String calculatorName, Frequency frequency) {
+        String sql = SELECT_BASE + """
+            WHERE calculator_name = :calculatorName
+              AND frequency = :frequency
+              AND expected_duration_ms IS NOT NULL
+            ORDER BY reporting_date DESC, created_at DESC
+            LIMIT 1
+            """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorName", calculatorName)
+                .addValue("frequency", frequency.name());
+
+        List<CalculatorRun> results = jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(false));
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
 
     private class CalculatorRunRowMapper implements RowMapper<CalculatorRun> {
         private final boolean includeJsonb;

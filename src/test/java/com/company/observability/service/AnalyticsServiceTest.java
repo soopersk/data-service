@@ -255,9 +255,9 @@ class AnalyticsServiceTest {
                 "calc-1", Frequency.DAILY, 30, null))
                 .thenReturn(List.of(split1, split2));
         // No usable profile → envelope reference lines fall back to latest-run values.
-        when(calculatorProfileService.getProfile("calc-1", Frequency.DAILY))
+        when(calculatorProfileService.getProfile("Portfolio", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
-                        "calc-1", "DAILY", 0, 0, 0, 0));
+                        "Portfolio", "DAILY", 0, 0, 0, 0));
 
         RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
 
@@ -307,9 +307,9 @@ class AnalyticsServiceTest {
                 "calc-1", Frequency.DAILY, 30, null))
                 .thenReturn(List.of(run));
         // avg start = 270 min UTC (04:30); avg duration = 1h; 10 samples → trusted.
-        when(calculatorProfileService.getProfile("calc-1", Frequency.DAILY))
+        when(calculatorProfileService.getProfile("Portfolio", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
-                        "calc-1", "DAILY", 3_600_000L, 270, 330, 10));
+                        "Portfolio", "DAILY", 3_600_000L, 270, 330, 10));
 
         RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
 

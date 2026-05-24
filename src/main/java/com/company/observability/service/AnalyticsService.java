@@ -501,7 +501,7 @@ public class AnalyticsService {
             RunWithSlaStatus latestRaw, Frequency frequency) {
 
         CalculatorProfile profile = calculatorProfileService.getProfile(
-                latestRaw.calculatorId(), frequency);
+                latestRaw.calculatorName(), frequency);
 
         if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
             java.time.Instant estStart = com.company.observability.util.TimeUtils

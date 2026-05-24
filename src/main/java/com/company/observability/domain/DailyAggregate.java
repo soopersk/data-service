@@ -9,7 +9,7 @@ import java.time.LocalDate;
  * Averages are computed at read time via the helper methods below.
  */
 public record DailyAggregate(
-        String calculatorId,
+        String calculatorName,
         LocalDate reportingDate,
         int totalRuns,
         int successRuns,

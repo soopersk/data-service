@@ -81,7 +81,7 @@ public class RunIngestionService {
         // Fetch the calculator's cached rolling profile once (Redis-backed, no DB on warm cache).
         // It feeds both the SLA baseline and the estimated start/end fallbacks.
         CalculatorProfile profile = calculatorProfileService.getProfile(
-                request.getCalculatorId(), frequency);
+                request.getCalculatorName(), frequency);
 
         // Derive the SLA deadline from the calculator's average runtime and freeze it into
         // slaTime. Applies to DAILY and MONTHLY. May be null when no baseline is available

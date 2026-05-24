@@ -117,6 +117,11 @@ public class CalculatorStateCacheService {
             return TTL_NOT_STARTED;
         }
 
+        // Synthetic not-started entry: status is null (omitted from JSON via @JsonInclude NON_NULL)
+        if (runs.stream().anyMatch(r -> r.status() == null)) {
+            return TTL_NOT_STARTED;
+        }
+
         boolean anyRunning = runs.stream()
                 .anyMatch(r -> "RUNNING".equals(r.status()));
         if (anyRunning) {

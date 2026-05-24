@@ -2,6 +2,7 @@ package com.company.observability.service;
 
 import com.company.observability.cache.CalculatorStateCacheService;
 import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
@@ -19,6 +20,7 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -33,6 +35,9 @@ class CalculatorStateServiceTest {
     @Mock
     CalculatorStateCacheService stateCache;
 
+    @Mock
+    CalculatorProfileService profileService;
+
     // Use a real DurationBasedSlaProperties so bandGapMs() returns a meaningful value (15 min default).
     // A Mockito mock would return 0, making LATE and VERY_LATE indistinguishable.
     CalculatorStateService service;
@@ -46,12 +51,21 @@ class CalculatorStateServiceTest {
     private static final Instant T_MINUS_1 = Instant.parse("2026-03-06T14:00:00Z");
     private static final Instant NOW       = Instant.parse("2026-03-06T14:45:00Z");
 
+    // Zero-sample profile — not enough history to derive estimates.
+    private static final CalculatorProfile NO_HISTORY_PROFILE =
+            new CalculatorProfile("test-calc", "DAILY", 0, 0, 0, 0);
+
     @BeforeEach
     void setUp() {
-        service = new CalculatorStateService(runRepository, new DurationBasedSlaProperties(), stateCache);
+        service = new CalculatorStateService(runRepository, new DurationBasedSlaProperties(), stateCache, profileService);
         // Default: cache returns no hits (all misses) so DB is called — matches all pre-existing tests
         lenient().when(stateCache.getEntries(any(), anyString(), any(), any()))
                 .thenReturn(new HashMap<>());
+        // Default: no profile history and no fallback run — empty-runs case returns empty entry
+        lenient().when(profileService.getProfile(anyString(), any(Frequency.class)))
+                .thenReturn(NO_HISTORY_PROFILE);
+        lenient().when(runRepository.findLatestRunEstimatesByName(anyString(), any(Frequency.class)))
+                .thenReturn(Optional.empty());
     }
 
     @Test
