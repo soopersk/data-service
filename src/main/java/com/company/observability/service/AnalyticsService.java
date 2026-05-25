@@ -394,7 +394,7 @@ public class AnalyticsService {
                 calculatorName, frequency, days, rn);
 
         List<RunWithSlaStatus> rawRuns = calculatorRunRepository
-                .findRunsWithSlaStatusByName(calculatorName, frequency, days, rn);
+                .findRunsByName(calculatorName, frequency, days, rn);
 
         RunPerformanceData response = buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
         cacheService.putInCache(CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn, response);
@@ -517,11 +517,19 @@ public class AnalyticsService {
 
     private String classifySlaStatusForRun(RunWithSlaStatus run) {
         if (run.status() == RunStatus.RUNNING || !Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.ON_TIME.name();
-        if (run.severity() == null) return SlaStatus.LATE.name();
-        return switch (run.severity()) {
-            case CRITICAL, HIGH -> SlaStatus.VERY_LATE.name();
-            default -> SlaStatus.LATE.name();
-        };
+        if (run.severity() != null) {
+            return switch (run.severity()) {
+                case CRITICAL, HIGH -> SlaStatus.VERY_LATE.name();
+                default -> SlaStatus.LATE.name();
+            };
+        }
+        // No sla_breach_events severity (e.g. /executions reads calculator_runs only): derive the
+        // band from the on-write sla_breach_reason set by SlaEvaluationService / failure short-circuit.
+        String reason = run.slaBreachReason();
+        if (reason != null && (reason.contains("VERY_LATE") || reason.startsWith("Run status:"))) {
+            return SlaStatus.VERY_LATE.name();
+        }
+        return SlaStatus.LATE.name();
     }
 
     // ================================================================

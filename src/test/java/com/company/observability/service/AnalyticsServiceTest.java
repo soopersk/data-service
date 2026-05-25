@@ -341,14 +341,14 @@ class AnalyticsServiceTest {
     void getRunExecutionsByName_cacheMiss_queriesDbAndPopulatesCache() {
         when(cacheService.getFromCache(any(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(null);
-        when(calculatorRunRepository.findRunsWithSlaStatusByName(
+        when(calculatorRunRepository.findRunsByName(
                 eq("cap"), eq(Frequency.DAILY), eq(30), isNull()))
                 .thenReturn(List.of());
 
         service.getRunExecutionsByName("cap", 30, Frequency.DAILY, null);
 
         verify(calculatorRunRepository)
-                .findRunsWithSlaStatusByName("cap", Frequency.DAILY, 30, null);
+                .findRunsByName("cap", Frequency.DAILY, 30, null);
         verify(cacheService).putInCache(
                 eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any());
     }
@@ -357,7 +357,7 @@ class AnalyticsServiceTest {
     void getRunExecutionsByName_runNumberDistinguishesKeys() {
         when(cacheService.getFromCache(any(), any(), any(), anyInt(), eq("2"), any()))
                 .thenReturn(null);
-        when(calculatorRunRepository.findRunsWithSlaStatusByName(
+        when(calculatorRunRepository.findRunsByName(
                 eq("cap"), any(), anyInt(), eq("2")))
                 .thenReturn(List.of());
 
@@ -373,7 +373,7 @@ class AnalyticsServiceTest {
     void getRunExecutionsByName_blankRunNumber_normalisedToNull() {
         when(cacheService.getFromCache(any(), any(), any(), anyInt(), isNull(), any()))
                 .thenReturn(null);
-        when(calculatorRunRepository.findRunsWithSlaStatusByName(any(), any(), anyInt(), isNull()))
+        when(calculatorRunRepository.findRunsByName(any(), any(), anyInt(), isNull()))
                 .thenReturn(List.of());
 
         service.getRunExecutionsByName("cap", 30, Frequency.DAILY, "  ");
@@ -381,7 +381,7 @@ class AnalyticsServiceTest {
         verify(cacheService).getFromCache(
                 eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any());
         verify(calculatorRunRepository)
-                .findRunsWithSlaStatusByName("cap", Frequency.DAILY, 30, null);
+                .findRunsByName("cap", Frequency.DAILY, 30, null);
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

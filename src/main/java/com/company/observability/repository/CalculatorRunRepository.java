@@ -511,13 +511,14 @@ public class CalculatorRunRepository {
     }
 
     /**
-     * Name-keyed variant of {@link #findRunsWithSlaStatus(String, String, Frequency, int, String)}.
-     * Filters by calculator_name (readable, unique-per-tenant) instead of the upstream UUID
-     * calculator_id. Used by GET /executions where the path variable is the readable name.
+     * Name-keyed run history for GET /executions, sourced solely from calculator_runs.
+     * Filters by calculator_name (readable, unique-per-tenant) instead of the upstream UUID.
+     * No sla_breach_events join: the SLA grade is derived downstream from sla_breached +
+     * sla_breach_reason (both set on-write by SlaEvaluationService), so severity() is always null.
      *
      * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
      */
-    public List<RunWithSlaStatus> findRunsWithSlaStatusByName(
+    public List<RunWithSlaStatus> findRunsByName(
             String calculatorName, Frequency frequency, int days, String runNumber) {
 
         StringBuilder sql = new StringBuilder("""
@@ -525,10 +526,8 @@ public class CalculatorRunRepository {
                    cr.start_time, cr.end_time, cr.duration_ms,
                    cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
                    cr.sla_breached, cr.sla_breach_reason, cr.correlation_id,
-                   cr.run_number, cr.expected_duration_ms,
-                   sbe.severity
+                   cr.run_number, cr.expected_duration_ms
             FROM calculator_runs cr
-            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id
             WHERE cr.calculator_name = :calculatorName AND cr.frequency = :frequency
             AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             AND cr.reporting_date <= CURRENT_DATE
@@ -546,35 +545,33 @@ public class CalculatorRunRepository {
             params.addValue("runNumber", runNumber);
         }
 
-        log.debug("event=db.query outcome=start query=find_runs_with_sla_by_name calculatorName={} frequency={} days={} runNumber={}",
+        log.debug("event=db.query outcome=start query=find_runs_by_name calculatorName={} frequency={} days={} runNumber={}",
                 calculatorName, frequency, days, runNumber);
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, (rs, rowNum) -> {
-            String severityStr = rs.getString("severity"); // nullable from LEFT JOIN
-            return new RunWithSlaStatus(
-                    rs.getString("run_id"),
-                    rs.getString("calculator_id"),
-                    rs.getString("calculator_name"),
-                    rs.getObject("reporting_date", LocalDate.class),
-                    fromTimestamp(rs.getTimestamp("start_time")),
-                    fromTimestamp(rs.getTimestamp("end_time")),
-                    rs.getObject("duration_ms", Long.class),
-                    fromTimestamp(rs.getTimestamp("sla_time")),
-                    fromTimestamp(rs.getTimestamp("estimated_start_time")),
-                    Frequency.from(rs.getString("frequency")),
-                    RunStatus.fromString(rs.getString("status")),
-                    rs.getObject("sla_breached", Boolean.class),
-                    rs.getString("sla_breach_reason"),
-                    severityStr != null ? Severity.fromString(severityStr) : null,
-                    rs.getString("correlation_id"),
-                    rs.getString("run_number"),
-                    rs.getObject("expected_duration_ms", Long.class)
-            );
-        });
-        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_with_sla_by_name").register(meterRegistry));
+        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, (rs, rowNum) ->
+                new RunWithSlaStatus(
+                        rs.getString("run_id"),
+                        rs.getString("calculator_id"),
+                        rs.getString("calculator_name"),
+                        rs.getObject("reporting_date", LocalDate.class),
+                        fromTimestamp(rs.getTimestamp("start_time")),
+                        fromTimestamp(rs.getTimestamp("end_time")),
+                        rs.getObject("duration_ms", Long.class),
+                        fromTimestamp(rs.getTimestamp("sla_time")),
+                        fromTimestamp(rs.getTimestamp("estimated_start_time")),
+                        Frequency.from(rs.getString("frequency")),
+                        RunStatus.fromString(rs.getString("status")),
+                        rs.getObject("sla_breached", Boolean.class),
+                        rs.getString("sla_breach_reason"),
+                        null,
+                        rs.getString("correlation_id"),
+                        rs.getString("run_number"),
+                        rs.getObject("expected_duration_ms", Long.class)
+                ));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_by_name").register(meterRegistry));
 
-        log.debug("event=db.query outcome=complete query=find_runs_with_sla_by_name calculatorName={} frequency={} rows={}",
+        log.debug("event=db.query outcome=complete query=find_runs_by_name calculatorName={} frequency={} rows={}",
                 calculatorName, frequency, results.size());
         return results;
     }
