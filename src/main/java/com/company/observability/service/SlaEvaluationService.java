@@ -3,7 +3,7 @@ package com.company.observability.service;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.util.SlaEvaluationResult;
+import com.company.observability.domain.SlaEvaluationResult;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -74,3 +74,4 @@ public class SlaEvaluationService {
                 String.format("Finished %d minutes late (VERY_LATE band)", minutesLate), "HIGH");
     }
 }
+

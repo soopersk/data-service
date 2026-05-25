@@ -27,10 +27,10 @@ Content-Type: application/json
 | `frequency` | String | Yes | `DAILY`, `D`, `MONTHLY`, or `M` | Run frequency. Determines partition query windows and SLA behaviour. |
 | `reportingDate` | Date | Yes | `YYYY-MM-DD` | The reporting date for this run. This is the partition key — always provide it. |
 | `startTime` | Instant | Yes | ISO-8601 UTC | When the run started. Example: `2026-03-24T05:00:00Z` |
-| `slaTime` | Instant | No | ISO-8601 UTC | **Optional.** Legacy upstream deadline. The graded SLA deadline is derived from the calculator's average runtime; `slaTime` is only the weakest baseline fallback (no history, no `expectedDurationMs`). |
-| `expectedDurationMs` | Long | No | Positive | Expected run duration (ms). Used as a duration baseline when history is thin, and for the estimated-end fallback. |
+| `slaTime` | String | No | ISO-8601 duration | **Optional.** Duration baseline such as `PT2H30M`. When present, this field takes precedence over `expectedDurationMs` as the external baseline input. |
+| `expectedDurationMs` | Long | No | Positive | Optional duration baseline (ms). Used when `slaTime` is omitted. |
 | `estimatedStartTime` | Instant | No | ISO-8601 UTC | Estimated start. If omitted, derived from the calculator's historical average start, else falls back to `startTime`. |
-| `estimatedEndTime` | Instant | No | ISO-8601 UTC | Estimated end. If omitted, derived from `start + expectedDurationMs`, else `estimatedStart + average duration`. |
+| `estimatedEndTime` | Instant | No | ISO-8601 UTC | Estimated end. If omitted, derived from the resolved baseline (`slaTime` duration or `expectedDurationMs`); otherwise from profile average where applicable. |
 | `runNumber` / `runType` / `region` | String | No | | Promoted dimensional fields (also accepted inside `runParameters`). |
 | `correlationId` | String | No | | Marks physical splits of one logical run. |
 | `runParameters` | Object | No | Any JSON object | Arbitrary key-value metadata stored as JSONB. |
@@ -67,7 +67,7 @@ The start endpoint is fully idempotent. Submitting the same `(runId, reportingDa
 
 ### SLA Deadline Derivation at Start
 
-There is **no start-time breach** (duration-based model). At start the service derives the SLA deadline from the calculator's average runtime and freezes it into `slaTime`; the run is created `RUNNING` with `slaBreached=false`. Both DAILY and MONTHLY runs are registered for live monitoring when a deadline is derived. Grading happens at completion (and via live detection) against the frozen deadline. See [SLA Monitoring](sla-monitoring.md).
+There is **no start-time breach** (duration-based model). At start the service resolves a baseline in this order: `slaTime` duration -> `expectedDurationMs` -> cached profile average -> ungraded. It then derives and freezes the SLA deadline into persisted `slaTime`; the run is created `RUNNING` with `slaBreached=false`. Persisted `expectedDurationMs` is also set to that effective baseline when one exists. Both DAILY and MONTHLY runs are registered for live monitoring when a deadline is derived. Grading happens at completion (and via live detection) against the frozen deadline. See [SLA Monitoring](sla-monitoring.md).
 
 ### cURL Example
 

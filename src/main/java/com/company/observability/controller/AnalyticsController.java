@@ -145,7 +145,7 @@ public class AnalyticsController {
         }
     }
 
-    @GetMapping("/calculators/{calculatorName}/executions")
+    @GetMapping("/calculators/{name}/executions")
     @Operation(
             summary = "Run execution history (raw)",
             description = "Returns all physical runs over the lookback window as independent entries. " +
@@ -156,7 +156,7 @@ public class AnalyticsController {
                     "For grouped/logical view, use GET /run-performance."
     )
     public ResponseEntity<RunPerformanceData> getRunExecutions(
-            @PathVariable String calculatorName,
+            @PathVariable("name") String calculatorName,
             @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @Parameter(description = "Lookback period in days (1-365)")
             @RequestParam(defaultValue = "30") @Min(1) @Max(365) int days,

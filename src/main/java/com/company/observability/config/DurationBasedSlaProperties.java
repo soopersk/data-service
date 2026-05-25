@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
 @Setter
 public class DurationBasedSlaProperties {
 
-    /** When false, the resolver passes the request's slaTime through unchanged (legacy behavior). */
+    /** When false, the resolver does not derive a deadline and the run is left ungraded. */
     private boolean enabled = true;
 
     /** Percentage buffer applied over the resolved baseline (e.g. 20 → baseline * 1.20). */

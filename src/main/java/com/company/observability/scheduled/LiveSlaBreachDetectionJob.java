@@ -9,7 +9,7 @@ import com.company.observability.logging.LifecycleEvent;
 import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.repository.CalculatorRunRepository;
 import com.company.observability.util.MdcContextUtil;
-import com.company.observability.util.SlaEvaluationResult;
+import com.company.observability.domain.SlaEvaluationResult;
 
 import static net.logstash.logback.argument.StructuredArguments.kv;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -245,3 +245,4 @@ public class LiveSlaBreachDetectionJob {
         activeRunsGauge.set(monitoredCount);
     }
 }
+

@@ -41,11 +41,9 @@ public class StartRunRequest {
     @Schema(example = "2026-02-06T23:22:32Z")
     private Instant startTime;
 
-    @Schema(description = "Optional. Legacy upstream SLA deadline (UTC instant, ISO-8601). " +
-            "No longer the primary SLA source — the deadline is derived from the calculator's " +
-            "average runtime. Used only as the weakest fallback when no history or " +
-            "expectedDurationMs is available.")
-    private Instant slaTime;
+    @Schema(description = "Optional SLA baseline in ISO-8601 duration format (for example, PT2H30M). " +
+            "The persisted/response slaTime remains a derived absolute deadline instant.")
+    private String slaTime;
 
     // Optional fields
     private Long expectedDurationMs;

@@ -646,7 +646,7 @@ public class CalculatorRunRepository {
      * calculator name and frequency, across any reporting_date. Used as a fallback estimator
      * when {@code CalculatorProfile} has insufficient samples (new/infrequent calculators).
      *
-     * <p>Uses index: {@code calculator_runs_name_date_idx (calculator_name, reporting_date DESC)}.
+     * <p>Uses index: {@code calculator_runs_latest_estimate_by_name_idx}.
      */
     public Optional<CalculatorRun> findLatestRunEstimatesByName(String calculatorName, Frequency frequency) {
         String sql = SELECT_BASE + """

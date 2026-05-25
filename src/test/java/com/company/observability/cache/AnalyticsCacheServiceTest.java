@@ -8,7 +8,7 @@ import com.company.observability.dto.response.RunPerformanceData.RunDataPoint;
 import com.company.observability.event.RunCompletedEvent;
 import com.company.observability.event.RunStartedEvent;
 import com.company.observability.event.SlaBreachedEvent;
-import com.company.observability.util.SlaEvaluationResult;
+import com.company.observability.domain.SlaEvaluationResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -246,3 +246,4 @@ class AnalyticsCacheServiceTest {
                 .build();
     }
 }
+

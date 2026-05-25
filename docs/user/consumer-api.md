@@ -203,7 +203,8 @@ How `runs` is populated depends on whether the calculator ran and whether it has
 
 - `region` and `runType` are **mutually exclusive** per calculator — a calculator uses one or neither, never both.
 - `slaStatus` is duration-based and always consistent with `slaBreached`: `ON_TIME` only when the run is neither flagged breached nor past its derived deadline; `LATE` within one band-gap (default 15 min) past `sla`; `VERY_LATE` beyond. A `RUNNING` run already flagged `slaBreached=true` reports `LATE`/`VERY_LATE`, never `ON_TIME`.
-- `estimatedStartTime` / `estimatedEndTime` / `sla` are frozen at run start by precedence: **request value (Airflow) → cached historical profile (avg start / avg duration) → computed (`start + expectedDurationMs`)**.
+- Start-request semantics differ from query-response semantics: request `slaTime` on `POST /runs/start` is a duration-style baseline input, while query `sla`/`slaTime` fields are derived deadline instants.
+- `estimatedStartTime` / `estimatedEndTime` / `sla` are frozen at run start. `estimatedEndTime` falls back from an explicit request value to the resolved baseline (`slaTime` duration, `expectedDurationMs`, or profile average).
 - `isRerun: true` is set when more than one attempt exists for that `(region, runType)`. Parallel splits sharing a `correlationId` are collapsed into one entry (worst-status-wins) and are **not** marked as reruns.
 
 ### Caching

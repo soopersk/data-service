@@ -9,7 +9,7 @@ import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.Severity;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.SlaBreachEventRepository;
-import com.company.observability.util.SlaEvaluationResult;
+import com.company.observability.domain.SlaEvaluationResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -145,3 +145,4 @@ class AlertHandlerServiceTest {
                 .build();
     }
 }
+

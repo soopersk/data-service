@@ -1,4 +1,4 @@
-package com.company.observability.util;
+package com.company.observability.domain;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

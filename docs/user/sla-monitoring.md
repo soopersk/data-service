@@ -9,14 +9,15 @@ The Observability Service provides two independent SLA breach detection mechanis
 The SLA deadline is **derived from each calculator's own average runtime**, not from an absolute time you supply. At `POST /runs/start` the service resolves a baseline duration and freezes a deadline into the `sla_time` column:
 
 ```
-baseline  = avg runtime (cached profile)  ▸ else expectedDurationMs  ▸ else (slaTime − startTime)
-slaTime   = startTime + baseline × (1 + thresholdPercent) + lateBand
+baseline  = slaTime duration  -> expectedDurationMs  -> avg runtime (cached profile)
+slaTime   = startTime + baseline * (1 + thresholdPercent) + lateBand
 ```
 
-- `slaTime` (in the start request) is now **optional** — it is only used as a last-resort baseline if there is no history and no `expectedDurationMs`.
-- `expectedDurationMs` (optional) is a good per-run baseline when history is thin.
+- `slaTime` (in the start request) is optional and must be an ISO-8601 duration (for example `PT2H30M`).
+- `slaTime` input takes precedence over `expectedDurationMs` when both are provided.
+- Persisted/response `slaTime` remains the derived deadline instant, not the request duration string.
+- Persisted `expectedDurationMs` is set to the effective resolved baseline whenever one exists.
 - If none of these are available, the run is left **ungraded** (treated ON_TIME) until enough history accrues.
-
 A run is graded at completion by comparing its **actual duration** to the frozen deadline plus grace bands (defaults: 20% buffer, 15-minute LATE band, 30-minute VERY_LATE band).
 
 !!! info "DAILY and MONTHLY"
@@ -175,3 +176,4 @@ observability:
     live-detection:
       enabled: false
 ```
+

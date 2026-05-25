@@ -44,7 +44,7 @@ Default: `dev` (set via `SPRING_PROFILES_ACTIVE` env var or `spring.profiles.act
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `observability.sla.duration-based.enabled` | `true` | Derive the SLA deadline from avg runtime; `false` passes the request `slaTime` through unchanged |
+| `observability.sla.duration-based.enabled` | `true` | Derive the SLA deadline from the resolved baseline; `false` leaves runs ungraded |
 | `observability.sla.duration-based.threshold-percent` | `20` | Percentage buffer over the resolved baseline |
 | `observability.sla.duration-based.late-band-minutes` | `15` | ON_TIME upper edge beyond buffered baseline (baked into `slaTime`) |
 | `observability.sla.duration-based.very-late-band-minutes` | `30` | LATE upper edge beyond buffered baseline |

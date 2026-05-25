@@ -2,6 +2,7 @@ package com.company.observability.controller;
 
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.exception.DomainValidationException;
 import com.company.observability.exception.GlobalExceptionHandler;
 import com.company.observability.logging.LifecycleLogger;
 import com.company.observability.service.RunIngestionService;
@@ -69,7 +70,7 @@ class RunIngestionControllerTest {
                   "frequency": "DAILY",
                   "reportingDate": "2026-02-22",
                   "startTime": "2026-02-22T06:00:00Z",
-                  "slaTime": "2026-02-22T05:15:00Z"
+                  "slaTime": "PT2H30M"
                 }
                 """;
 
@@ -82,6 +83,33 @@ class RunIngestionControllerTest {
                 .andExpect(jsonPath("$.runId").value("run-1"))
                 .andExpect(jsonPath("$.calculatorId").value("calc-1"))
                 .andExpect(jsonPath("$.status").value("RUNNING"));
+
+        verify(ingestionService).startRun(any(), eq("tenant-a"));
+    }
+
+    @Test
+    void startRun_legacySlaInstant_returnsBadRequest() throws Exception {
+        when(ingestionService.startRun(any(), eq("tenant-a")))
+                .thenThrow(new DomainValidationException("Invalid slaTime. Use ISO-8601 duration (for example PT2H30M)."));
+
+        String payload = """
+                {
+                  "runId": "run-1",
+                  "calculatorId": "calc-1",
+                  "calculatorName": "Calculator One",
+                  "frequency": "DAILY",
+                  "reportingDate": "2026-02-22",
+                  "startTime": "2026-02-22T06:00:00Z",
+                  "slaTime": "2026-02-22T05:15:00Z"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/runs/start")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header(TENANT_HEADER, "tenant-a")
+                        .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Bad Request"));
 
         verify(ingestionService).startRun(any(), eq("tenant-a"));
     }
@@ -219,5 +247,31 @@ class RunIngestionControllerTest {
                 .andExpect(jsonPath("$.runId").value("run-1"));
 
         verify(ingestionService).startRun(any(), isNull());
+    }
+
+    @Test
+    void startRun_malformedSlaTime_returnsBadRequest() throws Exception {
+        when(ingestionService.startRun(any(), eq("tenant-a")))
+                .thenThrow(new DomainValidationException("Invalid slaTime"));
+
+        String payload = """
+                {
+                  "runId": "run-1",
+                  "calculatorId": "calc-1",
+                  "calculatorName": "Calculator One",
+                  "frequency": "DAILY",
+                  "reportingDate": "2026-02-22",
+                  "startTime": "2026-02-22T06:00:00Z",
+                  "slaTime": "22:00"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/runs/start")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header(TENANT_HEADER, "tenant-a")
+                        .content(payload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Invalid slaTime"));
     }
 }

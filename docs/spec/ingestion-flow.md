@@ -20,16 +20,16 @@ Called by `RunIngestionService.startRun()` from `POST /api/v1/runs/start`.
    profile = calculatorProfileService.getProfile(calculatorId, tenantId, frequency)
 
 4. Resolve & freeze the SLA deadline (DAILY and MONTHLY):
-   slaDeadline = slaBaselineResolver.resolveDeadline(request, frequency, profile)
-   → baseline (avg duration | expectedDurationMs | slaTime budget | none)
-   → slaDeadline = startTime + baseline×(1+thresholdPercent) + lateBand, or null (ungraded)
+   slaResolution = slaBaselineResolver.resolve(request, frequency, profile)
+   -> baseline (slaTime duration | expectedDurationMs | avg duration | none)
+   -> slaDeadline = startTime + baseline * (1+thresholdPercent) + lateBand, or null (ungraded)
    There is NO start-time breach in the duration model.
 
 5. Resolve estimated start/end (precedence: request → profile → computed):
    estimatedStartTime = request.estimatedStartTime
                         ?? profile avg start (anchored to start date) ?? startTime
    estimatedEndTime   = request.estimatedEndTime
-                        ?? (start + expectedDurationMs) ?? (estimatedStart + profile avg duration) ?? null
+                        ?? (start/estimatedStart + resolved baseline) ?? null
 
 6. Build CalculatorRun domain object (status = RUNNING, slaBreached = false)
 

@@ -18,5 +18,5 @@ CREATE TABLE IF NOT EXISTS calculator_sli_daily (
     PRIMARY KEY (calculator_name, frequency, reporting_date)
 );
 
-CREATE INDEX IF NOT EXISTS idx_calculator_sli_daily_recent
-    ON calculator_sli_daily (calculator_name, reporting_date DESC);
+CREATE INDEX IF NOT EXISTS calculator_sli_daily_profile_idx
+    ON calculator_sli_daily (calculator_name, frequency, reporting_date DESC);

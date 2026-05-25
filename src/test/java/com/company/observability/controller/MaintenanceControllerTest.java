@@ -3,6 +3,7 @@ package com.company.observability.controller;
 import com.company.observability.config.TestMetricsConfig;
 import com.company.observability.dto.response.PartitionOperationResponse;
 import com.company.observability.exception.GlobalExceptionHandler;
+import com.company.observability.scheduled.DailyAggregationJob;
 import com.company.observability.service.PartitionMaintenanceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,9 @@ class MaintenanceControllerTest {
 
     @MockitoBean
     private PartitionMaintenanceService service;
+
+    @MockitoBean
+    private DailyAggregationJob dailyAggregationJob;
 
     private static final PartitionOperationResponse.PartitionStat SAMPLE_STAT =
             new PartitionOperationResponse.PartitionStat(

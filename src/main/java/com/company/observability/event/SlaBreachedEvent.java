@@ -1,7 +1,7 @@
 package com.company.observability.event;
 
 import com.company.observability.domain.CalculatorRun;
-import com.company.observability.util.SlaEvaluationResult;
+import com.company.observability.domain.SlaEvaluationResult;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 

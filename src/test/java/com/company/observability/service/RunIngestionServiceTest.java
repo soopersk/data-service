@@ -13,7 +13,7 @@ import com.company.observability.exception.DomainAccessDeniedException;
 import com.company.observability.exception.DomainValidationException;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.repository.CalculatorRunRepository;
-import com.company.observability.util.SlaEvaluationResult;
+import com.company.observability.domain.SlaEvaluationResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -112,8 +112,11 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY))
                 .thenReturn(EMPTY_PROFILE);
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
-                .thenReturn(derivedDeadline);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(
+                        3_600_000L,
+                        derivedDeadline
+                ));
 
         service.startRun(request, "tenant-1");
 
@@ -145,8 +148,11 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.MONTHLY))
                 .thenReturn(EMPTY_PROFILE);
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(Frequency.MONTHLY), any()))
-                .thenReturn(derivedDeadline);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.MONTHLY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(
+                        7_200_000L,
+                        derivedDeadline
+                ));
 
         service.startRun(request, "tenant-1");
 
@@ -175,8 +181,11 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY))
                 .thenReturn(EMPTY_PROFILE);
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
-                .thenReturn(null);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(
+                        null,
+                        null
+                ));
 
         service.startRun(request, "tenant-1");
 
@@ -184,6 +193,73 @@ class RunIngestionServiceTest {
         verify(runRepository).upsert(argThat(run -> run.getSlaTime() == null
                 && Boolean.FALSE.equals(run.getSlaBreached())));
         verify(eventPublisher).publishEvent(any(com.company.observability.event.RunStartedEvent.class));
+    }
+
+    @Test
+    void startRun_persistsResolvedBaselineAsExpectedDuration() {
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+
+        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+        Instant derivedDeadline = start.plusSeconds(4_200);
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-baseline")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(Frequency.DAILY)
+                .reportingDate(reportingDate)
+                .startTime(start)
+                .slaTime("PT1H")
+                .expectedDurationMs(9_999_999L)
+                .build();
+
+        when(runRepository.findById("run-baseline", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY)).thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(
+                        3_600_000L,
+                        derivedDeadline
+                ));
+
+        service.startRun(request, "tenant-1");
+
+        verify(runRepository).upsert(argThat(run ->
+                Long.valueOf(3_600_000L).equals(run.getExpectedDurationMs())
+                        && derivedDeadline.equals(run.getSlaTime())));
+    }
+
+    @Test
+    void startRun_estimatedEnd_usesResolvedBaselineWhenOnlySlaTimeProvided() {
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+
+        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-sla-only")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(Frequency.DAILY)
+                .reportingDate(reportingDate)
+                .startTime(start)
+                .slaTime("PT2H")
+                .build();
+
+        when(runRepository.findById("run-sla-only", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY)).thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(
+                        7_200_000L,
+                        start.plusSeconds(8_640)
+                ));
+
+        service.startRun(request, "tenant-1");
+
+        verify(runRepository).upsert(argThat(run ->
+                start.plusSeconds(7_200).equals(run.getEstimatedEndTime())));
     }
 
     @Test
@@ -254,7 +330,7 @@ class RunIngestionServiceTest {
                 .frequency(Frequency.DAILY)
                 .reportingDate(reportingDate)
                 .startTime(start)
-                .slaTime(Instant.parse("2026-02-20T05:15:00Z"))
+                .slaTime("2026-02-20T05:15:00Z")
                 .build();
 
         when(runRepository.findById("run-1", reportingDate)).thenReturn(Optional.of(existing));
@@ -279,12 +355,16 @@ class RunIngestionServiceTest {
                 .frequency(Frequency.MONTHLY)
                 .reportingDate(nonEom)
                 .startTime(start)
-                .slaTime(Instant.parse("2026-01-15T05:15:00Z"))
+                .slaTime("2026-01-15T05:15:00Z")
                 .build();
 
         when(runRepository.findById("run-monthly", nonEom)).thenReturn(Optional.empty());
         when(runRepository.upsert(any(CalculatorRun.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
+        when(calculatorProfileService.getProfile("Calculator 1", Frequency.MONTHLY))
+                .thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.MONTHLY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(null, null));
 
         // Should not throw
         service.startRun(request, "tenant-1");
@@ -359,8 +439,11 @@ class RunIngestionServiceTest {
         // Profile has samples, but request values must take precedence.
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY))
                 .thenReturn(new CalculatorProfile("Calculator 1", "DAILY", 3_600_000L, 200, 300, 10));
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
-                .thenReturn(null);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(
+                        null,
+                        null
+                ));
 
         service.startRun(request, "tenant-1");
 
@@ -385,8 +468,11 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(inv -> inv.getArgument(0));
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY))
                 .thenReturn(new CalculatorProfile("Calculator 1", "DAILY", 3_600_000L, 270, 330, 10));
-        when(slaBaselineResolver.resolveDeadline(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
-                .thenReturn(null);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(
+                        3_600_000L,
+                        null
+                ));
 
         service.startRun(request, "tenant-1");
 
@@ -430,3 +516,4 @@ class RunIngestionServiceTest {
                 .build();
     }
 }
+

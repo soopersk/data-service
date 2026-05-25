@@ -62,7 +62,10 @@ class SlaMonitoringCacheTest {
         cache = new SlaMonitoringCache(redisTemplate, new ObjectMapper(), new SimpleMeterRegistry());
         ReflectionTestUtils.setField(cache, "liveTrackingEnabled", true);
         lenient().when(redisTemplate.opsForZSet()).thenReturn(zSetOps);
-        lenient().when(redisTemplate.opsForHash()).thenReturn(hashOps);
+        // doReturn bypasses the compile-time generic mismatch:
+        // StringRedisTemplate.opsForHash() declares HashOperations<String,Object,Object>
+        // but our mock is <String,String,String> — same wire behaviour, different type token.
+        lenient().doReturn(hashOps).when(redisTemplate).opsForHash();
     }
 
     // ---------------------------------------------------------------

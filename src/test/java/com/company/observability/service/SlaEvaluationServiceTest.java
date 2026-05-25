@@ -3,7 +3,7 @@ package com.company.observability.service;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.util.SlaEvaluationResult;
+import com.company.observability.domain.SlaEvaluationResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -100,3 +100,4 @@ class SlaEvaluationServiceTest {
         assertNull(result.getSeverity());
     }
 }
+

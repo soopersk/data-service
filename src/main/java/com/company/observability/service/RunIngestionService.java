@@ -3,6 +3,7 @@ package com.company.observability.service;
 import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
+import com.company.observability.domain.SlaEvaluationResult;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
@@ -83,13 +84,13 @@ public class RunIngestionService {
         CalculatorProfile profile = calculatorProfileService.getProfile(
                 request.getCalculatorName(), frequency);
 
-        // Derive the SLA deadline from the calculator's average runtime and freeze it into
-        // slaTime. Applies to DAILY and MONTHLY. May be null when no baseline is available
-        // (no history, no expectedDurationMs, no usable slaTime) → run is left ungraded.
-        Instant slaDeadline = slaBaselineResolver.resolveDeadline(request, frequency, profile);
+        // Derive SLA baseline + deadline once and reuse for persistence + estimated-end fallback.
+        SlaBaselineResolver.SlaResolution slaResolution = slaBaselineResolver.resolve(request, frequency, profile);
+        Instant slaDeadline = slaResolution.deadline();
+        Long resolvedBaselineDurationMs = slaResolution.baselineDurationMs();
 
         Instant estimatedStartTime = resolveEstimatedStart(request, profile);
-        Instant estimatedEndTime = resolveEstimatedEnd(request, estimatedStartTime, profile);
+        Instant estimatedEndTime = resolveEstimatedEnd(request, estimatedStartTime, profile, slaResolution);
 
         CalculatorRun run = CalculatorRun.builder()
                 .runId(request.getRunId())
@@ -101,7 +102,7 @@ public class RunIngestionService {
                 .startTime(request.getStartTime())
                 .status(RunStatus.RUNNING)
                 .slaTime(slaDeadline)
-                .expectedDurationMs(request.getExpectedDurationMs())
+                .expectedDurationMs(resolvedBaselineDurationMs)
                 .estimatedStartTime(estimatedStartTime)
                 .estimatedEndTime(estimatedEndTime)
                 .runNumber(resolveField(request.getRunNumber(), request.getRunParameters(), "run_number"))
@@ -127,8 +128,8 @@ public class RunIngestionService {
                 "frequency", run.getFrequency().name()
         ).increment();
 
-        log.info("event=run.start.persist outcome=success slaDeadline={} liveTracking={}",
-                slaDeadline, liveTrackingEnabled);
+        log.info("event=run.start.persist outcome=success baselineMs={} slaDeadline={} liveTracking={}",
+                resolvedBaselineDurationMs, slaDeadline, liveTrackingEnabled);
 
         return run;
     }
@@ -252,16 +253,29 @@ public class RunIngestionService {
     }
 
     /**
-     * Estimated end precedence: request value (Airflow) → start + expectedDurationMs →
+     * Estimated end precedence: request value (Airflow) → resolved baseline fallback
+     * (anchored to start for external inputs, estimatedStart for profile average) →
      * estimatedStart + historical avg duration (cached profile) → null.
      */
-    private Instant resolveEstimatedEnd(StartRunRequest request, Instant estimatedStart, CalculatorProfile profile) {
+    private Instant resolveEstimatedEnd(
+            StartRunRequest request,
+            Instant estimatedStart,
+            CalculatorProfile profile,
+            SlaBaselineResolver.SlaResolution slaResolution
+    ) {
         if (request.getEstimatedEndTime() != null) {
             return request.getEstimatedEndTime();
         }
-        if (request.getExpectedDurationMs() != null) {
-            return TimeUtils.calculateEstimatedEndTime(request.getStartTime(), request.getExpectedDurationMs());
+
+        if (slaResolution != null && slaResolution.baselineDurationMs() != null) {
+            boolean usingProfileAverage = request.getExpectedDurationMs() == null
+                    && (request.getSlaTime() == null || request.getSlaTime().isBlank());
+            if (usingProfileAverage && estimatedStart != null) {
+                return estimatedStart.plusMillis(slaResolution.baselineDurationMs());
+            }
+            return TimeUtils.calculateEstimatedEndTime(request.getStartTime(), slaResolution.baselineDurationMs());
         }
+
         if (profile != null && profile.avgDurationMs() > 0 && estimatedStart != null) {
             return estimatedStart.plusMillis(profile.avgDurationMs());
         }
