@@ -8,7 +8,6 @@ import java.util.List;
 /**
  * Raw domain data for run-level performance analysis.
  * All timestamps are UTC Instants — no CET conversion, no formatting.
- * Use {@code /api/v1/analytics/projections/.../performance-card} for pre-formatted views.
  */
 public record RunPerformanceData(
         String calculatorId,

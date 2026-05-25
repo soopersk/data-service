@@ -11,7 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -47,13 +47,13 @@ class SlaMonitoringCacheTest {
     private static final String SLA_RUN_INFO_HASH  = "obs:sla:run_info";
 
     @Mock
-    private RedisTemplate<String, Object> redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @Mock
-    private ZSetOperations<String, Object> zSetOps;
+    private ZSetOperations<String, String> zSetOps;
 
     @Mock
-    private HashOperations<String, Object, Object> hashOps;
+    private HashOperations<String, String, String> hashOps;
 
     private SlaMonitoringCache cache;
 
@@ -168,7 +168,7 @@ class SlaMonitoringCacheTest {
     void getBreachedRuns_nullHashValue_isSkipped() {
         String runKey = "tenant-1:run-orphan:2026-04-10";
 
-        Set<Object> breachedKeys = new LinkedHashSet<>(List.of(runKey));
+        Set<String> breachedKeys = new LinkedHashSet<>(List.of(runKey));
         when(zSetOps.rangeByScore(eq(SLA_DEADLINES_ZSET), eq(0.0), anyDouble()))
                 .thenReturn(breachedKeys);
         // HGET returns null — orphaned entry (run already cleaned up from hash)
@@ -190,7 +190,7 @@ class SlaMonitoringCacheTest {
         );
         String runInfoJson = new ObjectMapper().writeValueAsString(runInfo);
 
-        Set<Object> breachedKeys = new LinkedHashSet<>(List.of(runKey));
+        Set<String> breachedKeys = new LinkedHashSet<>(List.of(runKey));
         when(zSetOps.rangeByScore(eq(SLA_DEADLINES_ZSET), eq(0.0), anyDouble()))
                 .thenReturn(breachedKeys);
         when(hashOps.get(eq(SLA_RUN_INFO_HASH), eq(runKey))).thenReturn(runInfoJson);

@@ -132,7 +132,7 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         List<CalculatorProfile> profiles = repository.findAllProfiles("DAILY", 3);
 
         assertThat(profiles).hasSize(2);
-        assertThat(profiles).extracting(CalculatorProfile::calculatorId)
+        assertThat(profiles).extracting(CalculatorProfile::calculatorName)
                 .containsExactlyInAnyOrder("calc-A", "calc-B");
     }
 

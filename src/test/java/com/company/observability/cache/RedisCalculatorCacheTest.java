@@ -4,6 +4,8 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.util.TestFixtures;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -12,8 +14,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.SetOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.ZSetOperations;
 
@@ -45,24 +47,33 @@ import static org.mockito.Mockito.when;
 class RedisCalculatorCacheTest {
 
     @Mock
-    private RedisTemplate<String, Object> redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @Mock
-    private ZSetOperations<String, Object> zSetOps;
+    private ZSetOperations<String, String> zSetOps;
 
     @Mock
-    private SetOperations<String, Object> setOps;
+    private SetOperations<String, String> setOps;
 
     @Mock
-    private ValueOperations<String, Object> valueOps;
+    private ValueOperations<String, String> valueOps;
 
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private RedisCalculatorCache cache;
 
     @BeforeEach
     void setUp() {
-        cache = new RedisCalculatorCache(redisTemplate, new SimpleMeterRegistry());
+        cache = new RedisCalculatorCache(redisTemplate, objectMapper, new SimpleMeterRegistry());
         lenient().when(redisTemplate.opsForZSet()).thenReturn(zSetOps);
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOps);
+    }
+
+    private String json(CalculatorRun run) {
+        try {
+            return objectMapper.writeValueAsString(run);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     // ---------------------------------------------------------------
@@ -299,7 +310,7 @@ class RedisCalculatorCacheTest {
         cache.updateRunInCache(run);
 
         String expectedKey = "obs:runs:zset:calc-1:DAILY";
-        verify(zSetOps).remove(eq(expectedKey), eq(run));
-        verify(zSetOps).add(eq(expectedKey), eq(run), anyDouble());
+        verify(zSetOps).remove(eq(expectedKey), eq(json(run)));
+        verify(zSetOps).add(eq(expectedKey), eq(json(run)), anyDouble());
     }
 }

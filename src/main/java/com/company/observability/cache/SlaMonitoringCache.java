@@ -8,7 +8,7 @@ import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -27,7 +27,7 @@ import static com.company.observability.util.ObservabilityConstants.CACHE_REDIS_
 @Slf4j
 public class SlaMonitoringCache {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
@@ -121,7 +121,7 @@ public class SlaMonitoringCache {
         try {
             long now = Instant.now().toEpochMilli();
 
-            Set<Object> breachedRunKeys = redisTemplate.opsForZSet()
+            Set<String> breachedRunKeys = redisTemplate.opsForZSet()
                     .rangeByScore(SLA_DEADLINES_ZSET, 0, now);
 
             if (breachedRunKeys == null || breachedRunKeys.isEmpty()) {
@@ -130,16 +130,12 @@ public class SlaMonitoringCache {
 
             List<Map<String, Object>> breachedRuns = new ArrayList<>();
 
-            for (Object runKeyObj : breachedRunKeys) {
-                String runKey = runKeyObj.toString();
-                Object runInfoJson = redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runKey);
+            for (String runKey : breachedRunKeys) {
+                String runInfoJson = (String) redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runKey);
 
                 if (runInfoJson != null) {
                     @SuppressWarnings("unchecked")
-                    Map<String, Object> runInfo = objectMapper.readValue(
-                            runInfoJson.toString(),
-                            Map.class
-                    );
+                    Map<String, Object> runInfo = objectMapper.readValue(runInfoJson, Map.class);
                     breachedRuns.add(runInfo);
                 }
             }
@@ -165,7 +161,7 @@ public class SlaMonitoringCache {
             long threshold = Instant.now().plus(Duration.ofMinutes(minutesAhead)).toEpochMilli();
 
             // Get runs with SLA deadline between NOW and NOW+N minutes
-            Set<Object> approachingRunKeys = redisTemplate.opsForZSet()
+            Set<String> approachingRunKeys = redisTemplate.opsForZSet()
                     .rangeByScore(SLA_DEADLINES_ZSET, now, threshold);
 
             if (approachingRunKeys == null || approachingRunKeys.isEmpty()) {
@@ -174,16 +170,12 @@ public class SlaMonitoringCache {
 
             List<Map<String, Object>> approachingRuns = new ArrayList<>();
 
-            for (Object runKeyObj : approachingRunKeys) {
-                String runKey = runKeyObj.toString();
-                Object runInfoJson = redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runKey);
+            for (String runKey : approachingRunKeys) {
+                String runInfoJson = (String) redisTemplate.opsForHash().get(SLA_RUN_INFO_HASH, runKey);
 
                 if (runInfoJson != null) {
                     @SuppressWarnings("unchecked")
-                    Map<String, Object> runInfo = objectMapper.readValue(
-                            runInfoJson.toString(),
-                            Map.class
-                    );
+                    Map<String, Object> runInfo = objectMapper.readValue(runInfoJson, Map.class);
                     approachingRuns.add(runInfo);
                 }
             }
@@ -218,13 +210,13 @@ public class SlaMonitoringCache {
     public Optional<Instant> getNextSlaDeadline() {
         try {
             // Get the run with the earliest (smallest score) SLA deadline
-            Set<Object> nextRun = redisTemplate.opsForZSet().range(SLA_DEADLINES_ZSET, 0, 0);
+            Set<String> nextRun = redisTemplate.opsForZSet().range(SLA_DEADLINES_ZSET, 0, 0);
 
             if (nextRun == null || nextRun.isEmpty()) {
                 return Optional.empty();
             }
 
-            String runId = nextRun.iterator().next().toString();
+            String runId = nextRun.iterator().next();
             Double score = redisTemplate.opsForZSet().score(SLA_DEADLINES_ZSET, runId);
 
             if (score != null) {

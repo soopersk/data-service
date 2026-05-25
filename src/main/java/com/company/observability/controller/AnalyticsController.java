@@ -188,8 +188,7 @@ public class AnalyticsController {
     @Operation(
             summary = "Run-level performance data",
             description = "Returns raw run-level performance data with SLA status classification. " +
-                    "All timestamps are UTC Instants. For pre-formatted CET times and chart " +
-                    "coordinates, use GET /api/v1/analytics/projections/calculators/{calculatorId}/performance-card."
+                    "All timestamps are UTC Instants."
     )
     public ResponseEntity<RunPerformanceData> getRunPerformanceData(
             @PathVariable String calculatorId,

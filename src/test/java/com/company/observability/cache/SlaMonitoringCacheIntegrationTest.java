@@ -15,8 +15,9 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
@@ -57,13 +58,18 @@ class SlaMonitoringCacheIntegrationTest extends RedisIntegrationTestBase {
         ObjectMapper objectMapper() {
             return new ObjectMapper();
         }
+
+        @Bean
+        StringRedisTemplate stringRedisTemplate(RedisConnectionFactory connectionFactory) {
+            return new StringRedisTemplate(connectionFactory);
+        }
     }
 
     @Autowired
     private SlaMonitoringCache cache;
 
     @Autowired
-    private RedisTemplate<String, Object> redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @BeforeEach
     void setUp() {

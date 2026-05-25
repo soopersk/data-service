@@ -6,6 +6,8 @@ import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
 import com.company.observability.util.TestFixtures;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,8 +19,9 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Instant;
 import java.util.List;
@@ -59,13 +62,23 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         MeterRegistry meterRegistry() {
             return new SimpleMeterRegistry();
         }
+
+        @Bean
+        StringRedisTemplate stringRedisTemplate(RedisConnectionFactory connectionFactory) {
+            return new StringRedisTemplate(connectionFactory);
+        }
+
+        @Bean
+        ObjectMapper objectMapper() {
+            return new ObjectMapper().registerModule(new JavaTimeModule());
+        }
     }
 
     @Autowired
     private RedisCalculatorCache cache;
 
     @Autowired
-    private RedisTemplate<String, Object> redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @BeforeEach
     void flushAll() {
@@ -235,6 +248,38 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
 
         assertThat(hits).containsKey("calc-1");
         assertThat(hits).doesNotContainKey("calc-missing");
+    }
+
+    // ---------------------------------------------------------------
+    // Status hash — populated history round-trip (proves the @class fix)
+    // ---------------------------------------------------------------
+
+    @Test
+    void statusResponseHash_populatedHistory_roundTrip() {
+        RunStatusInfo current = new RunStatusInfo(
+                "run-current", "SUCCESS",
+                Instant.parse("2026-04-10T05:00:00Z"),
+                Instant.parse("2026-04-10T05:10:00Z"),
+                null, null, null, 600_000L, "10m", false, null);
+        RunStatusInfo historical = new RunStatusInfo(
+                "run-prev", "SUCCESS",
+                Instant.parse("2026-04-09T05:00:00Z"),
+                Instant.parse("2026-04-09T05:08:00Z"),
+                null, null, null, 480_000L, "8m", false, null);
+
+        CalculatorStatusResponse response = new CalculatorStatusResponse(
+                "Calculator calc-hist", Instant.now(), current, List.of(historical));
+
+        cache.cacheStatusResponse("calc-hist", Frequency.DAILY, 5, response);
+
+        Optional<CalculatorStatusResponse> hit =
+                cache.getStatusResponse("calc-hist", Frequency.DAILY, 5);
+
+        assertThat(hit).isPresent();
+        assertThat(hit.get().calculatorName()).isEqualTo("Calculator calc-hist");
+        assertThat(hit.get().history()).hasSize(1);
+        assertThat(hit.get().history().get(0).runId()).isEqualTo("run-prev");
+        assertThat(hit.get().current().runId()).isEqualTo("run-current");
     }
 
     // ---------------------------------------------------------------

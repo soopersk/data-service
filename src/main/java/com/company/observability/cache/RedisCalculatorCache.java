@@ -4,12 +4,13 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.response.CalculatorStatusResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisCallback;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.stereotype.Service;
 
@@ -27,7 +28,8 @@ import static com.company.observability.util.ObservabilityConstants.*;
 @Slf4j
 public class RedisCalculatorCache {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
     // Cache key prefixes
@@ -59,7 +61,7 @@ public class RedisCalculatorCache {
             String key = buildRecentRunsKey(run.getCalculatorId(), frequency);
 
             // Add to sorted set with timestamp as score
-            redisTemplate.opsForZSet().add(key, run, run.getCreatedAt().toEpochMilli());
+            redisTemplate.opsForZSet().add(key, objectMapper.writeValueAsString(run), run.getCreatedAt().toEpochMilli());
 
             // Keep only last 100 runs per calculator per frequency
             redisTemplate.opsForZSet().removeRange(key, 0, -101);
@@ -106,10 +108,10 @@ public class RedisCalculatorCache {
             String key = buildRecentRunsKey(run.getCalculatorId(), frequency);
 
             // Remove old version by value (safer than score-based removal)
-            redisTemplate.opsForZSet().remove(key, run);
+            redisTemplate.opsForZSet().remove(key, objectMapper.writeValueAsString(run));
 
             // Add updated version
-            redisTemplate.opsForZSet().add(key, run, run.getCreatedAt().toEpochMilli());
+            redisTemplate.opsForZSet().add(key, objectMapper.writeValueAsString(run), run.getCreatedAt().toEpochMilli());
 
             log.debug("event=cache.write outcome=success action=update runId={}", run.getRunId());
 
@@ -150,7 +152,7 @@ public class RedisCalculatorCache {
         Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
-            Set<Object> runs = redisTemplate.opsForZSet().reverseRange(key, 0, limit - 1);
+            Set<String> runs = redisTemplate.opsForZSet().reverseRange(key, 0, limit - 1);
 
             if (runs == null || runs.isEmpty()) {
                 sample.stop(Timer.builder(CACHE_REDIS_DURATION)
@@ -161,10 +163,8 @@ public class RedisCalculatorCache {
             }
 
             List<CalculatorRun> result = new ArrayList<>();
-            for (Object obj : runs) {
-                if (obj instanceof CalculatorRun) {
-                    result.add((CalculatorRun) obj);
-                }
+            for (String json : runs) {
+                result.add(objectMapper.readValue(json, CalculatorRun.class));
             }
 
             sample.stop(Timer.builder(CACHE_REDIS_DURATION)
@@ -203,7 +203,7 @@ public class RedisCalculatorCache {
                     ? Duration.ofSeconds(30)
                     : Duration.ofSeconds(60);
 
-            redisTemplate.opsForHash().put(hashKey, field, response);
+            redisTemplate.opsForHash().put(hashKey, field, objectMapper.writeValueAsString(response));
             redisTemplate.expire(hashKey, ttl);
 
             sample.stop(Timer.builder(CACHE_REDIS_DURATION)
@@ -231,16 +231,17 @@ public class RedisCalculatorCache {
         Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
-            Object cached = redisTemplate.opsForHash().get(hashKey, field);
+            String json = (String) redisTemplate.opsForHash().get(hashKey, field);
 
-            if (cached instanceof CalculatorStatusResponse) {
+            if (json != null) {
+                CalculatorStatusResponse cached = objectMapper.readValue(json, CalculatorStatusResponse.class);
                 sample.stop(Timer.builder(CACHE_REDIS_DURATION)
                         .tag("operation", "read")
                         .tag("tier", "hash")
                         .register(meterRegistry));
                 log.debug("event=cache.read outcome=hit calculatorId={} frequency={} historyLimit={}",
                         calculatorId, frequency, historyLimit);
-                return Optional.of((CalculatorStatusResponse) cached);
+                return Optional.of(cached);
             }
 
             sample.stop(Timer.builder(CACHE_REDIS_DURATION)
@@ -319,8 +320,8 @@ public class RedisCalculatorCache {
         try {
             RedisSerializer<String> keySerializer =
                     (RedisSerializer<String>) redisTemplate.getKeySerializer();
-            RedisSerializer<Object> hashValueSerializer =
-                    (RedisSerializer<Object>) redisTemplate.getHashValueSerializer();
+            RedisSerializer<String> hashValueSerializer =
+                    (RedisSerializer<String>) redisTemplate.getHashValueSerializer();
             RedisSerializer<String> hashKeySerializer =
                     (RedisSerializer<String>) redisTemplate.getHashKeySerializer();
 
@@ -339,8 +340,9 @@ public class RedisCalculatorCache {
             if (pipelined != null) {
                 for (int i = 0; i < calculatorIds.size(); i++) {
                     Object cached = pipelined.get(i);
-                    if (cached instanceof CalculatorStatusResponse) {
-                        results.put(calculatorIds.get(i), (CalculatorStatusResponse) cached);
+                    if (cached instanceof String json) {
+                        results.put(calculatorIds.get(i),
+                                objectMapper.readValue(json, CalculatorStatusResponse.class));
                     }
                 }
             }
@@ -375,8 +377,8 @@ public class RedisCalculatorCache {
             RedisSerializer<String> keySerializer =
                     (RedisSerializer<String>) redisTemplate.getKeySerializer();
 
-            RedisSerializer<Object> hashValueSerializer =
-                    (RedisSerializer<Object>) redisTemplate.getHashValueSerializer();
+            RedisSerializer<String> hashValueSerializer =
+                    (RedisSerializer<String>) redisTemplate.getHashValueSerializer();
             RedisSerializer<String> hashKeySerializer =
                     (RedisSerializer<String>) redisTemplate.getHashKeySerializer();
 
@@ -393,9 +395,18 @@ public class RedisCalculatorCache {
                             ? Duration.ofSeconds(30)
                             : Duration.ofSeconds(60);
 
+                    String responseJson;
+                    try {
+                        responseJson = objectMapper.writeValueAsString(response);
+                    } catch (Exception e) {
+                        log.warn("event=cache.write outcome=failure operation=batch calcId={} error={}",
+                                calcId, e.getMessage());
+                        return;
+                    }
+
                     byte[] keyBytes = keySerializer.serialize(hashKey);
                     byte[] fieldBytes = hashKeySerializer.serialize(field);
-                    byte[] valueBytes = hashValueSerializer.serialize(response);
+                    byte[] valueBytes = hashValueSerializer.serialize(responseJson);
 
                     if (keyBytes != null && fieldBytes != null && valueBytes != null) {
                         connection.hashCommands().hSet(keyBytes, fieldBytes, valueBytes);
@@ -458,18 +469,13 @@ public class RedisCalculatorCache {
 
     public Set<String> getRunningCalculators() {
         try {
-            Set<Object> members = redisTemplate.opsForSet().members(RUNNING_SET);
+            Set<String> members = redisTemplate.opsForSet().members(RUNNING_SET);
 
             if (members == null) {
                 return Collections.emptySet();
             }
 
-            Set<String> result = new HashSet<>();
-            for (Object member : members) {
-                result.add(member.toString());
-            }
-
-            return result;
+            return new HashSet<>(members);
 
         } catch (Exception e) {
             log.warn("event=cache.read outcome=failure tier=running_set error={}", e.getMessage());

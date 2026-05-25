@@ -22,7 +22,7 @@ import static com.company.observability.util.ObservabilityConstants.*;
  *
  * <p>Key: {@code obs:state:{calculatorName}:{reportingDate}:{frequency}:{runNumber|all}}
  *
- * <p>TTL is state-aware (matches DashboardCacheService tiers):
+ * <p>TTL is state-aware:
  * <ul>
  *   <li>any RUNNING → 30 s</li>
  *   <li>empty / all NOT_STARTED → 60 s</li>
@@ -108,7 +108,7 @@ public class CalculatorStateCacheService {
     // ── TTL selection ─────────────────────────────────────────────────────────
 
     /**
-     * State-aware TTL mirroring DashboardCacheService tiers but operating on RunEntry lists.
+     * State-aware TTL selection based on the run states in the entry list.
      */
     Duration determineTtl(CalculatorEntry entry) {
         List<RunEntry> runs = entry.runs();

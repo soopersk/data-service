@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
@@ -28,10 +28,11 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class CalculatorProfileServiceTest {
 
-    @Mock private RedisTemplate<String, Object> redisTemplate;
-    @Mock private ValueOperations<String, Object> valueOps;
+    @Mock private StringRedisTemplate redisTemplate;
+    @Mock private ValueOperations<String, String> valueOps;
     @Mock private DailyAggregateRepository dailyAggregateRepository;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private CalculatorProfileService service;
 
     private static final String KEY = "obs:profile:calc-1:DAILY";
@@ -41,14 +42,22 @@ class CalculatorProfileServiceTest {
     @BeforeEach
     void setUp() {
         service = new CalculatorProfileService(
-                redisTemplate, new ObjectMapper(), dailyAggregateRepository,
+                redisTemplate, objectMapper, dailyAggregateRepository,
                 new DurationBasedSlaProperties(), new AggregationProperties(), new SimpleMeterRegistry());
+    }
+
+    private String json(CalculatorProfile p) {
+        try {
+            return objectMapper.writeValueAsString(p);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Test
     void cacheHit_returnsCachedProfile_withoutDbCall() {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get(KEY)).thenReturn(profile);
+        when(valueOps.get(KEY)).thenReturn(json(profile));
 
         CalculatorProfile result = service.getProfile("calc-1", Frequency.DAILY);
 
@@ -66,7 +75,7 @@ class CalculatorProfileServiceTest {
 
         assertThat(result.avgDurationMs()).isEqualTo(600_000L);
         // non-empty profile → long TTL (26h default)
-        verify(valueOps).set(eq(KEY), eq(profile), eq(Duration.ofHours(26)));
+        verify(valueOps).set(eq(KEY), eq(json(profile)), eq(Duration.ofHours(26)));
     }
 
     @Test
@@ -78,7 +87,7 @@ class CalculatorProfileServiceTest {
 
         service.getProfile("calc-1", Frequency.DAILY);
 
-        verify(valueOps).set(eq(KEY), eq(empty), eq(Duration.ofMinutes(60)));
+        verify(valueOps).set(eq(KEY), eq(json(empty)), eq(Duration.ofMinutes(60)));
     }
 
     @Test
@@ -98,6 +107,6 @@ class CalculatorProfileServiceTest {
 
         service.warm(profile);
 
-        verify(valueOps).set(eq(KEY), eq(profile), any(Duration.class));
+        verify(valueOps).set(eq(KEY), eq(json(profile)), any(Duration.class));
     }
 }

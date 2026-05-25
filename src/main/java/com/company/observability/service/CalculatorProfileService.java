@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -29,7 +29,7 @@ import java.time.Duration;
 @Slf4j
 public class CalculatorProfileService {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final DailyAggregateRepository dailyAggregateRepository;
     private final DurationBasedSlaProperties slaProperties;
@@ -63,9 +63,9 @@ public class CalculatorProfileService {
 
     private CalculatorProfile readFromCache(String key) {
         try {
-            Object cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
-                return objectMapper.convertValue(cached, CalculatorProfile.class);
+            String json = redisTemplate.opsForValue().get(key);
+            if (json != null) {
+                return objectMapper.readValue(json, CalculatorProfile.class);
             }
         } catch (Exception e) {
             log.warn("event=profile.cache.read outcome=failure key={} error={}", key, e.getMessage());
@@ -79,7 +79,7 @@ public class CalculatorProfileService {
                 ? Duration.ofHours(aggregationProperties.getProfileCacheTtlHours())
                 : Duration.ofMinutes(aggregationProperties.getEmptyProfileCacheTtlMinutes());
         try {
-            redisTemplate.opsForValue().set(key, profile, ttl);
+            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(profile), ttl);
         } catch (Exception e) {
             log.warn("event=profile.cache.write outcome=failure key={} error={}", key, e.getMessage());
         }
