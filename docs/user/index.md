@@ -26,8 +26,9 @@ This guide covers everything you need to integrate with and operate the Observab
 
 4. [Ingestion API](ingestion-api.md) — `POST /runs/start` and `POST /runs/{runId}/complete`
 5. [Query API](query-api.md) — Single-calculator status and batch status queries
-6. [Analytics API](analytics-api.md) — Runtime stats, SLA summaries, trend data, performance card
-7. [SLA Monitoring](sla-monitoring.md) — Understanding SLA evaluation, severity levels, and breach events
+6. [Consumer Query API](consumer-api.md) — Dashboard run state (`/batch/runs`) and raw execution history (`/executions`) for external teams
+7. [Analytics API](analytics-api.md) — Runtime stats, SLA summaries, trend data, performance card
+8. [SLA Monitoring](sla-monitoring.md) — Understanding SLA evaluation, severity levels, and breach events
 
 ---
 

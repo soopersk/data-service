@@ -221,6 +221,7 @@ X-Tenant-Id: <tenant>
           "estimatedEndTime": "2026-05-19T14:50:00Z",
           "sla": "2026-05-19T15:00:00Z",
           "durationMs": 6180000,
+          "expectedDurationMs": 5400000,
           "slaBreached": false,
           "isRerun": false
         },
@@ -228,23 +229,31 @@ X-Tenant-Id: <tenant>
           "runId": "run-ldnl-002",
           "region": "LDNL",
           "status": "FAILED",
-          "slaStatus": "FAILED",
+          "slaStatus": "VERY_LATE",
+          "startTime": "2026-05-19T13:02:00Z",
+          "endTime": "2026-05-19T15:18:00Z",
           "sla": "2026-05-19T15:00:00Z",
+          "durationMs": 8160000,
+          "expectedDurationMs": 5400000,
           "slaBreached": true,
           "slaBreachReason": "Run status: FAILED",
           "isRerun": true
         }
       ]
     },
-    "portfoliocalc": { "calculatorName": "portfoliocalc", "runs": [] }
+    "newcalc": { "calculatorName": "newcalc", "runs": [] }
   }
 }
 ```
 
 #### Notes
 
-- The `calculators` map key is the `calculator_name` you sent in `keys`.
-- `runs` is an empty list when no run exists for that calculator on the given date (the key is still present).
+- The `calculators` map key is the `calculator_name` you sent in `keys`. Every requested key is present in the response.
+- `status` (lifecycle: `RUNNING`/`SUCCESS`/`FAILED`/`TIMEOUT`/`CANCELLED`) and `slaStatus` are **independent**. `slaStatus` is always one of `ON_TIME` / `LATE` / `VERY_LATE` — never a lifecycle value. A `FAILED` run that breached its deadline reports `slaStatus: "VERY_LATE"` (or `"LATE"`).
+- **`runs` has three states:**
+  - **Actual runs present** → one entry per dimension with `runId` and `status` populated.
+  - **No run on the date but the calculator has history/profile** → a single **synthetic NOT_STARTED entry** with **no `runId` and no `status`**, `slaStatus: "ON_TIME"`, and `estimatedStartTime` / `estimatedEndTime` / `expectedDurationMs` projected from history. Detect "not started" by the absence of `runId`/`status`.
+  - **Brand-new calculator with no history** → `runs` is an empty list `[]`.
 - Each run entry exposes one of `region` or `runType` (regional calculators use `region`; typed calculators use `runType`) — never both.
 - `isRerun: true` indicates that dimensional run was re-triggered (the UI renders the dimension label with a `*` suffix and a failed icon).
 - Null fields on `RunEntry` are omitted from JSON.

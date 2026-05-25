@@ -232,6 +232,7 @@ Dimensional run state for a set of calculators on a specific reporting date. Pow
           "estimatedEndTime": "2026-05-19T14:50:00Z",
           "sla": "2026-05-19T15:00:00Z",
           "durationMs": 6180000,
+          "expectedDurationMs": 5400000,
           "slaBreached": false,
           "isRerun": false
         },
@@ -239,25 +240,86 @@ Dimensional run state for a set of calculators on a specific reporting date. Pow
           "runId": "run-ldnl-002",
           "region": "LDNL",
           "status": "FAILED",
-          "slaStatus": "FAILED",
+          "slaStatus": "VERY_LATE",
+          "startTime": "2026-05-19T13:02:00Z",
+          "endTime": "2026-05-19T15:18:00Z",
+          "estimatedStartTime": "2026-05-19T13:00:00Z",
+          "estimatedEndTime": "2026-05-19T14:50:00Z",
           "sla": "2026-05-19T15:00:00Z",
+          "durationMs": 8160000,
+          "expectedDurationMs": 5400000,
           "slaBreached": true,
           "slaBreachReason": "Run status: FAILED",
           "isRerun": true
         }
       ]
     },
-    "portfoliocalc": { "calculatorName": "portfoliocalc", "runs": [] }
+    "modelledexposurecalc": {
+      "calculatorName": "modelledexposurecalc",
+      "runs": [
+        {
+          "runId": "run-otc-001",
+          "runType": "OTC",
+          "status": "SUCCESS",
+          "slaStatus": "ON_TIME",
+          "startTime": "2026-05-19T17:03:00Z",
+          "endTime": "2026-05-19T17:49:00Z",
+          "estimatedStartTime": "2026-05-19T17:02:00Z",
+          "estimatedEndTime": "2026-05-19T17:58:00Z",
+          "sla": "2026-05-19T18:30:00Z",
+          "durationMs": 2760000,
+          "expectedDurationMs": 3360000,
+          "slaBreached": false,
+          "isRerun": false
+        },
+        {
+          "runId": "run-sft-001",
+          "runType": "SFT",
+          "status": "RUNNING",
+          "slaStatus": "ON_TIME",
+          "startTime": "2026-05-19T17:05:00Z",
+          "estimatedStartTime": "2026-05-19T17:02:00Z",
+          "estimatedEndTime": "2026-05-19T17:58:00Z",
+          "sla": "2026-05-19T18:30:00Z",
+          "expectedDurationMs": 3360000,
+          "slaBreached": false,
+          "isRerun": false
+        }
+      ]
+    },
+    "portfoliocalc": {
+      "calculatorName": "portfoliocalc",
+      "runs": [
+        {
+          "slaStatus": "ON_TIME",
+          "estimatedStartTime": "2026-05-19T16:02:00Z",
+          "estimatedEndTime": "2026-05-19T17:05:00Z",
+          "expectedDurationMs": 3780000,
+          "slaBreached": false,
+          "isRerun": false
+        }
+      ]
+    },
+    "newcalc": { "calculatorName": "newcalc", "runs": [] }
   }
 }
 ```
 
+The sample shows every entry shape a consumer must handle: **regional actual runs** (`capitalcalc` — `WMAP` completed on-time, `LDNL` failed and breached; note `status` and `slaStatus` are independent), **typed actual runs** (`modelledexposurecalc` — `OTC` completed, `SFT` still RUNNING with no `endTime`/`durationMs`), a **synthetic NOT_STARTED entry** (`portfoliocalc` — no `runId`/`status`, only estimates), and a **brand-new calculator with no history** (`newcalc` — empty `runs`).
+
 **Notes:**
 - The response `calculators` map is keyed by `calculator_name`. `CalculatorEntry` exposes only `calculatorName` — there is no `calculatorId` field.
-- `runs` is an **empty list** when no run exists for that calculator on the given date.
+- Every requested key is always present in `calculators` (never omitted), so consumers can iterate the request list directly.
+- **`runs` content per calculator:**
+  - **Has actual runs** → one `RunEntry` per dimension (`region` or `runType`) with `runId` + `status` populated.
+  - **No run on the date but has history/profile** → a single **synthetic NOT_STARTED entry**: `runId` and `status` are absent, `slaStatus` is `ON_TIME`, and `estimatedStartTime` / `estimatedEndTime` / `expectedDurationMs` are projected from the rolling profile (or the most recent run's stored estimates). **Detect "not started" by the absence of `runId`/`status`, not by an empty list.**
+  - **Brand-new calculator with zero history** → `runs` is an empty list `[]`.
+- `status` (run lifecycle: `RUNNING`/`SUCCESS`/`FAILED`/`TIMEOUT`/`CANCELLED`) and `slaStatus` (SLA classification) are **independent**. `slaStatus` is always one of `ON_TIME` / `LATE` / `VERY_LATE` — never a lifecycle value like `FAILED`. A `FAILED` run that breached its deadline reports `slaStatus: "LATE"` or `"VERY_LATE"`.
+- `slaStatus` is duration-based and consistent with `slaBreached`: `ON_TIME` only when neither flagged breached nor past the derived deadline; `LATE` within one band-gap (default 15 min) past `sla`, `VERY_LATE` beyond. A `RUNNING` run already flagged `slaBreached=true` reports `LATE`/`VERY_LATE`, not `ON_TIME`.
 - `region` and `runType` are mutually exclusive per calculator (one or neither, never both).
 - `isRerun: true` means a re-trigger occurred for that specific dimensional run; UI typically renders the dimension label with a `*` suffix.
 - `estimatedStartTime` / `estimatedEndTime` / `sla` are the run's stored values, set at start by precedence **request → cached profile (avg start / avg duration) → computed**. `sla` is the duration-derived deadline, not an upstream wall-clock time.
+- `expectedDurationMs` is the originally-configured duration baseline (immutable after first INSERT); compare against actual `durationMs`.
 - Null run-entry fields are omitted from JSON (`@JsonInclude(NON_NULL)`).
 
 ---
@@ -344,7 +406,7 @@ Raw run-level performance data.
       "endTime": "2026-01-24T11:15:00Z",
       "durationMs": 7980000,
       "status": "SUCCESS",
-      "slaStatus": "SLA_MET",
+      "slaStatus": "ON_TIME",
       "slaBreached": false
     },
     {
@@ -354,7 +416,7 @@ Raw run-level performance data.
       "endTime": null,
       "durationMs": null,
       "status": "RUNNING",
-      "slaStatus": "RUNNING",
+      "slaStatus": "ON_TIME",
       "slaBreached": false
     }
   ],
@@ -363,7 +425,7 @@ Raw run-level performance data.
 }
 ```
 
-Run-level SLA status values: `SLA_MET`, `LATE`, `VERY_LATE`, `RUNNING`.
+Run-level SLA status values: `ON_TIME`, `LATE`, `VERY_LATE`. A RUNNING run (or any not-yet-breached run) reports `ON_TIME` — `slaStatus` is never a lifecycle value like `RUNNING`.
 
 Counters: `totalRuns` is terminal/evaluated only; `runningRuns` is tracked separately.
 
@@ -381,7 +443,92 @@ Raw run-by-run execution history. Distinct from `/run-performance` in two ways:
 
 **Response `200 OK`**, `Cache-Control: max-age=60, private`:
 
-Same shape as `/run-performance` (`RunPerformanceData`). The envelope's `calculatorId` and `calculatorName` fields both carry the readable name — no UUID leak, because the lookup is by name. Each `RunDataPoint` includes `expectedDurationMs` (immutable, set at first INSERT) alongside actual `durationMs` for variance comparison, plus its own `estimatedStartTime` / `slaTime`.
+Shape is `RunPerformanceData` (the same record `/run-performance` returns). The envelope's `calculatorId` and `calculatorName` fields both carry the readable name — no UUID leak, because the lookup is by name.
+
+```json
+{
+  "calculatorId": "portfoliocalc",
+  "calculatorName": "portfoliocalc",
+  "frequency": "DAILY",
+  "periodDays": 30,
+  "meanDurationMs": 285000,
+  "totalRuns": 29,
+  "runningRuns": 1,
+  "slaMetCount": 24,
+  "lateCount": 3,
+  "veryLateCount": 2,
+  "runs": [
+    {
+      "runId": "run-2026-05-13-001",
+      "reportingDate": "2026-05-13",
+      "startTime": "2026-05-13T04:02:15Z",
+      "endTime": "2026-05-13T04:07:30Z",
+      "durationMs": 315000,
+      "status": "SUCCESS",
+      "slaBreached": false,
+      "slaStatus": "ON_TIME",
+      "subRunIds": null,
+      "estimatedStartTime": "2026-05-13T04:00:00Z",
+      "slaTime": "2026-05-13T06:30:00Z",
+      "runNumber": "1",
+      "expectedDurationMs": 300000
+    },
+    {
+      "runId": "run-2026-05-14-001",
+      "reportingDate": "2026-05-14",
+      "startTime": "2026-05-14T04:01:00Z",
+      "endTime": null,
+      "durationMs": null,
+      "status": "RUNNING",
+      "slaBreached": false,
+      "slaStatus": "ON_TIME",
+      "subRunIds": null,
+      "estimatedStartTime": "2026-05-14T04:00:00Z",
+      "slaTime": "2026-05-14T06:30:00Z",
+      "runNumber": "1",
+      "expectedDurationMs": 300000
+    }
+  ],
+  "estimatedStartTime": "2026-05-13T04:00:00Z",
+  "slaTime": "2026-05-13T06:30:00Z"
+}
+```
+
+**Envelope fields:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `calculatorId` / `calculatorName` | String | Both carry the readable `calculator_name` |
+| `frequency` | String | Echo of the request |
+| `periodDays` | int | Echo of `days` |
+| `meanDurationMs` | long | Mean over **completed** runs only (duration > 0); `0` when none |
+| `totalRuns` | int | Terminal/evaluated runs only (excludes RUNNING) |
+| `runningRuns` | int | Currently-running runs |
+| `slaMetCount` / `lateCount` / `veryLateCount` | int | Per-`slaStatus` tallies over terminal runs |
+| `runs` | array | One entry per physical row (see below) |
+| `estimatedStartTime` / `slaTime` | Instant | Chart reference lines — see note below |
+
+**Per-run fields (`RunDataPoint`):**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `runId` | String | Physical run id |
+| `reportingDate` | Date | `YYYY-MM-DD` |
+| `startTime` | Instant | UTC |
+| `endTime` | Instant | `null` while RUNNING |
+| `durationMs` | Long | `null` while RUNNING |
+| `status` | String | `RUNNING`/`SUCCESS`/`FAILED`/`TIMEOUT`/`CANCELLED` |
+| `slaBreached` | Boolean | Persisted breach flag |
+| `slaStatus` | String | `ON_TIME` / `LATE` / `VERY_LATE` (never a lifecycle value) |
+| `subRunIds` | array | Always `null` on this endpoint (no split-grouping) |
+| `estimatedStartTime` | Instant | The run's own stored estimate |
+| `slaTime` | Instant | The run's own derived deadline |
+| `runNumber` | String | Run bucket (`1` / `2`) |
+| `expectedDurationMs` | Long | Configured baseline, immutable; compare to `durationMs` |
+
+> Unlike `/batch/runs`, `RunPerformanceData` is **not** `@JsonInclude(NON_NULL)` — `null` fields (e.g. `endTime`, `durationMs`, `subRunIds` of a RUNNING run) are present in the JSON as `null`.
+
+**Empty result:** when no run matches the window, the endpoint returns `200 OK` (not `404`) with `calculatorName: null`, `runs: []`, and all counters `0`.
 
 **Envelope reference lines (`estimatedStartTime`, `slaTime`):** the two top-level fields are chart reference lines sourced from the calculator's cached **profile** — the typical (historical-average) start and a typical buffered deadline (`avgDuration × (1 + thresholdPercent) + lateBand`) — so they stay stable across the window. When the calculator has fewer than `min-sample-size` runs, they fall back to the most recent run's stored values. Per-run rows are live from `calculator_runs`; the envelope reference lines come from the profile cache (warmed nightly).
 
