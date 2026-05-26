@@ -6,7 +6,8 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.BreachType;
-import com.company.observability.domain.enums.Severity;
+import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.logging.LifecycleEvent;
 import com.company.observability.logging.LifecycleLogger;
@@ -62,14 +63,13 @@ public class AlertHandlerService {
                 .calculatorName(run.getCalculatorName())
                 .tenantId(run.getTenantId())
                 .reportingDate(run.getReportingDate())
-                .breachType(BreachType.fromString(determineBreachType(result.getReason())))
+                .breachType(determineBreachType(run))
                 .expectedValue(calculateExpectedValue(run))
                 .expectedUnit(run.getSlaTime() != null ? "epoch_seconds"
                         : run.getExpectedDurationMs() != null ? "duration_ms" : null)
                 .actualValue(calculateActualValue(run))
                 .actualUnit(run.getEndTime() != null && run.getSlaTime() != null ? "epoch_seconds"
                         : run.getDurationMs() != null ? "duration_ms" : null)
-                .severity(Severity.fromString(result.getSeverity()))
                 .alerted(false)
                 .alertStatus(AlertStatus.PENDING)
                 .retryCount(0)
@@ -82,7 +82,7 @@ public class AlertHandlerService {
             savedBreach = breachRepository.save(breach);
 
             meterRegistry.counter(SLA_BREACH_CREATED,
-                    "severity", result.getSeverity(),
+                    "band", result.getBand() != null ? result.getBand().name() : "NONE",
                     "frequency", run.getFrequency().name()
             ).increment();
 
@@ -108,7 +108,7 @@ public class AlertHandlerService {
             breachRepository.update(breach);
 
             meterRegistry.counter(SLA_ALERT_SENT,
-                    "severity", breach.getSeverity().name(),
+                    "band", run.getSlaBand() != null ? run.getSlaBand().name() : "NONE",
                     "frequency", run.getFrequency().name(),
                     "channel", alertSender.channelName()
             ).increment();
@@ -138,14 +138,16 @@ public class AlertHandlerService {
         ).increment();
     }
 
-    private String determineBreachType(String reason) {
-        if (reason == null) return "UNKNOWN";
-        if (reason.contains("Finished") && reason.contains("late")) return "TIME_EXCEEDED";
-        if (reason.contains("Still running")) return "STILL_RUNNING_PAST_SLA";
-        if (reason.contains("Duration") && reason.contains("exceeded")) return "DURATION_EXCEEDED";
-        if (reason.contains("FAILED")) return "FAILED";
-        if (reason.contains("TIMEOUT")) return "TIMEOUT";
-        return "UNKNOWN";
+    private BreachType determineBreachType(CalculatorRun run) {
+        // Failure dimension takes precedence over timing
+        if (run.getStatus() == RunStatus.FAILED) return BreachType.FAILED;
+        if (run.getStatus() == RunStatus.TIMEOUT) return BreachType.TIMEOUT;
+        // Timing dimension
+        SlaBand band = run.getSlaBand();
+        if (band == SlaBand.VERY_LATE || band == SlaBand.LATE) return BreachType.TIME_EXCEEDED;
+        // Still-running live breach (no end time yet) — deadline was crossed
+        if (run.getEndTime() == null) return BreachType.TIME_EXCEEDED;
+        return BreachType.UNKNOWN;
     }
 
     private Long calculateExpectedValue(CalculatorRun run) {

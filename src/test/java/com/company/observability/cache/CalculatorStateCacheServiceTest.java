@@ -55,25 +55,25 @@ class CalculatorStateCacheServiceTest {
 
     @Test
     void determineTtl_anyRunning_returns30s() {
-        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("RUNNING", false)));
+        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("RUNNING", null)));
         assertThat(service.determineTtl(entry)).isEqualTo(TTL_ANY_RUNNING);
     }
 
     @Test
     void determineTtl_slaBreached_returnsTerminalWithFailures() {
-        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("SUCCESS", true)));
+        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("SUCCESS", "VERY_LATE")));
         assertThat(service.determineTtl(entry)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
     }
 
     @Test
     void determineTtl_terminalFailure_returnsTerminalWithFailures() {
-        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("FAILED", false)));
+        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("FAILED", null)));
         assertThat(service.determineTtl(entry)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
     }
 
     @Test
     void determineTtl_terminalClean_returns4h() {
-        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("SUCCESS", false)));
+        CalculatorEntry entry = new CalculatorEntry("calc", List.of(runEntry("SUCCESS", null)));
         assertThat(service.determineTtl(entry)).isEqualTo(TTL_TERMINAL_CLEAN);
     }
 
@@ -81,7 +81,7 @@ class CalculatorStateCacheServiceTest {
 
     @Test
     void putEntries_storesEachWithDynamicTtl() throws Exception {
-        CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", false)));
+        CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", null)));
 
         service.putEntries(DATE, FREQ, null, Map.of("cap", entry));
 
@@ -91,7 +91,7 @@ class CalculatorStateCacheServiceTest {
 
     @Test
     void putEntries_withRunNumber_includesRunNumberInKey() throws Exception {
-        CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", false)));
+        CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", null)));
 
         service.putEntries(DATE, FREQ, "1", Map.of("cap", entry));
 
@@ -131,7 +131,7 @@ class CalculatorStateCacheServiceTest {
 
     @Test
     void putEntries_redisFailure_swallowed() {
-        CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", false)));
+        CalculatorEntry entry = new CalculatorEntry("cap", List.of(runEntry("SUCCESS", null)));
         doThrow(new RuntimeException("Redis down"))
                 .when(valueOps).set(anyString(), any(), any(Duration.class));
 
@@ -141,11 +141,11 @@ class CalculatorStateCacheServiceTest {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private RunEntry runEntry(String status, boolean slaBreached) {
+    private RunEntry runEntry(String status, String slaBand) {
         return RunEntry.builder()
                 .runId("r-1")
                 .status(status)
-                .slaBreached(slaBreached)
+                .slaBand(slaBand)
                 .isRerun(false)
                 .build();
     }

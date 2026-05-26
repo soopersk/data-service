@@ -59,7 +59,7 @@ public final class MdcContextUtil {
         MDC.put("calculatorName", nullSafe(breach.getCalculatorName()));
         MDC.put("tenantId", nullSafe(breach.getTenantId()));
         MDC.put("runId", nullSafe(breach.getRunId()));
-        MDC.put("severity", breach.getSeverity() != null ? breach.getSeverity().name() : "UNKNOWN");
+        MDC.put("breachTypeName", breach.getBreachType() != null ? breach.getBreachType().name() : "UNKNOWN");
         MDC.put("breachType", breach.getBreachType() != null ? breach.getBreachType().name() : "UNKNOWN");
         if (breach.getExpectedValue() != null) {
             MDC.put("expectedValue", String.valueOf(breach.getExpectedValue()));

@@ -100,7 +100,7 @@ public final class RunStatusClassifier {
         Instant deadline = run.getSlaTime();
         Instant ref = run.getEndTime() != null ? run.getEndTime() : now;  // terminal → endTime, in-flight → now
         boolean pastDeadline = deadline != null && ref != null && ref.isAfter(deadline);
-        boolean breached = Boolean.TRUE.equals(run.getSlaBreached());
+        boolean breached = run.getSlaBand() != null && run.getSlaBand().isBreached();
         if (!breached && !pastDeadline) return ON_TIME;
         if (deadline == null || ref == null) return LATE;   // breached without measurable overdue (fast FAILED)
         long overdueMs = ref.toEpochMilli() - deadline.toEpochMilli();

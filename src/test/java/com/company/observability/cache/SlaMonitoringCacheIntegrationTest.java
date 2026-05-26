@@ -192,7 +192,7 @@ class SlaMonitoringCacheIntegrationTest extends RedisIntegrationTestBase {
                 .startTime(TestFixtures.DEFAULT_START)
                 .status(com.company.observability.domain.enums.RunStatus.RUNNING)
                 .slaTime(slaTime)
-                .slaBreached(false)
+                .slaBand(null)
                 .createdAt(TestFixtures.DEFAULT_START)
                 .build();
     }

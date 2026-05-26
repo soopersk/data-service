@@ -5,6 +5,7 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.dto.request.CompleteRunRequest;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.event.RunCompletedEvent;
@@ -122,7 +123,7 @@ class RunIngestionServiceTest {
 
         verify(runRepository).upsert(argThat(run ->
                 derivedDeadline.equals(run.getSlaTime())
-                        && Boolean.FALSE.equals(run.getSlaBreached())));
+                        && run.getSlaBand() == null));
         verify(slaMonitoringCache).registerForSlaMonitoring(any(CalculatorRun.class));
         verify(eventPublisher, never()).publishEvent(any(SlaBreachedEvent.class));
     }
@@ -191,7 +192,7 @@ class RunIngestionServiceTest {
 
         verify(slaMonitoringCache, never()).registerForSlaMonitoring(any(CalculatorRun.class));
         verify(runRepository).upsert(argThat(run -> run.getSlaTime() == null
-                && Boolean.FALSE.equals(run.getSlaBreached())));
+                && run.getSlaBand() == null));
         verify(eventPublisher).publishEvent(any(com.company.observability.event.RunStartedEvent.class));
     }
 
@@ -266,12 +267,12 @@ class RunIngestionServiceTest {
     void completeRun_alreadyBreachedPublishesCompletedEventAndSkipsDuplicateBreachEvent() {
         Instant start = Instant.parse("2026-02-20T10:00:00Z");
         CalculatorRun run = runningRun(start);
-        run.setSlaBreached(true);
+        run.setSlaBand(SlaBand.LATE);
         run.setSlaBreachReason("Start time is after SLA deadline");
 
         when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
         when(slaEvaluationService.evaluateSla(any(CalculatorRun.class)))
-                .thenReturn(new SlaEvaluationResult(true, "Finished 30 minutes late", "HIGH"));
+                .thenReturn(new SlaEvaluationResult(SlaBand.LATE, "Finished 30 minutes late"));
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
@@ -290,12 +291,12 @@ class RunIngestionServiceTest {
     void completeRun_newBreachOnCompletion_persistsBreachAndPublishesBreachEvent() {
         Instant start = Instant.parse("2026-02-20T10:00:00Z");
         CalculatorRun run = runningRun(start);
-        run.setSlaBreached(false);
+        run.setSlaBand(null);
         run.setSlaBreachReason(null);
 
         when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
         when(slaEvaluationService.evaluateSla(any(CalculatorRun.class)))
-                .thenReturn(new SlaEvaluationResult(true, "Finished 30 minutes late", "HIGH"));
+                .thenReturn(new SlaEvaluationResult(SlaBand.LATE, "Finished 30 minutes late"));
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
@@ -307,7 +308,7 @@ class RunIngestionServiceTest {
         service.completeRun("run-1", request, "tenant-1");
 
         verify(runRepository).upsert(argThat(saved ->
-                Boolean.TRUE.equals(saved.getSlaBreached())
+                SlaBand.LATE.equals(saved.getSlaBand())
                         && "Finished 30 minutes late".equals(saved.getSlaBreachReason())));
         verify(eventPublisher).publishEvent(any(SlaBreachedEvent.class));
         verify(eventPublisher, never()).publishEvent(any(RunCompletedEvent.class));
@@ -382,7 +383,7 @@ class RunIngestionServiceTest {
         Instant start = Instant.parse("2026-04-10T05:00:00Z");
         CalculatorRun run = runningRun(start);
         when(runRepository.findById(eq("run-1"), any(LocalDate.class))).thenReturn(Optional.of(run));
-        when(slaEvaluationService.evaluateSla(any())).thenReturn(new SlaEvaluationResult(false, null, "LOW"));
+        when(slaEvaluationService.evaluateSla(any())).thenReturn(new SlaEvaluationResult(SlaBand.ON_TIME, null));
         when(runRepository.upsert(any())).thenAnswer(inv -> inv.getArgument(0));
 
         CompleteRunRequest request = CompleteRunRequest.builder()
@@ -512,7 +513,7 @@ class RunIngestionServiceTest {
                 .startTime(start)
                 .status(RunStatus.RUNNING)
                 .createdAt(start)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
     }
 }

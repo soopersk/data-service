@@ -57,7 +57,7 @@ class RunIngestionControllerTest {
                 .calculatorName("Calculator One")
                 .status(RunStatus.RUNNING)
                 .startTime(START_TIME)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
 
         when(ingestionService.startRun(any(), eq("tenant-a"))).thenReturn(savedRun);
@@ -147,7 +147,7 @@ class RunIngestionControllerTest {
                 .startTime(START_TIME)
                 .endTime(END_TIME)
                 .durationMs(600000L)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
 
         when(ingestionService.completeRun(eq("run-1"), any(), eq("tenant-a")))
@@ -223,7 +223,7 @@ class RunIngestionControllerTest {
                 .calculatorName("Calculator One")
                 .status(RunStatus.RUNNING)
                 .startTime(START_TIME)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
 
         when(ingestionService.startRun(any(), isNull())).thenReturn(savedRun);

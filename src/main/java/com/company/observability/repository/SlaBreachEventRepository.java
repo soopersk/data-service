@@ -3,7 +3,6 @@ package com.company.observability.repository;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.BreachType;
-import com.company.observability.domain.enums.Severity;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +34,7 @@ public class SlaBreachEventRepository {
     private static final String SELECT_COLUMNS = """
             breach_id, run_id, calculator_id, calculator_name, tenant_id,
             reporting_date,
-            breach_type, expected_value, actual_value, severity,
+            breach_type, expected_value, actual_value,
             alerted, alerted_at, alert_status, retry_count, last_error, created_at""";
 
     private static final String SELECT_FROM = "SELECT " + SELECT_COLUMNS + "\nFROM sla_breach_events\n";
@@ -49,8 +48,8 @@ public class SlaBreachEventRepository {
     private static final SlaBreachEventRowMapper ROW_MAPPER = new SlaBreachEventRowMapper();
 
     /**
-     * FIXED: Idempotent save - throws exception if duplicate
-     * Caller must handle DuplicateKeyException
+     * Idempotent save — throws DuplicateKeyException if run_id already has a breach row.
+     * Caller must handle DuplicateKeyException.
      */
     public SlaBreachEvent save(SlaBreachEvent breach) throws DuplicateKeyException {
         if (breach.getCreatedAt() == null) {
@@ -61,12 +60,12 @@ public class SlaBreachEventRepository {
             INSERT INTO sla_breach_events (
                 run_id, calculator_id, calculator_name, tenant_id,
                 reporting_date,
-                breach_type, expected_value, actual_value, severity,
+                breach_type, expected_value, actual_value,
                 alerted, alerted_at, alert_status, retry_count, last_error, created_at
             ) VALUES (
                 :runId, :calculatorId, :calculatorName, :tenantId,
                 :reportingDate,
-                :breachType, :expectedValue, :actualValue, :severity,
+                :breachType, :expectedValue, :actualValue,
                 :alerted, :alertedAt, :alertStatus, :retryCount, :lastError, :createdAt
             )
             """;
@@ -80,7 +79,6 @@ public class SlaBreachEventRepository {
                 .addValue("breachType", breach.getBreachType().name())
                 .addValue("expectedValue", breach.getExpectedValue())
                 .addValue("actualValue", breach.getActualValue())
-                .addValue("severity", breach.getSeverity().name())
                 .addValue("alerted", breach.getAlerted())
                 .addValue("alertedAt", breach.getAlertedAt() != null ? Timestamp.from(breach.getAlertedAt()) : null)
                 .addValue("alertStatus", breach.getAlertStatus().name())
@@ -99,7 +97,7 @@ public class SlaBreachEventRepository {
     }
 
     /**
-     * Find unalerted breaches for batch processing
+     * Find unalerted breaches for batch processing.
      */
     public List<SlaBreachEvent> findUnalertedBreaches(int limit) {
         String sql = SELECT_FROM + """
@@ -113,7 +111,7 @@ public class SlaBreachEventRepository {
     }
 
     /**
-     * Update breach status after alert attempt
+     * Update breach status after alert attempt.
      */
     public void update(SlaBreachEvent breach) {
         String sql = """
@@ -138,16 +136,23 @@ public class SlaBreachEventRepository {
     }
 
     /**
-     * Aggregated breach counts by severity for analytics summary/trends.
+     * Aggregated breach counts by sla_band (from calculator_runs) for analytics summary/trends.
+     * Bands: ON_TIME, LATE, VERY_LATE, plus FAILED for runs with terminal failure status.
      */
-    public Map<String, Integer> countBySeverity(
-            String calculatorId, int days) {
+    public Map<String, Integer> countByBand(String calculatorId, int days) {
         String sql = """
-            SELECT severity, COUNT(*) AS cnt
-            FROM sla_breach_events
-            """ + BASE_WHERE + """
-
-            GROUP BY severity""";
+            SELECT
+                CASE
+                    WHEN cr.status IN ('FAILED','TIMEOUT') THEN 'FAILED'
+                    WHEN cr.sla_band IS NOT NULL THEN cr.sla_band
+                    ELSE 'ON_TIME'
+                END AS band,
+                COUNT(*) AS cnt
+            FROM sla_breach_events sbe
+            JOIN calculator_runs cr ON cr.run_id = sbe.run_id
+            WHERE sbe.calculator_id = :calculatorId
+            AND sbe.created_at >= NOW() - CAST(:days AS INTEGER) * INTERVAL '1 day'
+            GROUP BY 1""";
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
@@ -155,23 +160,18 @@ public class SlaBreachEventRepository {
 
         Map<String, Integer> result = new HashMap<>();
         Timer.Sample sample = Timer.start(meterRegistry);
-        jdbcTemplate.query(sql, params, rs -> {
-            while (rs.next()) {
-                result.put(
-                        rs.getString("severity"),
-                        ((Number) rs.getObject("cnt")).intValue()
-                );
-            }
+        jdbcTemplate.query(sql, params, (RowMapper<Void>) (rs, rowNum) -> {
+            result.put(rs.getString("band"), ((Number) rs.getObject("cnt")).intValue());
+            return null;
         });
-        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "count_by_severity").register(meterRegistry));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "count_by_band").register(meterRegistry));
         return result;
     }
 
     /**
      * Aggregated breach counts by breach_type for analytics summary.
      */
-    public Map<String, Integer> countByType(
-            String calculatorId, int days) {
+    public Map<String, Integer> countByType(String calculatorId, int days) {
         String sql = """
             SELECT COALESCE(breach_type, 'UNKNOWN') AS breach_type, COUNT(*) AS cnt
             FROM sla_breach_events
@@ -184,74 +184,81 @@ public class SlaBreachEventRepository {
                 .addValue("days", days);
 
         Map<String, Integer> result = new HashMap<>();
-        jdbcTemplate.query(sql, params, rs -> {
-            while (rs.next()) {
-                result.put(
-                        rs.getString("breach_type"),
-                        ((Number) rs.getObject("cnt")).intValue()
-                );
-            }
+        jdbcTemplate.query(sql, params, (RowMapper<Void>) (rs, rowNum) -> {
+            result.put(rs.getString("breach_type"), ((Number) rs.getObject("cnt")).intValue());
+            return null;
         });
         return result;
     }
 
     /**
-     * Worst breach severity per CET day (CRITICAL > HIGH > MEDIUM > LOW).
+     * Worst health rank per CET day.
+     * Rank: failure (4) > VERY_LATE (3) > LATE (2) > ON_TIME (1).
+     * Returns the band/status name for the worst-ranked day.
      */
-    public Map<LocalDate, String> findWorstSeverityByDay(
-            String calculatorId, int days) {
+    public Map<LocalDate, String> findWorstDayHealthByDay(String calculatorId, int days) {
         String sql = """
-            SELECT (created_at AT TIME ZONE 'Europe/Amsterdam')::DATE AS day_cet,
+            SELECT (sbe.created_at AT TIME ZONE 'Europe/Amsterdam')::DATE AS day_cet,
                    MAX(
-                       CASE severity
-                           WHEN 'CRITICAL' THEN 4
-                           WHEN 'HIGH' THEN 3
-                           WHEN 'MEDIUM' THEN 2
-                           WHEN 'LOW' THEN 1
-                           ELSE 0
-                       END
+                       GREATEST(
+                           CASE WHEN cr.status IN ('FAILED','TIMEOUT') THEN 4 ELSE 0 END,
+                           CASE cr.sla_band
+                               WHEN 'VERY_LATE' THEN 3
+                               WHEN 'LATE'      THEN 2
+                               WHEN 'ON_TIME'   THEN 1
+                               ELSE 1
+                           END
+                       )
                    ) AS worst_rank
-            FROM sla_breach_events
-            """ + BASE_WHERE + """
-
-            GROUP BY (created_at AT TIME ZONE 'Europe/Amsterdam')::DATE""";
+            FROM sla_breach_events sbe
+            JOIN calculator_runs cr ON cr.run_id = sbe.run_id
+            WHERE sbe.calculator_id = :calculatorId
+            AND sbe.created_at >= NOW() - CAST(:days AS INTEGER) * INTERVAL '1 day'
+            GROUP BY (sbe.created_at AT TIME ZONE 'Europe/Amsterdam')::DATE""";
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
                 .addValue("days", days);
 
         Map<LocalDate, String> result = new HashMap<>();
-        jdbcTemplate.query(sql, params, rs -> {
-            while (rs.next()) {
-                LocalDate day = rs.getObject("day_cet", LocalDate.class);
-                int rank = ((Number) rs.getObject("worst_rank")).intValue();
-                result.put(day, severityFromRank(rank));
-            }
+        jdbcTemplate.query(sql, params, (RowMapper<Void>) (rs, rowNum) -> {
+            LocalDate day = rs.getObject("day_cet", LocalDate.class);
+            int rank = ((Number) rs.getObject("worst_rank")).intValue();
+            result.put(day, bandFromRank(rank));
+            return null;
         });
         return result;
     }
 
     /**
-     * Find breaches with offset pagination and optional severity filter.
+     * Find breaches with offset pagination and optional band filter.
+     * band parameter maps to cr.sla_band (ON_TIME/LATE/VERY_LATE) or 'FAILED' for terminal failures.
      */
     public List<SlaBreachEvent> findByCalculatorIdPaginated(
             String calculatorId, int days,
-            String severity, int offset, int limit) {
+            String band, int offset, int limit) {
 
-        boolean hasSeverity = severity != null && !severity.isBlank();
+        boolean hasBand = band != null && !band.isBlank();
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
                 .addValue("days", days);
 
-        StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
+        StringBuilder sql = new StringBuilder(
+                "SELECT " + SELECT_COLUMNS + "\nFROM sla_breach_events sbe\n");
 
-        if (hasSeverity) {
-            sql.append("\nAND severity = :severity");
-            params.addValue("severity", severity);
+        if (hasBand) {
+            sql.append("JOIN calculator_runs cr ON cr.run_id = sbe.run_id\n");
         }
 
-        sql.append("\nORDER BY created_at DESC");
+        sql.append("WHERE sbe.calculator_id = :calculatorId\n")
+           .append("AND sbe.created_at >= NOW() - CAST(:days AS INTEGER) * INTERVAL '1 day'\n");
+
+        if (hasBand) {
+            appendBandFilter(sql, params, band);
+        }
+
+        sql.append("\nORDER BY sbe.created_at DESC");
         sql.append("\nLIMIT :limit OFFSET :offset");
         params.addValue("limit", limit);
         params.addValue("offset", offset);
@@ -266,25 +273,32 @@ public class SlaBreachEventRepository {
      * Keyset pagination for SLA breach history (stable on created_at, breach_id).
      */
     public List<SlaBreachEvent> findByCalculatorIdKeyset(
-            String calculatorId, int days, String severity,
+            String calculatorId, int days, String band,
             Instant cursorCreatedAt, Long cursorBreachId, int limit) {
 
         boolean hasCursor = cursorCreatedAt != null && cursorBreachId != null;
-        boolean hasSeverity = severity != null && !severity.isBlank();
+        boolean hasBand = band != null && !band.isBlank();
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
                 .addValue("days", days);
 
-        StringBuilder sql = new StringBuilder(SELECT_FROM).append(BASE_WHERE);
+        StringBuilder sql = new StringBuilder(
+                "SELECT " + SELECT_COLUMNS + "\nFROM sla_breach_events sbe\n");
 
-        if (hasSeverity) {
-            sql.append("\nAND severity = :severity");
-            params.addValue("severity", severity);
+        if (hasBand) {
+            sql.append("JOIN calculator_runs cr ON cr.run_id = sbe.run_id\n");
+        }
+
+        sql.append("WHERE sbe.calculator_id = :calculatorId\n")
+           .append("AND sbe.created_at >= NOW() - CAST(:days AS INTEGER) * INTERVAL '1 day'\n");
+
+        if (hasBand) {
+            appendBandFilter(sql, params, band);
         }
 
         if (hasCursor) {
-            sql.append("\nAND (created_at, breach_id) < (:cursorCreatedAt, :cursorBreachId)");
+            sql.append("\nAND (sbe.created_at, sbe.breach_id) < (:cursorCreatedAt, :cursorBreachId)");
             params.addValue("cursorCreatedAt", Timestamp.from(cursorCreatedAt));
             params.addValue("cursorBreachId", cursorBreachId);
         }
@@ -300,35 +314,49 @@ public class SlaBreachEventRepository {
     }
 
     /**
-     * Count breaches with optional severity filter.
+     * Count breaches with optional band filter.
      */
-    public long countByCalculatorIdAndPeriod(
-            String calculatorId, int days, String severity) {
-
-        boolean hasSeverity = severity != null && !severity.isBlank();
+    public long countByCalculatorIdAndPeriod(String calculatorId, int days, String band) {
+        boolean hasBand = band != null && !band.isBlank();
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorId", calculatorId)
                 .addValue("days", days);
 
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM sla_breach_events\n")
-                .append(BASE_WHERE);
+        StringBuilder sql = new StringBuilder(
+                "SELECT COUNT(*) FROM sla_breach_events sbe\n");
 
-        if (hasSeverity) {
-            sql.append("\nAND severity = :severity");
-            params.addValue("severity", severity);
+        if (hasBand) {
+            sql.append("JOIN calculator_runs cr ON cr.run_id = sbe.run_id\n");
+        }
+
+        sql.append("WHERE sbe.calculator_id = :calculatorId\n")
+           .append("AND sbe.created_at >= NOW() - CAST(:days AS INTEGER) * INTERVAL '1 day'");
+
+        if (hasBand) {
+            appendBandFilter(sql, params, band);
         }
 
         Long count = jdbcTemplate.queryForObject(sql.toString(), params, Long.class);
         return count != null ? count : 0;
     }
 
-    private static String severityFromRank(int rank) {
+    /** Appends a WHERE clause fragment to filter by band (including FAILED for terminal failures). */
+    private void appendBandFilter(StringBuilder sql, MapSqlParameterSource params, String band) {
+        if ("FAILED".equalsIgnoreCase(band)) {
+            sql.append("\nAND cr.status IN ('FAILED','TIMEOUT')");
+        } else {
+            sql.append("\nAND cr.sla_band = :band");
+            params.addValue("band", band.toUpperCase());
+        }
+    }
+
+    private static String bandFromRank(int rank) {
         return switch (rank) {
-            case 4 -> "CRITICAL";
-            case 3 -> "HIGH";
-            case 2 -> "MEDIUM";
-            default -> "LOW";
+            case 4 -> "FAILED";
+            case 3 -> "VERY_LATE";
+            case 2 -> "LATE";
+            default -> "ON_TIME";
         };
     }
 
@@ -345,7 +373,6 @@ public class SlaBreachEventRepository {
                     .breachType(BreachType.fromString(rs.getString("breach_type")))
                     .expectedValue(rs.getObject("expected_value", Long.class))
                     .actualValue(rs.getObject("actual_value", Long.class))
-                    .severity(Severity.fromString(rs.getString("severity")))
                     .alerted(rs.getBoolean("alerted"))
                     .alertedAt(fromTimestamp(rs.getTimestamp("alerted_at")))
                     .alertStatus(AlertStatus.fromString(rs.getString("alert_status")))

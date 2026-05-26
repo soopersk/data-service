@@ -2,7 +2,6 @@ package com.company.observability.service.projection;
 
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.dto.enums.SlaStatus;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -106,7 +105,7 @@ public final class LogicalRunGrouper {
             }
         }
 
-        boolean anyBreached = splits.stream().anyMatch(r -> Boolean.TRUE.equals(r.slaBreached()));
+        boolean anyBreached = splits.stream().anyMatch(r -> r.slaBand() != null && r.slaBand().isBreached());
 
         String breachReason = splits.stream()
                 .map(RunWithSlaStatus::slaBreachReason)
@@ -156,7 +155,7 @@ public final class LogicalRunGrouper {
                 run.status() != RunStatus.RUNNING ? run.endTime() : null,
                 wallClockMs,
                 run.status().name(),
-                run.slaBreached(),
+                run.slaBand() != null && run.slaBand().isBreached(),
                 run.slaBreachReason(),
                 slaStatus,
                 run.slaTime(),
@@ -180,9 +179,7 @@ public final class LogicalRunGrouper {
                 .orElse(RunStatus.SUCCESS);
     }
 
-    private static final List<String> SLA_PRECEDENCE = List.of(
-            SlaStatus.VERY_LATE.name(), SlaStatus.LATE.name(), SlaStatus.ON_TIME.name()
-    );
+    private static final List<String> SLA_PRECEDENCE = List.of("VERY_LATE", "LATE", "ON_TIME");
 
     private static String worstSlaStatus(List<RunWithSlaStatus> splits) {
         return splits.stream()
@@ -191,15 +188,11 @@ public final class LogicalRunGrouper {
                     int idx = SLA_PRECEDENCE.indexOf(s);
                     return idx < 0 ? SLA_PRECEDENCE.size() : idx;
                 }))
-                .orElse(SlaStatus.ON_TIME.name());
+                .orElse("ON_TIME");
     }
 
     private static String classifySlaStatus(RunWithSlaStatus run) {
-        if (run.status() == RunStatus.RUNNING || !Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.ON_TIME.name();
-        if (run.severity() == null) return SlaStatus.LATE.name();
-        return switch (run.severity()) {
-            case CRITICAL, HIGH -> SlaStatus.VERY_LATE.name();
-            default -> SlaStatus.LATE.name();
-        };
+        if (run.status() == RunStatus.RUNNING || run.slaBand() == null) return "ON_TIME";
+        return run.slaBand().name(); // ON_TIME / LATE / VERY_LATE
     }
 }

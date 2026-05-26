@@ -111,7 +111,7 @@ public class RunIngestionService {
                 .correlationId(request.getCorrelationId())
                 .runParameters(request.getRunParameters())
                 .additionalAttributes(request.getAdditionalAttributes())
-                .slaBreached(false)
+                .slaBand(null)
                 .slaBreachReason(null)
                 .build();
 
@@ -167,7 +167,8 @@ public class RunIngestionService {
             throw new DomainValidationException("End time cannot be before start time");
         }
 
-        boolean alreadyBreached = Boolean.TRUE.equals(run.getSlaBreached());
+        // Capture any breach already set by live detection (band non-null → already breached)
+        boolean alreadyBreached = run.getSlaBand() != null && run.getSlaBand().isBreached();
         String previousBreachReason = run.getSlaBreachReason();
 
         long durationMs = Duration.between(run.getStartTime(), request.getEndTime()).toMillis();
@@ -179,8 +180,13 @@ public class RunIngestionService {
                 : CompletionStatus.SUCCESS;
         run.setStatus(completionStatus.toRunStatus());
 
+        // Grade timing (independent of failure status)
         SlaEvaluationResult slaResult = slaEvaluationService.evaluateSla(run);
-        run.setSlaBreached(alreadyBreached || slaResult.isBreached());
+
+        // Timing band: use live-detection band if already set, otherwise use on-write result
+        if (!alreadyBreached && slaResult.getBand() != null) {
+            run.setSlaBand(slaResult.getBand());
+        }
         run.setSlaBreachReason(
                 slaResult.getReason() != null ? slaResult.getReason() : previousBreachReason
         );
@@ -192,13 +198,17 @@ public class RunIngestionService {
 
         // calculator_sli_daily is populated by the nightly DailyAggregationJob, not per completion.
 
+        boolean timingBreached = run.getSlaBand() != null && run.getSlaBand().isBreached();
+        boolean failureBreached = run.getStatus() == RunStatus.FAILED || run.getStatus() == RunStatus.TIMEOUT;
+        boolean isBreached = timingBreached || failureBreached;
+
         meterRegistry.counter(INGESTION_RUN_COMPLETED,
                 "frequency", run.getFrequency().name(),
                 "status", run.getStatus().name(),
-                "sla_breached", String.valueOf(run.getSlaBreached())
+                "sla_breached", String.valueOf(isBreached)
         ).increment();
 
-        boolean newlyBreached = !alreadyBreached && slaResult.isBreached();
+        boolean newlyBreached = !alreadyBreached && isBreached;
         if (newlyBreached) {
             eventPublisher.publishEvent(new SlaBreachedEvent(run, slaResult));
         } else {

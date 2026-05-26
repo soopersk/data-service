@@ -6,6 +6,7 @@ import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.RunEntry;
 import com.company.observability.repository.CalculatorRunRepository;
@@ -163,7 +164,6 @@ public class CalculatorStateService {
                 .estimatedStartTime(estStart)
                 .estimatedEndTime(estEnd)
                 .expectedDurationMs(expectedMs)
-                .slaBreached(false)
                 .isRerun(false)
                 .build();
         return new CalculatorEntry(name, List.of(synthetic));
@@ -187,7 +187,12 @@ public class CalculatorStateService {
         Long durationMs = startTime != null && endTime != null
                 ? endTime.toEpochMilli() - startTime.toEpochMilli() : null;
 
-        boolean slaBreached = splits.stream().anyMatch(r -> Boolean.TRUE.equals(r.getSlaBreached()));
+        // Pick worst band across splits (VERY_LATE > LATE > ON_TIME > null)
+        SlaBand worstBand = splits.stream()
+                .map(CalculatorRun::getSlaBand)
+                .filter(Objects::nonNull)
+                .max(Comparator.comparingInt(b -> b == SlaBand.VERY_LATE ? 2 : b == SlaBand.LATE ? 1 : 0))
+                .orElse(null);
         String breachReason = splits.stream().map(CalculatorRun::getSlaBreachReason)
                 .filter(s -> s != null && !s.isBlank()).collect(Collectors.joining("; "));
 
@@ -202,7 +207,7 @@ public class CalculatorStateService {
         rep.setStartTime(startTime);
         rep.setEndTime(endTime);
         rep.setDurationMs(durationMs);
-        rep.setSlaBreached(slaBreached);
+        rep.setSlaBand(worstBand);
         rep.setSlaBreachReason(breachReason.isBlank() ? null : breachReason);
         rep.setSlaTime(first.getSlaTime());
         rep.setExpectedDurationMs(first.getExpectedDurationMs());
@@ -229,7 +234,7 @@ public class CalculatorStateService {
                 .sla(run.getSlaTime())
                 .durationMs(run.getDurationMs())
                 .expectedDurationMs(run.getExpectedDurationMs())
-                .slaBreached(run.getSlaBreached())
+                .slaBand(run.getSlaBand() != null ? run.getSlaBand().name() : null)
                 .slaBreachReason(run.getSlaBreachReason())
                 .isRerun(run.isRerun())
                 .build();

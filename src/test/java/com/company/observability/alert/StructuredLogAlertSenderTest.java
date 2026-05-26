@@ -6,7 +6,6 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.BreachType;
-import com.company.observability.domain.enums.Severity;
 import com.company.observability.logging.LifecycleLogger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +53,6 @@ class StructuredLogAlertSenderTest {
         assertTrue(message.contains("event=sla.breach.alert"), "message should contain event=sla.breach.alert, got: " + message);
         assertTrue(message.contains("outcome=emitted"), "message should contain outcome=emitted, got: " + message);
         assertTrue(message.contains("CALC-1"));
-        assertTrue(message.contains("HIGH"));
     }
 
     @Test
@@ -69,7 +67,6 @@ class StructuredLogAlertSenderTest {
         assertEquals("req-123", MDC.get("requestId"));
         assertNull(MDC.get("alert_source"));
         assertNull(MDC.get("alert_type"));
-        assertNull(MDC.get("severity"));
     }
 
     @Test
@@ -82,7 +79,6 @@ class StructuredLogAlertSenderTest {
         ILoggingEvent event = listAppender.list.get(0);
         assertEquals("observability-service", event.getMDCPropertyMap().get("alert_source"));
         assertEquals("SLA_BREACH", event.getMDCPropertyMap().get("alert_type"));
-        assertEquals("HIGH", event.getMDCPropertyMap().get("severity"));
         assertEquals("TIME_EXCEEDED", event.getMDCPropertyMap().get("breachType"));
         assertEquals("CALC-1", event.getMDCPropertyMap().get("calculatorId"));
         assertEquals("tenant-1", event.getMDCPropertyMap().get("tenantId"));
@@ -91,31 +87,6 @@ class StructuredLogAlertSenderTest {
     @Test
     void send_whenNullBreach_throwsAlertDeliveryException() {
         assertThrows(AlertDeliveryException.class, () -> sender.send(null));
-    }
-
-    @Test
-    void send_whenSeverityMissing_throwsAlertDeliveryException() {
-        SlaBreachEvent breach = SlaBreachEvent.builder()
-                .calculatorId("CALC-1")
-                .tenantId("tenant-1")
-                .runId("run-1")
-                .severity(null)
-                .build();
-
-        assertThrows(AlertDeliveryException.class, () -> sender.send(breach));
-    }
-
-    @Test
-    void send_whenSeverityMissing_mdcIsNotModified() {
-        MDC.put("requestId", "req-abc");
-        SlaBreachEvent breach = SlaBreachEvent.builder()
-                .calculatorId("CALC-1").tenantId("tenant-1").runId("run-1").severity(null).build();
-
-        assertThrows(AlertDeliveryException.class, () -> sender.send(breach));
-
-        // MDC must be untouched — validation fires before setAlertContext
-        assertEquals("req-abc", MDC.get("requestId"));
-        assertNull(MDC.get("alert_source"));
     }
 
     @Test
@@ -130,7 +101,6 @@ class StructuredLogAlertSenderTest {
                 .calculatorId("CALC-1")
                 .calculatorName("Risk Calculator")
                 .tenantId("tenant-1")
-                .severity(Severity.HIGH)
                 .breachType(BreachType.TIME_EXCEEDED)
                 .expectedValue(1740200100L)
                 .expectedUnit("epoch_seconds")

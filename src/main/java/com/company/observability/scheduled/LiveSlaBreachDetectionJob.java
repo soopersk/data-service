@@ -4,6 +4,7 @@ import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.logging.LifecycleEvent;
 import com.company.observability.logging.LifecycleLogger;
@@ -125,25 +126,21 @@ public class LiveSlaBreachDetectionJob {
                         continue;
                     }
 
-                    if (Boolean.TRUE.equals(run.getSlaBreached())) {
+                    if (run.getSlaBand() != null) {
                         log.debug("event=sla.live_detection.run_check outcome=rejected reason=already_breached runId={}", runId);
                         slaMonitoringCache.deregisterFromSlaMonitoring(runId, tenantId, reportingDate);
                         continue;
                     }
 
                     String breachReason = buildBreachReason(run);
-                    int updated = runRepository.markSlaBreached(
-                            runId, breachReason, run.getReportingDate());
+                    SlaBand band = determineBand(run);
+                    int updated = runRepository.markSlaBreach(
+                            runId, run.getReportingDate(), band, breachReason);
 
                     if (updated > 0) {
-                        String severity = determineSeverity(run);
-                        SlaEvaluationResult result = new SlaEvaluationResult(
-                                true,
-                                breachReason,
-                                severity
-                        );
+                        SlaEvaluationResult result = new SlaEvaluationResult(band, breachReason);
 
-                        run.setSlaBreached(true);
+                        run.setSlaBand(band);
                         run.setSlaBreachReason(breachReason);
 
                         eventPublisher.publishEvent(new SlaBreachedEvent(run, result));
@@ -151,10 +148,10 @@ public class LiveSlaBreachDetectionJob {
                         processedCount++;
 
                         lifecycleLogger.emit(LifecycleEvent.SLA_LIVE_BREACH,
-                                kv("runId", runId), kv("reason", breachReason), kv("severity", severity));
+                                kv("runId", runId), kv("reason", breachReason), kv("band", band));
 
                         meterRegistry.counter(SLA_BREACH_LIVE_DETECTED,
-                                "severity", severity
+                                "band", band.name()
                         ).increment();
                     }
 
@@ -224,9 +221,9 @@ public class LiveSlaBreachDetectionJob {
      * slaTime is the LATE-band edge; within one band-gap past it the run is in the LATE
      * band (MEDIUM), beyond that it is VERY_LATE (HIGH).
      */
-    private String determineSeverity(CalculatorRun run) {
+    private SlaBand determineBand(CalculatorRun run) {
         long delayMs = Duration.between(run.getSlaTime(), Instant.now()).toMillis();
-        return delayMs <= durationBasedSlaProperties.bandGapMs() ? "MEDIUM" : "HIGH";
+        return delayMs <= durationBasedSlaProperties.bandGapMs() ? SlaBand.LATE : SlaBand.VERY_LATE;
     }
 
     private long calculateMinutesUntilSla(Map<String, Object> runInfo) {

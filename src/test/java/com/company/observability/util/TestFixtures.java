@@ -7,7 +7,7 @@ import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.BreachType;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.domain.enums.Severity;
+import com.company.observability.domain.enums.SlaBand;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -47,7 +47,7 @@ public final class TestFixtures {
     public static CalculatorRun aRunningRun() {
         return baseRunBuilder()
                 .status(RunStatus.RUNNING)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
     }
 
@@ -58,7 +58,7 @@ public final class TestFixtures {
                 .calculatorId(calculatorId)
                 .tenantId(tenantId)
                 .status(RunStatus.RUNNING)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
     }
 
@@ -68,7 +68,7 @@ public final class TestFixtures {
                 .status(RunStatus.SUCCESS)
                 .endTime(DEFAULT_START.plusSeconds(600))
                 .durationMs(600_000L)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
     }
 
@@ -81,7 +81,7 @@ public final class TestFixtures {
                 .status(RunStatus.SUCCESS)
                 .endTime(DEFAULT_START.plusSeconds(600))
                 .durationMs(600_000L)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
     }
 
@@ -90,7 +90,7 @@ public final class TestFixtures {
         return baseRunBuilder()
                 .status(RunStatus.RUNNING)
                 .slaTime(DEFAULT_START.minusSeconds(300))  // SLA was 5 min ago
-                .slaBreached(true)
+                .slaBand(SlaBand.LATE)
                 .slaBreachReason("Still running 5 minutes past SLA deadline")
                 .build();
     }
@@ -102,7 +102,7 @@ public final class TestFixtures {
                 .frequency(Frequency.MONTHLY)
                 .reportingDate(eom)
                 .status(RunStatus.RUNNING)
-                .slaBreached(false)
+                .slaBand(null)
                 .build();
     }
 
@@ -119,7 +119,6 @@ public final class TestFixtures {
                 .breachType(BreachType.TIME_EXCEEDED)
                 .expectedValue(300_000L)
                 .actualValue(600_000L)
-                .severity(Severity.HIGH)
                 .alerted(false)
                 .alertStatus(AlertStatus.PENDING)
                 .retryCount(0)

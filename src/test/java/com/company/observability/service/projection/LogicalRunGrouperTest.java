@@ -3,8 +3,7 @@ package com.company.observability.service.projection;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.domain.enums.Severity;
-import com.company.observability.dto.enums.SlaStatus;
+import com.company.observability.domain.enums.SlaBand;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -23,13 +22,13 @@ class LogicalRunGrouperTest {
     private static final Instant SLA = Instant.parse("2026-05-05T05:00:00Z");
 
     private RunWithSlaStatus run(String runId, String correlationId, RunStatus status,
-                                 Instant start, Instant end, boolean slaBreached, Severity severity) {
+                                 Instant start, Instant end, SlaBand slaBand) {
         return new RunWithSlaStatus(
                 runId, "calc-1", "Calc One", DATE, start, end,
                 end != null ? end.toEpochMilli() - start.toEpochMilli() : null,
                 SLA, T0, Frequency.DAILY, status,
-                slaBreached, slaBreached ? "breached" : null,
-                severity, correlationId, null, null);
+                slaBand, slaBand != null ? "breached" : null,
+                correlationId, null, null);
     }
 
     @Test
@@ -39,7 +38,7 @@ class LogicalRunGrouperTest {
 
     @Test
     void singleUngroupedRun_passesThroughAsSingleton() {
-        RunWithSlaStatus r = run("run-A", null, RunStatus.SUCCESS, T0, T1, false, null);
+        RunWithSlaStatus r = run("run-A", null, RunStatus.SUCCESS, T0, T1, null);
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(r));
 
         assertThat(result).hasSize(1);
@@ -52,7 +51,7 @@ class LogicalRunGrouperTest {
 
     @Test
     void singleSplitRun_correlationSetOneRun_passesThroughAsSingleton() {
-        RunWithSlaStatus r = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, false, null);
+        RunWithSlaStatus r = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, null);
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(r));
 
         assertThat(result).hasSize(1);
@@ -62,8 +61,8 @@ class LogicalRunGrouperTest {
 
     @Test
     void twoSplits_bothSuccess_collapseToOneLogicalRun() {
-        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, false, null);
-        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, false, null);
+        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, null);
+        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, null);
 
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(a, b));
 
@@ -79,22 +78,22 @@ class LogicalRunGrouperTest {
 
     @Test
     void twoSplits_oneBreached_logicalIsBreached() {
-        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, false, null);
-        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, true, Severity.HIGH);
+        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, null);
+        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, SlaBand.VERY_LATE);
 
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(a, b));
 
         assertThat(result).hasSize(1);
         LogicalRunGrouper.LogicalRun lr = result.get(0);
         assertThat(lr.slaBreached()).isTrue();
-        assertThat(lr.slaStatus()).isEqualTo(SlaStatus.VERY_LATE.name());
+        assertThat(lr.slaStatus()).isEqualTo("VERY_LATE");
     }
 
     @Test
     void threeSplits_oneRunning_logicalStatusIsRunning_endIsNull() {
-        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, false, null);
-        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, false, null);
-        RunWithSlaStatus c = run("run-C", "corr-1", RunStatus.RUNNING, T2, null, false, null);
+        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, null);
+        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, null);
+        RunWithSlaStatus c = run("run-C", "corr-1", RunStatus.RUNNING, T2, null, null);
 
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(a, b, c));
 
@@ -107,8 +106,8 @@ class LogicalRunGrouperTest {
 
     @Test
     void mixedFailures_failedBeatsTimeout() {
-        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.TIMEOUT, T0, T1, true, Severity.HIGH);
-        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.FAILED, T1, T2, true, Severity.CRITICAL);
+        RunWithSlaStatus a = run("run-A", "corr-1", RunStatus.TIMEOUT, T0, T1, SlaBand.LATE);
+        RunWithSlaStatus b = run("run-B", "corr-1", RunStatus.FAILED, T1, T2, SlaBand.VERY_LATE);
 
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(a, b));
 
@@ -124,11 +123,11 @@ class LogicalRunGrouperTest {
         RunWithSlaStatus a = new RunWithSlaStatus(
                 "run-A", "calc-1", "Calc One", day1, T0, T1, 600_000L,
                 SLA, T0, Frequency.DAILY, RunStatus.SUCCESS,
-                false, null, null, "corr-1", null, null);
+                null, null, "corr-1", null, null);
         RunWithSlaStatus b = new RunWithSlaStatus(
                 "run-B", "calc-1", "Calc One", day2, T2, T3, 600_000L,
                 SLA, T0, Frequency.DAILY, RunStatus.SUCCESS,
-                false, null, null, "corr-1", null, null);
+                null, null, "corr-1", null, null);
 
         List<LogicalRunGrouper.LogicalRun> result = LogicalRunGrouper.groupWithSla(List.of(a, b));
 
@@ -138,9 +137,9 @@ class LogicalRunGrouperTest {
 
     @Test
     void ungroupedAndGroupedRuns_independentGroups() {
-        RunWithSlaStatus standalone = run("run-Z", null, RunStatus.SUCCESS, T0, T1, false, null);
-        RunWithSlaStatus splitA = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, false, null);
-        RunWithSlaStatus splitB = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, false, null);
+        RunWithSlaStatus standalone = run("run-Z", null, RunStatus.SUCCESS, T0, T1, null);
+        RunWithSlaStatus splitA = run("run-A", "corr-1", RunStatus.SUCCESS, T0, T1, null);
+        RunWithSlaStatus splitB = run("run-B", "corr-1", RunStatus.SUCCESS, T1, T2, null);
 
         List<LogicalRunGrouper.LogicalRun> result =
                 LogicalRunGrouper.groupWithSla(List.of(standalone, splitA, splitB));

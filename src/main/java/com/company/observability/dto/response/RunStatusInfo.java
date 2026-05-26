@@ -14,6 +14,6 @@ public record RunStatusInfo(
         Instant sla,
         Long durationMs,
         String durationFormatted,
-        Boolean slaBreached,
+        String slaBand,
         String slaBreachReason
 ) {}

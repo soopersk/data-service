@@ -5,7 +5,7 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.domain.enums.Severity;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.util.JsonbConverter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -283,7 +283,7 @@ public class CalculatorRunRepository {
                 start_time, end_time, duration_ms,
                 status, sla_time, expected_duration_ms,
                 estimated_start_time, estimated_end_time,
-                sla_breached, sla_breach_reason,
+                sla_band, sla_breach_reason,
                 run_number, run_type, region, correlation_id,
                 run_parameters, additional_attributes,
                 created_at, updated_at
@@ -292,7 +292,7 @@ public class CalculatorRunRepository {
                 :startTime, :endTime, :durationMs,
                 :status, :slaTime, :expectedDurationMs,
                 :estimatedStartTime, :estimatedEndTime,
-                :slaBreached, :slaBreachReason,
+                :slaBand, :slaBreachReason,
                 :runNumber, :runType, :region, :correlationId,
                 :runParameters, :additionalAttributes,
                 :createdAt, :updatedAt
@@ -301,7 +301,7 @@ public class CalculatorRunRepository {
                 end_time = EXCLUDED.end_time,
                 duration_ms = EXCLUDED.duration_ms,
                 status = EXCLUDED.status,
-                sla_breached = EXCLUDED.sla_breached,
+                sla_band = EXCLUDED.sla_band,
                 sla_breach_reason = EXCLUDED.sla_breach_reason,
                 run_number = EXCLUDED.run_number,
                 run_type = EXCLUDED.run_type,
@@ -327,7 +327,7 @@ public class CalculatorRunRepository {
                 .addValue("expectedDurationMs", run.getExpectedDurationMs())
                 .addValue("estimatedStartTime", toTimestamp(run.getEstimatedStartTime()))
                 .addValue("estimatedEndTime", toTimestamp(run.getEstimatedEndTime()))
-                .addValue("slaBreached", run.getSlaBreached())
+                .addValue("slaBand", run.getSlaBand() != null ? run.getSlaBand().name() : null)
                 .addValue("slaBreachReason", run.getSlaBreachReason())
                 .addValue("runNumber", run.getRunNumber())
                 .addValue("runType", run.getRunType())
@@ -399,27 +399,29 @@ public class CalculatorRunRepository {
 
 
     /**
-     * Mark SLA breached with partition awareness
+     * Mark SLA breach with partition awareness. Idempotent — only updates when sla_band IS NULL
+     * (first breach write wins; live detection must not overwrite an already-set band).
      */
-    public int markSlaBreached(String runId, String breachReason, LocalDate reportingDate) {
+    public int markSlaBreach(String runId, LocalDate reportingDate, SlaBand band, String breachReason) {
         String sql = """
             UPDATE calculator_runs
-            SET sla_breached = true,
+            SET sla_band = :slaBand,
                 sla_breach_reason = :breachReason,
                 updated_at = NOW()
             WHERE run_id = :runId
               AND reporting_date = :reportingDate
               AND status = 'RUNNING'
-              AND sla_breached = false
+              AND sla_band IS NULL
             """;
         MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("slaBand", band != null ? band.name() : null)
                 .addValue("breachReason", breachReason)
                 .addValue("runId", runId)
                 .addValue("reportingDate", reportingDate);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         int updated = jdbcTemplate.update(sql, params);
-        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "mark_sla_breached").register(meterRegistry));
+        sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "mark_sla_breach").register(meterRegistry));
         return updated;
     }
 
@@ -460,11 +462,9 @@ public class CalculatorRunRepository {
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
                    cr.start_time, cr.end_time, cr.duration_ms,
                    cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
-                   cr.sla_breached, cr.sla_breach_reason, cr.correlation_id,
-                   cr.run_number, cr.expected_duration_ms,
-                   sbe.severity
+                   cr.sla_band, cr.sla_breach_reason, cr.correlation_id,
+                   cr.run_number, cr.expected_duration_ms
             FROM calculator_runs cr
-            LEFT JOIN sla_breach_events sbe ON sbe.run_id = cr.run_id
             WHERE cr.calculator_id = :calculatorId AND cr.frequency = :frequency
             AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
             AND cr.reporting_date <= CURRENT_DATE
@@ -483,28 +483,7 @@ public class CalculatorRunRepository {
         }
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, (rs, rowNum) -> {
-            String severityStr = rs.getString("severity"); // nullable from LEFT JOIN
-            return new RunWithSlaStatus(
-                    rs.getString("run_id"),
-                    rs.getString("calculator_id"),
-                    rs.getString("calculator_name"),
-                    rs.getObject("reporting_date", LocalDate.class),
-                    fromTimestamp(rs.getTimestamp("start_time")),
-                    fromTimestamp(rs.getTimestamp("end_time")),
-                    rs.getObject("duration_ms", Long.class),
-                    fromTimestamp(rs.getTimestamp("sla_time")),
-                    fromTimestamp(rs.getTimestamp("estimated_start_time")),
-                    Frequency.from(rs.getString("frequency")),
-                    RunStatus.fromString(rs.getString("status")),
-                    rs.getObject("sla_breached", Boolean.class),
-                    rs.getString("sla_breach_reason"),
-                    severityStr != null ? Severity.fromString(severityStr) : null,
-                    rs.getString("correlation_id"),
-                    rs.getString("run_number"),
-                    rs.getObject("expected_duration_ms", Long.class)
-            );
-        });
+        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, runWithSlaStatusMapper());
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_with_sla").register(meterRegistry));
 
         return results;
@@ -525,7 +504,7 @@ public class CalculatorRunRepository {
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
                    cr.start_time, cr.end_time, cr.duration_ms,
                    cr.sla_time, cr.estimated_start_time, cr.frequency, cr.status,
-                   cr.sla_breached, cr.sla_breach_reason, cr.correlation_id,
+                   cr.sla_band, cr.sla_breach_reason, cr.correlation_id,
                    cr.run_number, cr.expected_duration_ms
             FROM calculator_runs cr
             WHERE cr.calculator_name = :calculatorName AND cr.frequency = :frequency
@@ -549,26 +528,7 @@ public class CalculatorRunRepository {
                 calculatorName, frequency, days, runNumber);
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, (rs, rowNum) ->
-                new RunWithSlaStatus(
-                        rs.getString("run_id"),
-                        rs.getString("calculator_id"),
-                        rs.getString("calculator_name"),
-                        rs.getObject("reporting_date", LocalDate.class),
-                        fromTimestamp(rs.getTimestamp("start_time")),
-                        fromTimestamp(rs.getTimestamp("end_time")),
-                        rs.getObject("duration_ms", Long.class),
-                        fromTimestamp(rs.getTimestamp("sla_time")),
-                        fromTimestamp(rs.getTimestamp("estimated_start_time")),
-                        Frequency.from(rs.getString("frequency")),
-                        RunStatus.fromString(rs.getString("status")),
-                        rs.getObject("sla_breached", Boolean.class),
-                        rs.getString("sla_breach_reason"),
-                        null,
-                        rs.getString("correlation_id"),
-                        rs.getString("run_number"),
-                        rs.getObject("expected_duration_ms", Long.class)
-                ));
+        List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, runWithSlaStatusMapper());
         sample.stop(Timer.builder(DB_QUERY_DURATION).tag("query", "find_runs_by_name").register(meterRegistry));
 
         log.debug("event=db.query outcome=complete query=find_runs_by_name calculatorName={} frequency={} rows={}",
@@ -662,6 +622,31 @@ public class CalculatorRunRepository {
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
+    private RowMapper<RunWithSlaStatus> runWithSlaStatusMapper() {
+        return (rs, rowNum) -> {
+            String bandStr = rs.getString("sla_band");
+            SlaBand slaBand = bandStr != null ? SlaBand.valueOf(bandStr) : null;
+            return new RunWithSlaStatus(
+                    rs.getString("run_id"),
+                    rs.getString("calculator_id"),
+                    rs.getString("calculator_name"),
+                    rs.getObject("reporting_date", LocalDate.class),
+                    fromTimestamp(rs.getTimestamp("start_time")),
+                    fromTimestamp(rs.getTimestamp("end_time")),
+                    rs.getObject("duration_ms", Long.class),
+                    fromTimestamp(rs.getTimestamp("sla_time")),
+                    fromTimestamp(rs.getTimestamp("estimated_start_time")),
+                    Frequency.from(rs.getString("frequency")),
+                    RunStatus.fromString(rs.getString("status")),
+                    slaBand,
+                    rs.getString("sla_breach_reason"),
+                    rs.getString("correlation_id"),
+                    rs.getString("run_number"),
+                    rs.getObject("expected_duration_ms", Long.class)
+            );
+        };
+    }
+
     private class CalculatorRunRowMapper implements RowMapper<CalculatorRun> {
         private final boolean includeJsonb;
 
@@ -687,7 +672,7 @@ public class CalculatorRunRepository {
                         .expectedDurationMs(rs.getObject("expected_duration_ms", Long.class))
                         .estimatedStartTime(fromTimestamp(rs.getTimestamp("estimated_start_time")))
                         .estimatedEndTime(fromTimestamp(rs.getTimestamp("estimated_end_time")))
-                        .slaBreached(rs.getBoolean("sla_breached"))
+                        .slaBand(rs.getString("sla_band") != null ? SlaBand.valueOf(rs.getString("sla_band")) : null)
                         .slaBreachReason(rs.getString("sla_breach_reason"))
                         .runNumber(rs.getString("run_number"))
                         .runType(rs.getString("run_type"))

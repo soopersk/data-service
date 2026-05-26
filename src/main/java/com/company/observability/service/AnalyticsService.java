@@ -7,6 +7,7 @@ import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.dto.enums.SlaStatus;
 import com.company.observability.dto.response.*;
 import com.company.observability.service.projection.LogicalRunGrouper;
@@ -140,11 +141,11 @@ public class AnalyticsService {
         int greenDays = 0, amberDays = 0, redDays = 0;
 
         for (DailyAggregate agg : coreData.getAggregates()) {
-            String worstSeverity = coreData.getWorstSeverityByDay().get(agg.reportingDate());
-            if (worstSeverity == null || agg.slaBreaches() == 0) {
+            String worstBand = coreData.getWorstBandByDay().get(agg.reportingDate());
+            if (worstBand == null || agg.slaBreaches() == 0) {
                 greenDays++;
             } else {
-                if ("HIGH".equals(worstSeverity) || "CRITICAL".equals(worstSeverity)) {
+                if ("FAILED".equals(worstBand) || "VERY_LATE".equals(worstBand)) {
                     redDays++;
                 } else {
                     amberDays++;
@@ -155,7 +156,7 @@ public class AnalyticsService {
         return new SlaSummaryResponse(
                 calculatorId, days, coreData.getTotalBreaches(),
                 greenDays, amberDays, redDays,
-                coreData.getBreachesBySeverity(), coreData.getBreachesByType());
+                coreData.getBreachesByBand(), coreData.getBreachesByType());
     }
 
     // ================================================================
@@ -184,8 +185,8 @@ public class AnalyticsService {
 
         List<TrendAnalyticsResponse.TrendDataPoint> trends = coreData.getAggregates().stream()
                 .map(agg -> {
-                    String worstSeverity = coreData.getWorstSeverityByDay().get(agg.reportingDate());
-                    String slaStatus = classifyDay(agg, worstSeverity);
+                    String worstBand = coreData.getWorstBandByDay().get(agg.reportingDate());
+                    String slaStatus = classifyDay(agg, worstBand);
 
                     return new TrendAnalyticsResponse.TrendDataPoint(
                             agg.reportingDate(), agg.avgDurationMs(), agg.totalRuns(),
@@ -244,10 +245,11 @@ public class AnalyticsService {
     }
 
     private SlaBreachDetailResponse toBreachDetail(SlaBreachEvent breach) {
+        // band is not stored on sla_breach_events; null until a JOIN is added to the paged query
         return new SlaBreachDetailResponse(
                 breach.getBreachId(), breach.getRunId(), breach.getCalculatorId(),
                 breach.getCalculatorName(), breach.getBreachType().name(),
-                breach.getSeverity().name(), mapSeverityToTrafficLight(breach.getSeverity().name()),
+                null, null,
                 breach.getExpectedValue(), breach.getActualValue(), breach.getCreatedAt());
     }
 
@@ -313,9 +315,9 @@ public class AnalyticsService {
             }
 
             if (!isRunning) {
-                if (SlaStatus.ON_TIME.name().equals(lr.slaStatus())) slaMetCount++;
-                else if (SlaStatus.LATE.name().equals(lr.slaStatus())) lateCount++;
-                else if (SlaStatus.VERY_LATE.name().equals(lr.slaStatus())) veryLateCount++;
+                if ("ON_TIME".equals(lr.slaStatus())) slaMetCount++;
+                else if ("LATE".equals(lr.slaStatus())) lateCount++;
+                else if ("VERY_LATE".equals(lr.slaStatus())) veryLateCount++;
             }
 
             dataPoints.add(new RunPerformanceData.RunDataPoint(
@@ -325,7 +327,7 @@ public class AnalyticsService {
                     lr.endTime(),
                     lr.wallClockDurationMs(),
                     lr.status(),
-                    lr.slaBreached(),
+                    lr.slaStatus(),   // slaBand — ON_TIME / LATE / VERY_LATE from LogicalRun
                     lr.slaStatus(),
                     lr.subRunIds(),
                     lr.estimatedStartTime(),
@@ -425,7 +427,7 @@ public class AnalyticsService {
                             isRunning ? null : run.endTime(),
                             isRunning ? null : run.durationMs(),
                             run.status().name(),
-                            run.slaBreached(),
+                            run.slaBand() != null ? run.slaBand().name() : null,
                             slaStatus,
                             null,
                             run.estimatedStartTime(),
@@ -466,9 +468,9 @@ public class AnalyticsService {
                 completedCount++;
             }
             if (!isRunning) {
-                if (SlaStatus.ON_TIME.name().equals(dp.slaStatus())) slaMetCount++;
-                else if (SlaStatus.LATE.name().equals(dp.slaStatus())) lateCount++;
-                else if (SlaStatus.VERY_LATE.name().equals(dp.slaStatus())) veryLateCount++;
+                if ("ON_TIME".equals(dp.slaStatus())) slaMetCount++;
+                else if ("LATE".equals(dp.slaStatus())) lateCount++;
+                else if ("VERY_LATE".equals(dp.slaStatus())) veryLateCount++;
             }
         }
 
@@ -516,20 +518,8 @@ public class AnalyticsService {
     private record ReferenceLines(java.time.Instant estimatedStartTime, java.time.Instant slaTime) {}
 
     private String classifySlaStatusForRun(RunWithSlaStatus run) {
-        if (run.status() == RunStatus.RUNNING || !Boolean.TRUE.equals(run.slaBreached())) return SlaStatus.ON_TIME.name();
-        if (run.severity() != null) {
-            return switch (run.severity()) {
-                case CRITICAL, HIGH -> SlaStatus.VERY_LATE.name();
-                default -> SlaStatus.LATE.name();
-            };
-        }
-        // No sla_breach_events severity (e.g. /executions reads calculator_runs only): derive the
-        // band from the on-write sla_breach_reason set by SlaEvaluationService / failure short-circuit.
-        String reason = run.slaBreachReason();
-        if (reason != null && (reason.contains("VERY_LATE") || reason.startsWith("Run status:"))) {
-            return SlaStatus.VERY_LATE.name();
-        }
-        return SlaStatus.LATE.name();
+        if (run.status() == RunStatus.RUNNING || run.slaBand() == null) return SlaBand.ON_TIME.name();
+        return run.slaBand().name(); // ON_TIME / LATE / VERY_LATE
     }
 
     // ================================================================
@@ -537,13 +527,14 @@ public class AnalyticsService {
     // ================================================================
 
     /**
-     * Per-day classification for trends/summary (GREEN / AMBER / RED)
+     * Per-day classification for trends/summary (GREEN / AMBER / RED).
+     * worstBand is one of: FAILED, VERY_LATE, LATE, ON_TIME (from findWorstDayHealthByDay).
      */
-    private String classifyDay(DailyAggregate agg, String worstSeverity) {
-        if (worstSeverity == null || agg.slaBreaches() == 0) {
+    private String classifyDay(DailyAggregate agg, String worstBand) {
+        if (worstBand == null || agg.slaBreaches() == 0) {
             return SlaStatus.GREEN.name();
         }
-        return mapSeverityToTrafficLight(worstSeverity);
+        return mapBandToTrafficLight(worstBand);
     }
 
     private SlaCoreData getSlaCoreData(String calculatorId, int days) {
@@ -556,22 +547,22 @@ public class AnalyticsService {
 
         List<DailyAggregate> aggregates = dailyAggregateRepository
                 .findRecentAggregates(calculatorId, days);
-        Map<String, Integer> bySeverity = slaBreachEventRepository
-                .countBySeverity(calculatorId, days);
+        Map<String, Integer> byBand = slaBreachEventRepository
+                .countByBand(calculatorId, days);
         Map<String, Integer> byType = slaBreachEventRepository
                 .countByType(calculatorId, days);
-        Map<LocalDate, String> worstSeverityByDay = slaBreachEventRepository
-                .findWorstSeverityByDay(calculatorId, days);
+        Map<LocalDate, String> worstBandByDay = slaBreachEventRepository
+                .findWorstDayHealthByDay(calculatorId, days);
 
-        int totalBreaches = bySeverity.values().stream()
+        int totalBreaches = byBand.values().stream()
                 .mapToInt(Integer::intValue)
                 .sum();
 
         SlaCoreData coreData = SlaCoreData.builder()
                 .aggregates(aggregates)
-                .breachesBySeverity(bySeverity)
+                .breachesByBand(byBand)
                 .breachesByType(byType)
-                .worstSeverityByDay(worstSeverityByDay)
+                .worstBandByDay(worstBandByDay)
                 .totalBreaches(totalBreaches)
                 .build();
 
@@ -579,11 +570,11 @@ public class AnalyticsService {
         return coreData;
     }
 
-    private String mapSeverityToTrafficLight(String severity) {
-        if (severity == null) return SlaStatus.AMBER.name();
-        return switch (severity) {
-            case "HIGH", "CRITICAL" -> SlaStatus.RED.name();
-            default -> SlaStatus.AMBER.name();
+    private String mapBandToTrafficLight(String band) {
+        if (band == null) return SlaStatus.AMBER.name();
+        return switch (band) {
+            case "FAILED", "VERY_LATE" -> SlaStatus.RED.name();
+            default -> SlaStatus.AMBER.name(); // LATE
         };
     }
 
@@ -627,9 +618,9 @@ public class AnalyticsService {
     private static class SlaCoreData implements Serializable {
         private static final long serialVersionUID = 1L;
         private List<DailyAggregate> aggregates;
-        private Map<String, Integer> breachesBySeverity;
+        private Map<String, Integer> breachesByBand;
         private Map<String, Integer> breachesByType;
-        private Map<LocalDate, String> worstSeverityByDay;
+        private Map<LocalDate, String> worstBandByDay;
         private int totalBreaches;
     }
 }

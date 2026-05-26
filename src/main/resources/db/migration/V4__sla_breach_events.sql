@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS sla_breach_events (
     breach_type     VARCHAR(50)     NOT NULL,
     expected_value  BIGINT,
     actual_value    BIGINT,
-    severity        VARCHAR(20)     NOT NULL CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
     alerted         BOOLEAN         DEFAULT false,
     alerted_at      TIMESTAMPTZ,
     alert_status    VARCHAR(20)     DEFAULT 'PENDING'

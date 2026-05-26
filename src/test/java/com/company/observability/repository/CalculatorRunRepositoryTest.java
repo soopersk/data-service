@@ -106,7 +106,7 @@ class CalculatorRunRepositoryTest {
                 .endTime(Instant.parse("2026-02-22T08:05:00Z"))
                 .durationMs(300000L)
                 .status(RunStatus.SUCCESS)
-                .slaBreached(false)
+                .slaBand(null)
                 .createdAt(Instant.parse("2026-02-22T08:05:00Z"))
                 .updatedAt(Instant.parse("2026-02-22T08:05:00Z"))
                 .build();

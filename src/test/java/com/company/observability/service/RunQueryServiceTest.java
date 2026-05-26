@@ -70,7 +70,7 @@ class RunQueryServiceTest {
                 .startTime(Instant.now().minusSeconds(120))
                 .endTime(Instant.now().minusSeconds(60))
                 .durationMs(60000L)
-                .slaBreached(false)
+                .slaBand(null)
                 .createdAt(Instant.now())
                 .build();
 
@@ -185,7 +185,7 @@ class RunQueryServiceTest {
     private static CalculatorStatusResponse statusResponse(String calculatorId) {
         RunStatusInfo info = new RunStatusInfo(
                 "run-" + calculatorId, "RUNNING",
-                Instant.now(), null, null, null, null, null, null, false, null);
+                Instant.now(), null, null, null, null, null, null, null, null);
         return new CalculatorStatusResponse("Calculator " + calculatorId, Instant.now(), info, List.of());
     }
 
@@ -199,7 +199,7 @@ class RunQueryServiceTest {
                 .reportingDate(LocalDate.now())
                 .startTime(Instant.now().minusSeconds(120))
                 .status(RunStatus.RUNNING)
-                .slaBreached(false)
+                .slaBand(null)
                 .createdAt(Instant.now())
                 .build();
     }

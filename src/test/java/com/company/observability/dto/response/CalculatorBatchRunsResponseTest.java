@@ -36,7 +36,7 @@ class CalculatorBatchRunsResponseTest {
                 .status("SUCCESS")
                 .slaStatus("ON_TIME")
                 .sla(Instant.parse("2026-03-06T15:00:00Z"))
-                .slaBreached(false)
+                .slaBand(null)
                 .isRerun(false)
                 .build();
         String json = mapper.writeValueAsString(run);
@@ -59,7 +59,7 @@ class CalculatorBatchRunsResponseTest {
                 .endTime(Instant.parse("2026-03-06T14:58:00Z"))
                 .sla(Instant.parse("2026-03-06T15:00:00Z"))
                 .durationMs(6960000L)
-                .slaBreached(true)
+                .slaBand("VERY_LATE")
                 .slaBreachReason("Run status: FAILED")
                 .isRerun(true)
                 .build();

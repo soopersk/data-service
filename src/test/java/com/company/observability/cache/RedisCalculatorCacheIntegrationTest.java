@@ -120,7 +120,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
                     .reportingDate(TestFixtures.DEFAULT_DATE)
                     .startTime(base)
                     .status(com.company.observability.domain.enums.RunStatus.RUNNING)
-                    .slaBreached(false)
+                    .slaBand(null)
                     .createdAt(base.plusSeconds(i))   // unique score per run
                     .build();
             cache.cacheRunOnWrite(run);
@@ -187,7 +187,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         cache.cacheRunOnWrite(run);
 
         // Update: mark as breached (mutate the object)
-        run.setSlaBreached(true);
+        run.setSlaBand(com.company.observability.domain.enums.SlaBand.LATE);
         run.setSlaBreachReason("Still running past SLA deadline");
         cache.updateRunInCache(run);
 
@@ -260,12 +260,12 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
                 "run-current", "SUCCESS",
                 Instant.parse("2026-04-10T05:00:00Z"),
                 Instant.parse("2026-04-10T05:10:00Z"),
-                null, null, null, 600_000L, "10m", false, null);
+                null, null, null, 600_000L, "10m", null, null);
         RunStatusInfo historical = new RunStatusInfo(
                 "run-prev", "SUCCESS",
                 Instant.parse("2026-04-09T05:00:00Z"),
                 Instant.parse("2026-04-09T05:08:00Z"),
-                null, null, null, 480_000L, "8m", false, null);
+                null, null, null, 480_000L, "8m", null, null);
 
         CalculatorStatusResponse response = new CalculatorStatusResponse(
                 "Calculator calc-hist", Instant.now(), current, List.of(historical));
@@ -290,7 +290,7 @@ class RedisCalculatorCacheIntegrationTest extends RedisIntegrationTestBase {
         RunStatusInfo current = new RunStatusInfo(
                 "run-" + calculatorId, "RUNNING",
                 Instant.parse("2026-04-10T05:00:00Z"),
-                null, null, null, null, null, null, false, null);
+                null, null, null, null, null, null, null, null);
         return new CalculatorStatusResponse(
                 "Calculator " + calculatorId,
                 Instant.now(), current, List.of());

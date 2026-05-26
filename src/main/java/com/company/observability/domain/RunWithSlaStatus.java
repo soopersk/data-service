@@ -2,14 +2,14 @@ package com.company.observability.domain;
 
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.domain.enums.Severity;
+import com.company.observability.domain.enums.SlaBand;
 
 import java.time.Instant;
 import java.time.LocalDate;
 
 /**
- * Lightweight projection for performance card: calculator_runs LEFT JOIN sla_breach_events.
- * Severity is nullable (LEFT JOIN — null when no breach exists).
+ * Lightweight projection for performance card: sourced from calculator_runs only.
+ * slaBand is read directly from cr.sla_band — no JOIN to sla_breach_events.
  */
 public record RunWithSlaStatus(
         String runId,
@@ -23,9 +23,8 @@ public record RunWithSlaStatus(
         Instant estimatedStartTime,
         Frequency frequency,
         RunStatus status,
-        Boolean slaBreached,
+        SlaBand slaBand,
         String slaBreachReason,
-        Severity severity,
         String correlationId,
         String runNumber,
         Long expectedDurationMs

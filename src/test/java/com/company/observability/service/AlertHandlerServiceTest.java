@@ -6,7 +6,7 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.Frequency;
-import com.company.observability.domain.enums.Severity;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.SlaBreachEventRepository;
 import com.company.observability.domain.SlaEvaluationResult;
@@ -53,7 +53,7 @@ class AlertHandlerServiceTest {
     void handleSlaBreachEvent_savesAndMarksAlertSent() {
         when(alertSender.channelName()).thenReturn("logging");
         CalculatorRun run = baseRun();
-        SlaEvaluationResult result = new SlaEvaluationResult(true, "Finished 10 minutes late", "HIGH");
+        SlaEvaluationResult result = new SlaEvaluationResult(SlaBand.LATE, "Finished 10 minutes late");
 
         SlaBreachEvent saved = SlaBreachEvent.builder()
                 .breachId(101L)
@@ -61,7 +61,6 @@ class AlertHandlerServiceTest {
                 .calculatorId(run.getCalculatorId())
                 .calculatorName(run.getCalculatorName())
                 .tenantId(run.getTenantId())
-                .severity(Severity.HIGH)
                 .alerted(false)
                 .retryCount(0)
                 .build();
@@ -87,14 +86,13 @@ class AlertHandlerServiceTest {
     void handleSlaBreachEvent_senderFails_marksAlertFailed() {
         when(alertSender.channelName()).thenReturn("logging");
         CalculatorRun run = baseRun();
-        SlaEvaluationResult result = new SlaEvaluationResult(true, "Finished 10 minutes late", "HIGH");
+        SlaEvaluationResult result = new SlaEvaluationResult(SlaBand.LATE, "Finished 10 minutes late");
 
         SlaBreachEvent saved = SlaBreachEvent.builder()
                 .breachId(102L)
                 .runId(run.getRunId())
                 .calculatorId(run.getCalculatorId())
                 .tenantId(run.getTenantId())
-                .severity(Severity.HIGH)
                 .alerted(false)
                 .retryCount(0)
                 .build();
@@ -118,7 +116,7 @@ class AlertHandlerServiceTest {
     @Test
     void handleSlaBreachEvent_duplicateSaveSkipsAlertUpdate() {
         CalculatorRun run = baseRun();
-        SlaEvaluationResult result = new SlaEvaluationResult(true, "Still running 5 minutes past SLA deadline", "LOW");
+        SlaEvaluationResult result = new SlaEvaluationResult(SlaBand.LATE, "Still running 5 minutes past SLA deadline");
 
         when(breachRepository.save(any(SlaBreachEvent.class)))
                 .thenThrow(new DuplicateKeyException("duplicate"));
@@ -145,4 +143,3 @@ class AlertHandlerServiceTest {
                 .build();
     }
 }
-

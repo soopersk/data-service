@@ -185,6 +185,6 @@ public class RunQueryService {
                 run.getEstimatedStartTime(), run.getEstimatedEndTime(),
                 run.getSlaTime(), run.getDurationMs(),
                 TimeUtils.formatDuration(run.getDurationMs()),
-                run.getSlaBreached(), run.getSlaBreachReason());
+                run.getSlaBand() != null ? run.getSlaBand().name() : null, run.getSlaBreachReason());
     }
 }

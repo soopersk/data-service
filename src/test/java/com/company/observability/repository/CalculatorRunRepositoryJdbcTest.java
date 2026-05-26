@@ -4,6 +4,7 @@ import com.company.observability.cache.RedisCalculatorCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.RunWithSlaStatus;
 import com.company.observability.domain.enums.Frequency;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.util.JsonbConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,30 +78,18 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     }
 
     @Test
-    void findRunsWithSlaStatus_returnsJoinedSeverityFromBreachEvents() {
+    void findRunsWithSlaStatus_returnsSlaBandFromCalculatorRuns() {
         LocalDate reportDate = LocalDate.now();
         Instant createdAt = Instant.parse("2026-02-22T12:00:00Z");
-        insertRun("run-severity", "calc-1", reportDate, createdAt);
-
-        jdbcTemplate.update("""
-            INSERT INTO sla_breach_events (
-                run_id, calculator_id, calculator_name, tenant_id,
-                breach_type, expected_value, actual_value, severity,
-                alerted, alert_status, retry_count, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                "run-severity", "calc-1", "Calculator 1", "tenant-1",
-                "TIME_EXCEEDED", 100L, 300L, "HIGH",
-                false, "PENDING", 0, Timestamp.from(createdAt)
-        );
+        insertRunWithSlaBand("run-banded", "calc-1", reportDate, createdAt, "LATE");
 
         List<RunWithSlaStatus> result = repository.findRunsWithSlaStatus(
                 "calc-1", Frequency.DAILY, 3
         );
 
         assertEquals(1, result.size());
-        assertEquals("run-severity", result.get(0).runId());
-        assertEquals("HIGH", result.get(0).severity() != null ? result.get(0).severity().name() : null);
+        assertEquals("run-banded", result.get(0).runId());
+        assertEquals(SlaBand.LATE, result.get(0).slaBand());
         assertNotNull(result.get(0).reportingDate());
     }
 
@@ -122,7 +111,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
                 .reportingDate(date)
                 .startTime(originalStart)
                 .status(RunStatus.RUNNING)
-                .slaBreached(false)
+                .slaBand(null)
                 .createdAt(originalStart)
                 .build();
         repository.upsert(first);
@@ -137,7 +126,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
                 .reportingDate(date)
                 .startTime(originalStart.plusSeconds(9999)) // ON CONFLICT DO UPDATE does NOT include this column
                 .status(RunStatus.SUCCESS)              // mutable — should be updated
-                .slaBreached(false)
+                .slaBand(null)
                 .createdAt(originalStart)
                 .build();
         repository.upsert(second);
@@ -150,39 +139,39 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     }
 
     // ---------------------------------------------------------------
-    // markSlaBreached — idempotency and status guard
+    // markSlaBreach — idempotency and status guard
     // ---------------------------------------------------------------
 
     @Test
-    void markSlaBreached_idempotent_secondCallReturnsZero() {
+    void markSlaBreach_idempotent_secondCallReturnsZero() {
         LocalDate date = LocalDate.of(2026, 4, 10);
         Instant start = Instant.parse("2026-04-10T05:00:00Z");
         insertRunWithStatus("run-breach", "calc-1", date, start, "RUNNING");
 
-        int firstCall  = repository.markSlaBreached("run-breach", "Exceeded SLA deadline", date);
-        int secondCall = repository.markSlaBreached("run-breach", "Exceeded SLA deadline again", date);
+        int firstCall  = repository.markSlaBreach("run-breach", date, SlaBand.LATE, "Exceeded SLA deadline");
+        int secondCall = repository.markSlaBreach("run-breach", date, SlaBand.VERY_LATE, "Exceeded SLA deadline again");
 
         assertThat(firstCall).isEqualTo(1);
-        assertThat(secondCall).isZero(); // sla_breached=true → WHERE sla_breached=false fails
+        assertThat(secondCall).isZero(); // sla_band IS NULL guard → second call skipped
 
         Optional<CalculatorRun> run = repository.findById("run-breach", date);
         assertThat(run).isPresent();
-        assertThat(run.get().getSlaBreached()).isTrue();
+        assertThat(run.get().getSlaBand()).isEqualTo(SlaBand.LATE); // first call wins
     }
 
     @Test
-    void markSlaBreached_completedRun_notUpdated() {
+    void markSlaBreach_completedRun_notUpdated() {
         LocalDate date = LocalDate.of(2026, 4, 10);
         Instant start = Instant.parse("2026-04-10T05:00:00Z");
         insertRunWithStatus("run-complete", "calc-1", date, start, "SUCCESS");
 
-        int updated = repository.markSlaBreached("run-complete", "Breach reason", date);
+        int updated = repository.markSlaBreach("run-complete", date, SlaBand.LATE, "Breach reason");
 
         assertThat(updated).isZero(); // WHERE status='RUNNING' excludes completed runs
 
         Optional<CalculatorRun> run = repository.findById("run-complete", date);
         assertThat(run).isPresent();
-        assertThat(run.get().getSlaBreached()).isFalse();
+        assertThat(run.get().getSlaBand()).isNull();
     }
 
     private void insertRunWithStatus(String runId, String calculatorId,
@@ -190,20 +179,21 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         jdbcTemplate.update("""
             INSERT INTO calculator_runs (
                 run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-                start_time, status, sla_breached, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                start_time, status, sla_band, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
             """,
                 runId, calculatorId, "Calculator 1", "tenant-1", "DAILY", reportingDate,
-                Timestamp.from(start), status, false,
+                Timestamp.from(start), status,
                 Timestamp.from(start), Timestamp.from(start)
         );
     }
 
-    private void insertRun(String runId, String calculatorId, LocalDate reportingDate, Instant createdAt) {
+    private void insertRunWithSlaBand(String runId, String calculatorId, LocalDate reportingDate,
+                                      Instant createdAt, String slaBand) {
         jdbcTemplate.update("""
             INSERT INTO calculator_runs (
                 run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-                start_time, end_time, duration_ms, status, sla_breached, created_at, updated_at
+                start_time, end_time, duration_ms, status, sla_band, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 runId, calculatorId, "Calculator 1", "tenant-1", "DAILY", reportingDate,
@@ -211,7 +201,24 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
                 Timestamp.from(createdAt),
                 60000L,
                 "SUCCESS",
-                false,
+                slaBand,
+                Timestamp.from(createdAt),
+                Timestamp.from(createdAt)
+        );
+    }
+
+    private void insertRun(String runId, String calculatorId, LocalDate reportingDate, Instant createdAt) {
+        jdbcTemplate.update("""
+            INSERT INTO calculator_runs (
+                run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
+                start_time, end_time, duration_ms, status, sla_band, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+            """,
+                runId, calculatorId, "Calculator 1", "tenant-1", "DAILY", reportingDate,
+                Timestamp.from(createdAt.minusSeconds(60)),
+                Timestamp.from(createdAt),
+                60000L,
+                "SUCCESS",
                 Timestamp.from(createdAt),
                 Timestamp.from(createdAt)
         );

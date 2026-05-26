@@ -140,7 +140,7 @@ class CalculatorStateServiceTest {
     void runningRunWithSlaBreachedTrueIsNotOnTime() {
         CalculatorRun run = buildRun("calc", "r-1", RunStatus.RUNNING, "WMAP", null, "1", null,
                 T_MINUS_3, null, SLA_TIME);
-        run.setSlaBreached(true);
+        run.setSlaBand(com.company.observability.domain.enums.SlaBand.LATE);
 
         when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(run));

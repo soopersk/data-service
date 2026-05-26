@@ -7,7 +7,7 @@ import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.BreachType;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
-import com.company.observability.domain.enums.Severity;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.dto.response.PagedResponse;
 import com.company.observability.dto.response.RunPerformanceData;
 import com.company.observability.dto.response.SlaBreachDetailResponse;
@@ -109,12 +109,12 @@ class AnalyticsServiceTest {
 
         when(dailyAggregateRepository.findRecentAggregates("calc-1", 30))
                 .thenReturn(List.of(aggregate));
-        when(slaBreachEventRepository.countBySeverity("calc-1", 30))
-                .thenReturn(Map.of("HIGH", 2));
+        when(slaBreachEventRepository.countByBand("calc-1", 30))
+                .thenReturn(Map.of("VERY_LATE", 2));
         when(slaBreachEventRepository.countByType("calc-1", 30))
                 .thenReturn(Map.of("TIME_EXCEEDED", 2));
-        when(slaBreachEventRepository.findWorstSeverityByDay("calc-1", 30))
-                .thenReturn(Map.of(day, "HIGH"));
+        when(slaBreachEventRepository.findWorstDayHealthByDay("calc-1", 30))
+                .thenReturn(Map.of(day, "VERY_LATE"));
 
         SlaSummaryResponse response = service.getSlaSummary("calc-1", 30);
 
@@ -123,7 +123,7 @@ class AnalyticsServiceTest {
     }
 
     @Test
-    void getTrends_usesAggregatedWorstSeverityByDay() {
+    void getTrends_usesAggregatedWorstBandByDay() {
         LocalDate day = LocalDate.of(2026, 2, 20);
         DailyAggregate aggregate = new DailyAggregate(
                 "calc-1", day,
@@ -131,12 +131,12 @@ class AnalyticsServiceTest {
 
         when(dailyAggregateRepository.findRecentAggregates("calc-1", 7))
                 .thenReturn(List.of(aggregate));
-        when(slaBreachEventRepository.countBySeverity("calc-1", 7))
-                .thenReturn(Map.of("MEDIUM", 1));
+        when(slaBreachEventRepository.countByBand("calc-1", 7))
+                .thenReturn(Map.of("LATE", 1));
         when(slaBreachEventRepository.countByType("calc-1", 7))
                 .thenReturn(Map.of("TIME_EXCEEDED", 1));
-        when(slaBreachEventRepository.findWorstSeverityByDay("calc-1", 7))
-                .thenReturn(Map.of(day, "MEDIUM"));
+        when(slaBreachEventRepository.findWorstDayHealthByDay("calc-1", 7))
+                .thenReturn(Map.of(day, "LATE"));
 
         TrendAnalyticsResponse response = service.getTrends("calc-1", 7);
 
@@ -155,19 +155,19 @@ class AnalyticsServiceTest {
                 "run-1", "calc-1", "Calculator One", day,
                 start, end, 180000L,
                 slaTime, start, Frequency.DAILY,
-                RunStatus.SUCCESS, false, null, null, null, null, null);
+                RunStatus.SUCCESS, null, null, null, null, null);
 
         RunWithSlaStatus breachedRun = new RunWithSlaStatus(
                 "run-2", "calc-1", "Calculator One", day.plusDays(1),
                 start, end, 180000L,
                 slaTime, start, Frequency.DAILY,
-                RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH, null, null, null);
+                RunStatus.SUCCESS, SlaBand.VERY_LATE, "Time exceeded", null, null, null);
 
         RunWithSlaStatus runningRun = new RunWithSlaStatus(
                 "run-3", "calc-1", "Calculator One", day.plusDays(2),
                 start, null, null,
                 slaTime, start, Frequency.DAILY,
-                RunStatus.RUNNING, false, null, null, null, null, null);
+                RunStatus.RUNNING, null, null, null, null, null);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
                 "calc-1", Frequency.DAILY, 30))
@@ -194,12 +194,12 @@ class AnalyticsServiceTest {
         assertEquals(end, point1.endTime());
         assertEquals("SUCCESS", point1.status());
         assertEquals("ON_TIME", point1.slaStatus());
-        assertEquals(false, point1.slaBreached());
+        assertEquals("ON_TIME", point1.slaBand());
 
         RunPerformanceData.RunDataPoint point2 = result.runs().get(1);
         assertEquals("SUCCESS", point2.status());
         assertEquals("VERY_LATE", point2.slaStatus());
-        assertEquals(true, point2.slaBreached());
+        assertEquals("VERY_LATE", point2.slaBand());
 
         RunPerformanceData.RunDataPoint point3 = result.runs().get(2);
         assertEquals("RUNNING", point3.status());
@@ -243,13 +243,13 @@ class AnalyticsServiceTest {
                 "run-split-1", "calc-1", "Portfolio", day,
                 start1, end1, 500000L,
                 slaTime, start1, Frequency.DAILY,
-                RunStatus.SUCCESS, false, null, null, "corr-1", "1", 300000L);
+                RunStatus.SUCCESS, null, null, "corr-1", "1", 300000L);
 
         RunWithSlaStatus split2 = new RunWithSlaStatus(
                 "run-split-2", "calc-1", "Portfolio", day,
                 start2, end2, 940000L,
                 slaTime, start2, Frequency.DAILY,
-                RunStatus.SUCCESS, true, "Time exceeded", Severity.HIGH, "corr-1", "1", 300000L);
+                RunStatus.SUCCESS, SlaBand.VERY_LATE, "Time exceeded", "corr-1", "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
                 "calc-1", Frequency.DAILY, 30, null))
@@ -301,7 +301,7 @@ class AnalyticsServiceTest {
                 "run-1", "calc-1", "Portfolio", day,
                 start, end, 1_800_000L,
                 runSla, start, Frequency.DAILY,
-                RunStatus.SUCCESS, false, null, null, null, "1", 300000L);
+                RunStatus.SUCCESS, null, null, null, "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
                 "calc-1", Frequency.DAILY, 30, null))
@@ -392,7 +392,6 @@ class AnalyticsServiceTest {
                 .calculatorName("Calculator 1")
                 .tenantId("tenant-1")
                 .breachType(BreachType.TIME_EXCEEDED)
-                .severity(Severity.HIGH)
                 .createdAt(createdAt)
                 .build();
     }

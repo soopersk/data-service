@@ -34,36 +34,49 @@ class SlaBreachEventRepositoryTest {
     }
 
     @Test
-    void findByCalculatorIdPaginated_withSeverity_usesLimitOffsetOrdering() {
+    void findByCalculatorIdPaginated_withBandFilter_usesBandJoinAndLimitOffset() {
         when(jdbcTemplate.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of());
 
-        repository.findByCalculatorIdPaginated("calc-1", 30, "HIGH", 40, 20);
+        repository.findByCalculatorIdPaginated("calc-1", 30, "VERY_LATE", 40, 20);
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sqlCaptor.capture(), any(SqlParameterSource.class), any(RowMapper.class));
         String sql = sqlCaptor.getValue();
-        assertTrue(sql.contains("AND severity = :severity"));
-        assertTrue(sql.contains("ORDER BY created_at DESC"));
+        assertTrue(sql.contains("AND cr.sla_band = :band"), "expected band filter, got: " + sql);
+        assertTrue(sql.contains("ORDER BY sbe.created_at DESC"));
         assertTrue(sql.contains("LIMIT :limit OFFSET :offset"));
     }
 
     @Test
-    void findByCalculatorIdKeyset_withCursorAndSeverity_usesStableKeysetPredicateAndOrder() {
+    void findByCalculatorIdKeyset_withCursorAndBandFilter_usesStableKeysetPredicateAndOrder() {
         when(jdbcTemplate.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of());
 
         repository.findByCalculatorIdKeyset(
-                "calc-1", 30, "CRITICAL",
+                "calc-1", 30, "LATE",
                 Instant.parse("2026-02-22T10:00:00Z"), 123L, 25
         );
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sqlCaptor.capture(), any(SqlParameterSource.class), any(RowMapper.class));
         String sql = sqlCaptor.getValue();
-        assertTrue(sql.contains("AND severity = :severity"));
-        assertTrue(sql.contains("AND (created_at, breach_id) < (:cursorCreatedAt, :cursorBreachId)"));
+        assertTrue(sql.contains("AND cr.sla_band = :band"), "expected band filter, got: " + sql);
+        assertTrue(sql.contains("AND (sbe.created_at, sbe.breach_id) < (:cursorCreatedAt, :cursorBreachId)"));
         assertTrue(sql.contains("ORDER BY created_at DESC, breach_id DESC"));
         assertTrue(sql.contains("LIMIT :limit"));
+    }
+
+    @Test
+    void findByCalculatorIdPaginated_withFailedBandFilter_usesStatusInFilter() {
+        when(jdbcTemplate.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class)))
+                .thenReturn(List.of());
+
+        repository.findByCalculatorIdPaginated("calc-1", 30, "FAILED", 0, 10);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(SqlParameterSource.class), any(RowMapper.class));
+        String sql = sqlCaptor.getValue();
+        assertTrue(sql.contains("AND cr.status IN ('FAILED','TIMEOUT')"), "expected status filter, got: " + sql);
     }
 }

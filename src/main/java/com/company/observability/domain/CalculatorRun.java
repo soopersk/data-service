@@ -2,6 +2,7 @@ package com.company.observability.domain;
 
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import lombok.*;
 
 import java.io.Serializable;
@@ -51,7 +52,7 @@ public class CalculatorRun implements Serializable {
     private Instant estimatedStartTime;
     private Instant estimatedEndTime;
 
-    private Boolean slaBreached;
+    private SlaBand slaBand;
     private String slaBreachReason;
 
     // Promoted from run_parameters JSONB

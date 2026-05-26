@@ -95,14 +95,14 @@ class AnalyticsControllerTest {
                                 "run-1", LocalDate.parse("2026-02-21"),
                                 Instant.parse("2026-02-21T04:00:00Z"),
                                 Instant.parse("2026-02-21T04:03:00Z"),
-                                180000L, "SUCCESS", false, "ON_TIME", null,
+                                180000L, "SUCCESS", null, "ON_TIME", null,
                                 Instant.parse("2026-02-21T04:00:00Z"),
                                 Instant.parse("2026-02-21T06:15:00Z"), null, null),
                         new RunPerformanceData.RunDataPoint(
                                 "run-2", LocalDate.parse("2026-02-22"),
                                 Instant.parse("2026-02-22T04:00:00Z"),
                                 null,
-                                null, "RUNNING", false, "ON_TIME", null,
+                                null, "RUNNING", null, "ON_TIME", null,
                                 Instant.parse("2026-02-22T04:00:00Z"),
                                 Instant.parse("2026-02-22T06:15:00Z"), null, null)
                 ),
@@ -170,14 +170,14 @@ class AnalyticsControllerTest {
                                 "run-split-1", LocalDate.parse("2026-05-11"),
                                 Instant.parse("2026-05-11T03:59:50Z"),
                                 Instant.parse("2026-05-11T04:08:10Z"),
-                                500000L, "SUCCESS", false, "ON_TIME", null,
+                                500000L, "SUCCESS", null, "ON_TIME", null,
                                 Instant.parse("2026-05-11T04:00:00Z"),
                                 Instant.parse("2026-05-11T06:30:00Z"), "1", 300000L),
                         new RunPerformanceData.RunDataPoint(
                                 "run-split-2", LocalDate.parse("2026-05-11"),
                                 Instant.parse("2026-05-11T04:00:05Z"),
                                 Instant.parse("2026-05-11T04:15:45Z"),
-                                940000L, "SUCCESS", true, "VERY_LATE", null,
+                                940000L, "SUCCESS", "VERY_LATE", "VERY_LATE", null,
                                 Instant.parse("2026-05-11T04:00:00Z"),
                                 Instant.parse("2026-05-11T06:30:00Z"), "1", 300000L)
                 ),

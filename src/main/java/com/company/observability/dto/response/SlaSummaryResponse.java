@@ -9,6 +9,6 @@ public record SlaSummaryResponse(
         int greenDays,
         int amberDays,
         int redDays,
-        Map<String, Integer> breachesBySeverity,
+        Map<String, Integer> breachesByBand,
         Map<String, Integer> breachesByType
 ) {}

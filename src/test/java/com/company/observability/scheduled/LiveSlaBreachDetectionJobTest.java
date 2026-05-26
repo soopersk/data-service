@@ -4,6 +4,7 @@ import com.company.observability.cache.SlaMonitoringCache;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.repository.CalculatorRunRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -63,13 +64,13 @@ class LiveSlaBreachDetectionJobTest {
                 .runId("run-1").calculatorId("calc-1").calculatorName("Calculator 1")
                 .tenantId("tenant-1").frequency(Frequency.DAILY).reportingDate(date)
                 .startTime(Instant.parse("2026-04-10T04:00:00Z")).status(RunStatus.SUCCESS)
-                .slaTime(Instant.now().minusSeconds(600)).slaBreached(false)
+                .slaTime(Instant.now().minusSeconds(600)).slaBand(null)
                 .createdAt(Instant.parse("2026-04-10T04:00:00Z")).build();
         when(runRepository.findById("run-1", date)).thenReturn(Optional.of(completedRun));
 
         job.detectLiveSlaBreaches();
 
-        verify(runRepository, never()).markSlaBreached(anyString(), anyString(), any());
+        verify(runRepository, never()).markSlaBreach(anyString(), any(), any(), anyString());
         verify(eventPublisher, never()).publishEvent(any());
         verify(slaMonitoringCache).deregisterFromSlaMonitoring("run-1", "tenant-1", date);
     }
@@ -84,14 +85,14 @@ class LiveSlaBreachDetectionJobTest {
                 .runId("run-1").calculatorId("calc-1").calculatorName("Calculator 1")
                 .tenantId("tenant-1").frequency(Frequency.DAILY).reportingDate(date)
                 .startTime(Instant.parse("2026-04-10T04:00:00Z")).status(RunStatus.RUNNING)
-                .slaTime(Instant.now().minusSeconds(600)).slaBreached(true)
+                .slaTime(Instant.now().minusSeconds(600)).slaBand(SlaBand.LATE)
                 .slaBreachReason("Already breached at start")
                 .createdAt(Instant.parse("2026-04-10T04:00:00Z")).build();
         when(runRepository.findById("run-1", date)).thenReturn(Optional.of(alreadyBreached));
 
         job.detectLiveSlaBreaches();
 
-        verify(runRepository, never()).markSlaBreached(anyString(), anyString(), any());
+        verify(runRepository, never()).markSlaBreach(anyString(), any(), any(), anyString());
         verify(eventPublisher, never()).publishEvent(any());
         verify(slaMonitoringCache).deregisterFromSlaMonitoring("run-1", "tenant-1", date);
     }
@@ -105,7 +106,7 @@ class LiveSlaBreachDetectionJobTest {
 
         job.detectLiveSlaBreaches();
 
-        verify(runRepository, never()).markSlaBreached(anyString(), anyString(), any());
+        verify(runRepository, never()).markSlaBreach(anyString(), any(), any(), anyString());
         verify(eventPublisher, never()).publishEvent(any());
         verify(slaMonitoringCache).deregisterFromSlaMonitoring("run-missing", "tenant-1", date);
     }
@@ -122,11 +123,11 @@ class LiveSlaBreachDetectionJobTest {
 
         CalculatorRun run = runningRun("run-1", date);
         when(runRepository.findById("run-1", date)).thenReturn(Optional.of(run));
-        when(runRepository.markSlaBreached(eq("run-1"), anyString(), eq(date))).thenReturn(1);
+        when(runRepository.markSlaBreach(eq("run-1"), eq(date), any(SlaBand.class), anyString())).thenReturn(1);
 
         job.detectLiveSlaBreaches();
 
-        verify(runRepository).markSlaBreached(eq("run-1"), anyString(), eq(date));
+        verify(runRepository).markSlaBreach(eq("run-1"), eq(date), any(SlaBand.class), anyString());
         verify(eventPublisher).publishEvent(any(SlaBreachedEvent.class));
         verify(slaMonitoringCache).deregisterFromSlaMonitoring("run-1", "tenant-1", date);
     }
@@ -180,7 +181,7 @@ class LiveSlaBreachDetectionJobTest {
         // Second run proceeds normally
         CalculatorRun run = runningRun("run-good", date);
         when(runRepository.findById("run-good", date)).thenReturn(Optional.of(run));
-        when(runRepository.markSlaBreached(eq("run-good"), anyString(), eq(date))).thenReturn(1);
+        when(runRepository.markSlaBreach(eq("run-good"), eq(date), any(SlaBand.class), anyString())).thenReturn(1);
 
         // Must not throw — per-run exceptions are caught and logged
         job.detectLiveSlaBreaches();
@@ -234,7 +235,7 @@ class LiveSlaBreachDetectionJobTest {
                 .startTime(Instant.parse("2026-04-10T04:00:00Z"))
                 .status(RunStatus.RUNNING)
                 .slaTime(Instant.now().minusSeconds(600)) // already past deadline
-                .slaBreached(false)
+                .slaBand(null)
                 .createdAt(Instant.parse("2026-04-10T04:00:00Z"))
                 .build();
     }

@@ -3,6 +3,7 @@ package com.company.observability.service;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
+import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.domain.SlaEvaluationResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,7 @@ class SlaEvaluationServiceTest {
         SlaEvaluationResult result = service.evaluateSla(run(RunStatus.SUCCESS, 50L * 60 * 1000));
         assertFalse(result.isBreached());
         assertNull(result.getReason());
-        assertNull(result.getSeverity());
+        assertEquals(SlaBand.ON_TIME, result.getBand());
     }
 
     @Test
@@ -46,49 +47,53 @@ class SlaEvaluationServiceTest {
         // duration == lateEdge (60 min) → still ON_TIME
         SlaEvaluationResult result = service.evaluateSla(run(RunStatus.SUCCESS, 60L * 60 * 1000));
         assertFalse(result.isBreached());
+        assertEquals(SlaBand.ON_TIME, result.getBand());
     }
 
     @Test
-    void late_whenBetweenLateAndVeryLateEdge_mediumSeverity() {
+    void late_whenBetweenLateAndVeryLateEdge_lateBand() {
         SlaEvaluationResult result = service.evaluateSla(run(RunStatus.SUCCESS, 70L * 60 * 1000));
         assertTrue(result.isBreached());
-        assertEquals("MEDIUM", result.getSeverity());
+        assertEquals(SlaBand.LATE, result.getBand());
         assertTrue(result.getReason().contains("LATE band"));
     }
 
     @Test
-    void late_atExactVeryLateEdgeBoundary_mediumSeverity() {
+    void late_atExactVeryLateEdgeBoundary_lateBand() {
         // duration == veryLateEdge (75 min) → still LATE
         SlaEvaluationResult result = service.evaluateSla(run(RunStatus.SUCCESS, 75L * 60 * 1000));
         assertTrue(result.isBreached());
-        assertEquals("MEDIUM", result.getSeverity());
+        assertEquals(SlaBand.LATE, result.getBand());
     }
 
     @Test
-    void veryLate_whenBeyondVeryLateEdge_highSeverity() {
+    void veryLate_whenBeyondVeryLateEdge_veryLateBand() {
         SlaEvaluationResult result = service.evaluateSla(run(RunStatus.SUCCESS, 80L * 60 * 1000));
         assertTrue(result.isBreached());
-        assertEquals("HIGH", result.getSeverity());
+        assertEquals(SlaBand.VERY_LATE, result.getBand());
         assertTrue(result.getReason().contains("VERY_LATE band"));
     }
 
     @Test
-    void failedRun_isCritical_regardlessOfDuration() {
+    void failedRun_shortDuration_treatedAsOnTimeTiming() {
+        // FAILED/TIMEOUT are orthogonal to timing — SlaEvaluationService is timing-only.
+        // A FAILED run with 1ms duration is ON_TIME from a timing perspective.
+        // RunIngestionService independently checks status for failure breach.
         SlaEvaluationResult result = service.evaluateSla(run(RunStatus.FAILED, 1L));
-        assertTrue(result.isBreached());
-        assertEquals("CRITICAL", result.getSeverity());
-        assertTrue(result.getReason().contains("Run status: FAILED"));
+        assertFalse(result.isBreached());
+        assertEquals(SlaBand.ON_TIME, result.getBand());
     }
 
     @Test
-    void timeoutRun_isCritical() {
+    void timeoutRun_longDuration_gradedByTimingBand() {
+        // TIMEOUT with a very-late duration → VERY_LATE timing band.
         SlaEvaluationResult result = service.evaluateSla(run(RunStatus.TIMEOUT, 80L * 60 * 1000));
         assertTrue(result.isBreached());
-        assertEquals("CRITICAL", result.getSeverity());
+        assertEquals(SlaBand.VERY_LATE, result.getBand());
     }
 
     @Test
-    void ungraded_whenNoDeadlineResolved_treatedAsOnTime() {
+    void ungraded_whenNoDeadlineResolved_nullBand() {
         CalculatorRun run = CalculatorRun.builder()
                 .status(RunStatus.SUCCESS)
                 .startTime(START)
@@ -97,7 +102,6 @@ class SlaEvaluationServiceTest {
                 .build();
         SlaEvaluationResult result = service.evaluateSla(run);
         assertFalse(result.isBreached());
-        assertNull(result.getSeverity());
+        assertNull(result.getBand());
     }
 }
-

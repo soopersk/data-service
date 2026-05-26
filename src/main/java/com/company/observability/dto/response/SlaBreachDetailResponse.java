@@ -8,7 +8,7 @@ public record SlaBreachDetailResponse(
         String calculatorId,
         String calculatorName,
         String breachType,
-        String severity,
+        String band,
         String slaStatus,
         Long expectedValue,
         Long actualValue,

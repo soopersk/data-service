@@ -47,17 +47,17 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     /** Insert one completed run into the partitioned source table. */
     private void insertRun(String runId, String calcId, String tenant, String frequency,
                            LocalDate reportingDate, int startMinUtc, long durationMs,
-                           String status, boolean slaBreached) {
+                           String status, boolean ignored) {
         OffsetDateTime start = reportingDate.atStartOfDay(ZoneOffset.UTC).toOffsetDateTime().plusMinutes(startMinUtc);
         OffsetDateTime end = start.plusNanos(durationMs * 1_000_000L);
         jdbcTemplate.update("""
                 INSERT INTO calculator_runs (
                     run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
-                    start_time, end_time, duration_ms, status, sla_breached)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    start_time, end_time, duration_ms, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 runId, calcId, calcId, tenant, frequency, reportingDate,
-                start, end, durationMs, status, slaBreached);
+                start, end, durationMs, status);
     }
 
     // ---------------------------------------------------------------

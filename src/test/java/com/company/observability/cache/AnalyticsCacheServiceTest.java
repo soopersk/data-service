@@ -127,7 +127,7 @@ class AnalyticsCacheServiceTest {
         when(setOperations.members(idIndex)).thenReturn(idKeys);
         when(setOperations.members(nameIndex)).thenReturn(nameKeys);
 
-        service.onSlaBreached(new SlaBreachedEvent(run, new SlaEvaluationResult(true, "b", "HIGH")));
+        service.onSlaBreached(new SlaBreachedEvent(run, new SlaEvaluationResult(com.company.observability.domain.enums.SlaBand.LATE, "b")));
 
         verify(redisTemplate).delete(List.of("obs:analytics:runtime:calc-1:30", idIndex));
         verify(redisTemplate).delete(List.of("obs:analytics:executions:Calculator:DAILY:30:all", nameIndex));
@@ -203,7 +203,7 @@ class AnalyticsCacheServiceTest {
         RunDataPoint dp = new RunDataPoint(
                 "run-1", LocalDate.of(2026, 5, 1),
                 Instant.parse("2026-05-01T04:00:00Z"), Instant.parse("2026-05-01T05:00:00Z"),
-                3_600_000L, "SUCCESS", false, "ON_TIME",
+                3_600_000L, "SUCCESS", null, "ON_TIME",
                 null, Instant.parse("2026-05-01T04:00:00Z"), Instant.parse("2026-05-01T06:00:00Z"),
                 "1", 3_600_000L);
         RunPerformanceData response = new RunPerformanceData(

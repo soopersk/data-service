@@ -22,15 +22,11 @@ public class StructuredLogAlertSender implements AlertSender {
         if (breach == null) {
             throw new AlertDeliveryException("breach payload is required");
         }
-        if (breach.getSeverity() == null) {
-            throw new AlertDeliveryException("severity is required for alert routing");
-        }
 
         Map<String, String> snapshot = MdcContextUtil.setAlertContext(breach);
         try {
             lifecycleLogger.emit(LifecycleEvent.SLA_BREACH_ALERT,
                     kv("calculator", breach.getCalculatorId()),
-                    kv("severity", breach.getSeverity().name()),
                     kv("breach", breach.getBreachType() != null ? breach.getBreachType().name() : "UNKNOWN"),
                     kv("tenant", breach.getTenantId()));
         } catch (Exception e) {

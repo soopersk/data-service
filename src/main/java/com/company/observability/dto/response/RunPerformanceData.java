@@ -34,7 +34,7 @@ public record RunPerformanceData(
             Instant endTime,
             Long durationMs,
             String status,
-            Boolean slaBreached,
+            String slaBand,
             String slaStatus,
             List<String> subRunIds,   // non-null only when this point represents a collapsed split group
             Instant estimatedStartTime,

@@ -2,7 +2,6 @@ package com.company.observability.domain;
 
 import com.company.observability.domain.enums.AlertStatus;
 import com.company.observability.domain.enums.BreachType;
-import com.company.observability.domain.enums.Severity;
 import lombok.*;
 
 import java.time.Instant;
@@ -25,7 +24,6 @@ public class SlaBreachEvent {
     private BreachType breachType;
     private Long expectedValue;
     private Long actualValue;
-    private Severity severity;
     private Boolean alerted;
     private Instant alertedAt;
     private AlertStatus alertStatus;
