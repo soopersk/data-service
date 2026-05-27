@@ -117,8 +117,9 @@ public class CalculatorStateService {
                 })
                 .toList();
 
+        String calculatorId = runs.stream().findFirst().map(CalculatorRun::getCalculatorId).orElse(null);
         List<RunEntry> allEntries = Stream.concat(splitEntries.stream(), standaloneEntries.stream()).toList();
-        return new CalculatorEntry(calculatorName, allEntries);
+        return new CalculatorEntry(calculatorName, calculatorId, allEntries);
     }
 
     /**
@@ -128,13 +129,13 @@ public class CalculatorStateService {
      * Returns an empty entry only for brand-new calculators with no history at all.
      */
     private CalculatorEntry buildNotStartedEntry(String name, LocalDate date, Frequency freq) {
-        // 1. Try profile (Redis-cached 26h — very cheap)
+        // 1. Try profile (Redis-cached 26h — very cheap); calculatorId not available here
         CalculatorProfile profile = profileService.getProfile(name, freq);
         if (profile.hasSufficientSamples(slaProps.getMinSampleSize())) {
             Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(date, profile.avgStartMinUtc());
             Instant estEnd = estStart.plusMillis(profile.avgDurationMs());
             log.debug("event=batch_runs.not_started source=profile calculator={} date={}", name, date);
-            return entryWithSyntheticRun(name, estStart, estEnd, profile.avgDurationMs());
+            return entryWithSyntheticRun(name, null, estStart, estEnd, profile.avgDurationMs());
         }
 
         // 2. Fallback: most recent run's stored estimates, projected onto the queried date
@@ -148,16 +149,17 @@ public class CalculatorStateService {
                 Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(date, minuteOfDay);
                 Instant estEnd = estStart.plusMillis(r.getExpectedDurationMs());
                 log.debug("event=batch_runs.not_started source=latest_run calculator={} date={}", name, date);
-                return entryWithSyntheticRun(name, estStart, estEnd, r.getExpectedDurationMs());
+                return entryWithSyntheticRun(name, r.getCalculatorId(), estStart, estEnd, r.getExpectedDurationMs());
             }
         }
 
         // 3. Brand-new calculator with no history — return empty (same as before)
         log.debug("event=batch_runs.not_started source=none calculator={} date={}", name, date);
-        return new CalculatorEntry(name, List.of());
+        return new CalculatorEntry(name, null, List.of());
     }
 
-    private CalculatorEntry entryWithSyntheticRun(String name, Instant estStart, Instant estEnd, long expectedMs) {
+    private CalculatorEntry entryWithSyntheticRun(String name, String calculatorId,
+                                                   Instant estStart, Instant estEnd, long expectedMs) {
         RunEntry synthetic = RunEntry.builder()
                 .slaStatus("ON_TIME")
                 .estimatedStartTime(estStart)
@@ -165,7 +167,7 @@ public class CalculatorStateService {
                 .expectedDurationMs(expectedMs)
                 .isRerun(false)
                 .build();
-        return new CalculatorEntry(name, List.of(synthetic));
+        return new CalculatorEntry(name, calculatorId, List.of(synthetic));
     }
 
     private RunEntry collapseSplitGroup(List<CalculatorRun> splits) {

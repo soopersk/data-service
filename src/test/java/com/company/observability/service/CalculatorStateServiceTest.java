@@ -226,7 +226,7 @@ class CalculatorStateServiceTest {
 
     @Test
     void fullCacheHit_skipsDbCall() {
-        CalculatorEntry cachedEntry = new CalculatorEntry("cap", List.of());
+        CalculatorEntry cachedEntry = new CalculatorEntry("cap", null, List.of());
         when(stateCache.getEntries(eq(DATE), eq(FREQ_NAME), isNull(), eq(List.of("cap"))))
                 .thenReturn(Map.of("cap", cachedEntry));
 
@@ -240,7 +240,7 @@ class CalculatorStateServiceTest {
     void partialCacheHit_queriesDbOnlyForMisses() {
         CalculatorRun run = buildRun("other", "r-1", RunStatus.SUCCESS, "WMAP", null, "1",
                 null, T_MINUS_3, T_MINUS_1, SLA_TIME);
-        CalculatorEntry cachedEntry = new CalculatorEntry("cap", List.of());
+        CalculatorEntry cachedEntry = new CalculatorEntry("cap", null, List.of());
 
         when(stateCache.getEntries(eq(DATE), eq(FREQ_NAME), eq("1"), eq(List.of("cap", "other"))))
                 .thenReturn(new HashMap<>(Map.of("cap", cachedEntry)));

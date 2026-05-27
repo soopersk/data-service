@@ -20,7 +20,7 @@ class CalculatorBatchRunsResponseTest {
 
     @Test
     void emptyRunsSerializesWithEmptyArray() throws Exception {
-        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capitalcalc", List.of());
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capitalcalc", null, List.of());
         var response = new CalculatorBatchRunsResponse(
                 LocalDate.of(2026, 3, 6), "DAILY", "1", Instant.now(), Map.of("capitalcalc", entry));
         String json = mapper.writeValueAsString(response);

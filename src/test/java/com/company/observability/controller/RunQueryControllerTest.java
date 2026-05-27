@@ -171,7 +171,7 @@ class RunQueryControllerTest {
 
     @Test
     void batchRuns_returns200WithMapKeyedByCalculatorName() throws Exception {
-        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capitalcalc", List.of());
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capitalcalc", null, List.of());
         when(calculatorStateService.getState(eq(LocalDate.of(2026, 3, 6)),
                 eq(Frequency.DAILY), eq("1"), eq(List.of("capitalcalc"))))
                 .thenReturn(Map.of("capitalcalc", entry));
@@ -216,7 +216,7 @@ class RunQueryControllerTest {
 
     @Test
     void batchRuns_omittedRunNumberPassesNullToService() throws Exception {
-        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", List.of());
+        var entry = new CalculatorBatchRunsResponse.CalculatorEntry("capital", null, List.of());
         when(calculatorStateService.getState(eq(LocalDate.of(2026, 3, 6)),
                 eq(Frequency.DAILY), isNull(), eq(List.of("capital"))))
                 .thenReturn(Map.of("capital", entry));

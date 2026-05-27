@@ -16,8 +16,10 @@ public record CalculatorBatchRunsResponse(
         Instant generatedAt,
         Map<String, CalculatorEntry> calculators
 ) {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record CalculatorEntry(
             String calculatorName,
+            String calculatorId,
             List<RunEntry> runs
     ) {}
 
