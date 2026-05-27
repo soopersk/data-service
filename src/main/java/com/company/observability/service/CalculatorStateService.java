@@ -10,7 +10,6 @@ import com.company.observability.domain.enums.SlaBand;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.RunEntry;
 import com.company.observability.repository.CalculatorRunRepository;
-import com.company.observability.util.RunStatusClassifier;
 import com.company.observability.util.TimeUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -219,14 +218,12 @@ public class CalculatorStateService {
     }
 
     private RunEntry toRunEntry(CalculatorRun run) {
-        String slaStatus = RunStatusClassifier.classifyDurationBased(run, slaProps.bandGapMs(), Instant.now());
-
         return RunEntry.builder()
                 .runId(run.getRunId())
                 .region(run.getRegion())
                 .runType(run.getRunType())
                 .status(run.getStatus().name())
-                .slaStatus(slaStatus)
+                .slaStatus(run.getSlaBand() != null ? run.getSlaBand().name() : "ON_TIME")
                 .startTime(run.getStartTime())
                 .endTime(run.getEndTime())
                 .estimatedStartTime(run.getEstimatedStartTime())
@@ -234,7 +231,6 @@ public class CalculatorStateService {
                 .sla(run.getSlaTime())
                 .durationMs(run.getDurationMs())
                 .expectedDurationMs(run.getExpectedDurationMs())
-                .slaBand(run.getSlaBand() != null ? run.getSlaBand().name() : null)
                 .slaBreachReason(run.getSlaBreachReason())
                 .isRerun(run.isRerun())
                 .build();

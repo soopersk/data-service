@@ -191,16 +191,18 @@ public class RunIngestionService {
                 slaResult.getReason() != null ? slaResult.getReason() : previousBreachReason
         );
 
+        // Compute breach flag before upsert so it is persisted to sla_breached
+        boolean timingBreached = run.getSlaBand() != null && run.getSlaBand().isBreached();
+        boolean failureBreached = run.getStatus() == RunStatus.FAILED || run.getStatus() == RunStatus.TIMEOUT;
+        boolean isBreached = timingBreached || failureBreached;
+        run.setSlaBreached(isBreached);
+
         run = runRepository.upsert(run);
 
         // Deregister from SLA monitoring
         slaMonitoringCache.deregisterFromSlaMonitoring(run.getRunId(), run.getTenantId(), run.getReportingDate());
 
         // calculator_sli_daily is populated by the nightly DailyAggregationJob, not per completion.
-
-        boolean timingBreached = run.getSlaBand() != null && run.getSlaBand().isBreached();
-        boolean failureBreached = run.getStatus() == RunStatus.FAILED || run.getStatus() == RunStatus.TIMEOUT;
-        boolean isBreached = timingBreached || failureBreached;
 
         meterRegistry.counter(INGESTION_RUN_COMPLETED,
                 "frequency", run.getFrequency().name(),

@@ -141,6 +141,7 @@ public class LiveSlaBreachDetectionJob {
                         SlaEvaluationResult result = new SlaEvaluationResult(band, breachReason);
 
                         run.setSlaBand(band);
+                        run.setSlaBreached(true);
                         run.setSlaBreachReason(breachReason);
 
                         eventPublisher.publishEvent(new SlaBreachedEvent(run, result));

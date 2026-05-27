@@ -135,7 +135,7 @@ public class CalculatorStateCacheService {
         }
 
         boolean anyFailureOrBreach = runs.stream()
-                .anyMatch(r -> ("LATE".equals(r.slaBand()) || "VERY_LATE".equals(r.slaBand()))
+                .anyMatch(r -> ("LATE".equals(r.slaStatus()) || "VERY_LATE".equals(r.slaStatus()))
                         || "FAILED".equals(r.status())
                         || "TIMEOUT".equals(r.status()));
 

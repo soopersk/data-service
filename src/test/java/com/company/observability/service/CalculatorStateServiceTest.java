@@ -38,8 +38,7 @@ class CalculatorStateServiceTest {
     @Mock
     CalculatorProfileService profileService;
 
-    // Use a real DurationBasedSlaProperties so bandGapMs() returns a meaningful value (15 min default).
-    // A Mockito mock would return 0, making LATE and VERY_LATE indistinguishable.
+    // Real DurationBasedSlaProperties — still needed for getMinSampleSize() (profile estimation path).
     CalculatorStateService service;
 
     private static final LocalDate DATE = LocalDate.of(2026, 3, 6);
@@ -152,13 +151,13 @@ class CalculatorStateServiceTest {
     }
 
     /**
-     * A completed run ending 10 minutes past slaTime → LATE (within the 15-min bandGap).
+     * A completed run graded LATE by SlaEvaluationService → slaStatus surfaces as LATE.
      */
     @Test
-    void completedRun10MinPastSlaIsLate() {
-        Instant endTime = SLA_TIME.plusSeconds(10 * 60);  // 10 min late
+    void completedRunWithLateBandIsLate() {
         CalculatorRun run = buildRun("calc", "r-1", RunStatus.SUCCESS, "WMAP", null, "1", null,
-                T_MINUS_3, endTime, SLA_TIME);
+                T_MINUS_3, SLA_TIME.plusSeconds(10 * 60), SLA_TIME);
+        run.setSlaBand(com.company.observability.domain.enums.SlaBand.LATE);
 
         when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(run));
@@ -169,14 +168,13 @@ class CalculatorStateServiceTest {
     }
 
     /**
-     * A completed run ending 20 minutes past slaTime → VERY_LATE (beyond the 15-min bandGap).
-     * Under the old 60-min dashboard.late-threshold-ms this would have been classified as LATE.
+     * A completed run graded VERY_LATE by SlaEvaluationService → slaStatus surfaces as VERY_LATE.
      */
     @Test
-    void completedRun20MinPastSlaIsVeryLate() {
-        Instant endTime = SLA_TIME.plusSeconds(20 * 60);  // 20 min late — crosses 15-min bandGap
+    void completedRunWithVeryLateBandIsVeryLate() {
         CalculatorRun run = buildRun("calc", "r-1", RunStatus.SUCCESS, "WMAP", null, "1", null,
-                T_MINUS_3, endTime, SLA_TIME);
+                T_MINUS_3, SLA_TIME.plusSeconds(20 * 60), SLA_TIME);
+        run.setSlaBand(com.company.observability.domain.enums.SlaBand.VERY_LATE);
 
         when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of(run));

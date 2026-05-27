@@ -141,11 +141,11 @@ class CalculatorStateCacheServiceTest {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private RunEntry runEntry(String status, String slaBand) {
+    private RunEntry runEntry(String status, String slaStatus) {
         return RunEntry.builder()
                 .runId("r-1")
                 .status(status)
-                .slaBand(slaBand)
+                .slaStatus(slaStatus)
                 .isRerun(false)
                 .build();
     }

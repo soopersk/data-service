@@ -283,7 +283,7 @@ public class CalculatorRunRepository {
                 start_time, end_time, duration_ms,
                 status, sla_time, expected_duration_ms,
                 estimated_start_time, estimated_end_time,
-                sla_band, sla_breach_reason,
+                sla_band, sla_breached, sla_breach_reason,
                 run_number, run_type, region, correlation_id,
                 run_parameters, additional_attributes,
                 created_at, updated_at
@@ -292,7 +292,7 @@ public class CalculatorRunRepository {
                 :startTime, :endTime, :durationMs,
                 :status, :slaTime, :expectedDurationMs,
                 :estimatedStartTime, :estimatedEndTime,
-                :slaBand, :slaBreachReason,
+                :slaBand, :slaBreached, :slaBreachReason,
                 :runNumber, :runType, :region, :correlationId,
                 :runParameters, :additionalAttributes,
                 :createdAt, :updatedAt
@@ -302,6 +302,7 @@ public class CalculatorRunRepository {
                 duration_ms = EXCLUDED.duration_ms,
                 status = EXCLUDED.status,
                 sla_band = EXCLUDED.sla_band,
+                sla_breached = EXCLUDED.sla_breached,
                 sla_breach_reason = EXCLUDED.sla_breach_reason,
                 run_number = EXCLUDED.run_number,
                 run_type = EXCLUDED.run_type,
@@ -328,6 +329,7 @@ public class CalculatorRunRepository {
                 .addValue("estimatedStartTime", toTimestamp(run.getEstimatedStartTime()))
                 .addValue("estimatedEndTime", toTimestamp(run.getEstimatedEndTime()))
                 .addValue("slaBand", run.getSlaBand() != null ? run.getSlaBand().name() : null)
+                .addValue("slaBreached", run.isSlaBreached())
                 .addValue("slaBreachReason", run.getSlaBreachReason())
                 .addValue("runNumber", run.getRunNumber())
                 .addValue("runType", run.getRunType())
@@ -406,6 +408,7 @@ public class CalculatorRunRepository {
         String sql = """
             UPDATE calculator_runs
             SET sla_band = :slaBand,
+                sla_breached = true,
                 sla_breach_reason = :breachReason,
                 updated_at = NOW()
             WHERE run_id = :runId
@@ -673,6 +676,7 @@ public class CalculatorRunRepository {
                         .estimatedStartTime(fromTimestamp(rs.getTimestamp("estimated_start_time")))
                         .estimatedEndTime(fromTimestamp(rs.getTimestamp("estimated_end_time")))
                         .slaBand(rs.getString("sla_band") != null ? SlaBand.valueOf(rs.getString("sla_band")) : null)
+                        .slaBreached(rs.getBoolean("sla_breached"))
                         .slaBreachReason(rs.getString("sla_breach_reason"))
                         .runNumber(rs.getString("run_number"))
                         .runType(rs.getString("run_type"))

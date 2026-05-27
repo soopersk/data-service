@@ -53,6 +53,7 @@ public class CalculatorRun implements Serializable {
     private Instant estimatedEndTime;
 
     private SlaBand slaBand;
+    private boolean slaBreached;
     private String slaBreachReason;
 
     // Promoted from run_parameters JSONB
