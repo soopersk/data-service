@@ -48,7 +48,7 @@ public class CalculatorRunRepository {
                start_time, end_time, duration_ms,
                status, sla_time, expected_duration_ms,
                estimated_start_time, estimated_end_time,
-               sla_breached, sla_breach_reason,
+               sla_band, sla_breached, sla_breach_reason,
                run_number, run_type, region, correlation_id,
                run_parameters, additional_attributes,
                created_at, updated_at
@@ -60,7 +60,7 @@ public class CalculatorRunRepository {
                start_time, end_time, duration_ms,
                status, sla_time, expected_duration_ms,
                estimated_start_time, estimated_end_time,
-               sla_breached, sla_breach_reason,
+               sla_band, sla_breached, sla_breach_reason,
                run_number, run_type, region,
                created_at, updated_at
         FROM calculator_runs
@@ -215,7 +215,7 @@ public class CalculatorRunRepository {
                        start_time, end_time, duration_ms,
                        status, sla_time, expected_duration_ms,
                        estimated_start_time, estimated_end_time,
-                       sla_breached, sla_breach_reason,
+                       sla_band, sla_breached, sla_breach_reason,
                        run_number, run_type, region, correlation_id,
                        created_at, updated_at,
                        ROW_NUMBER() OVER (

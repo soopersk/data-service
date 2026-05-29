@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS calculator_runs (
 
     -- SLA breach
     sla_band             VARCHAR(20)    CHECK (sla_band IS NULL OR sla_band IN ('ON_TIME','LATE','VERY_LATE')),
+    sla_breached         BOOLEAN        DEFAULT false,
     sla_breach_reason    TEXT,
 
     -- Promoted from run_parameters JSONB (structural fields used in SQL predicates)
