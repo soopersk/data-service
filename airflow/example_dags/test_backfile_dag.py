@@ -7,7 +7,8 @@ from typing import Any
 
 import pendulum
 from airflow.decorators import dag, task
-from airflow.models import Param
+from airflow.models import Param, Variable
+from airflow.operators.empty import EmptyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 logger = logging.getLogger(__name__)
@@ -16,8 +17,31 @@ logger = logging.getLogger(__name__)
 # the module stays importable without them:
 #   get_config() → dict
 #   get_events(config, query_params) → list[dict]  (raises RuntimeError on empty)
-#   obs_start_run(start_event, tenant_id, run_number=None) → str | None
-#   obs_complete_run(run_id, event, tenant_id, reporting_date) → None
+#    def obs_start_run(
+#     enriched_event: dict[str, Any],
+#     tenant_id: str = DEFAULT_TENANT,
+#     **kwargs,
+# ) -> str | None:
+#     event_wrapper = (
+#         enriched_event if "event" in enriched_event else {"event": enriched_event}
+#     )
+#     payload = build_calculator_start_payload(
+#         event_wrapper,
+#         tenant_id=tenant_id,
+#         **kwargs,
+#     )
+
+# def build_calculator_start_payload(
+#     event_wrapper: dict[str, Any],
+#     tenant_id: str = DEFAULT_TENANT,
+#     **kwargs,
+# ) -> dict[str, Any]:
+#     ...
+#     # existing payload construction
+#     run_number = kwargs.get("run_number")
+#     if run_number is not None:
+#         payload["runNumber"] = str(run_number)   # matches StartRunRequest.runNumber (String)
+#     return payload
 
 _FAILED_ID_CAP = 50
 
@@ -109,6 +133,37 @@ def fetch_events(
     return _safe_get_events(config=config, query_params=query_params)
 
 
+# ── SLA helpers ──────────────────────────────────────────────────────────────
+
+def _normalize_frequency(freq: str | None) -> str | None:
+    if not freq:
+        return None
+    upper = freq.upper()
+    if upper in {"D", "DAILY"}:
+        return "DAILY"
+    if upper in {"M", "MONTHLY"}:
+        return "MONTHLY"
+    return None
+
+
+def resolve_sla_time(
+    sla_config: dict[str, Any],
+    calculator_name: str | None,
+    frequency: str | None,
+    run_number: int,
+) -> str | None:
+    """Return ISO-8601 SLA duration from calculator_sla_config for this run, or None."""
+    if not calculator_name or not sla_config:
+        return None
+    freq_norm = _normalize_frequency(frequency)
+    if not freq_norm:
+        return None
+    calc_key = next((k for k in sla_config if k.lower() == calculator_name.lower()), None)
+    if not calc_key:
+        return None
+    return sla_config[calc_key].get(freq_norm, {}).get(f"RUN{run_number}")
+
+
 # ── DAG ───────────────────────────────────────────────────────────────────────
 
 @dag(
@@ -149,6 +204,8 @@ def obs_event_backfill_dag():
         if frequency and frequency.upper() not in {"D", "M", "DAILY", "MONTHLY"}:
             raise ValueError(f"frequency must be one of D, M, DAILY, MONTHLY — got {frequency!r}")
 
+        sla_config = Variable.get("calculator_sla_config", default_var=None, deserialize_json=True) or {}
+
         return {
             "n_days": n_days,
             "end_date": raw_end,
@@ -156,6 +213,7 @@ def obs_event_backfill_dag():
             "frequency": frequency,
             "tenant_id": conf.get("tenant_id", "default"),
             "dry_run": bool(conf.get("dry_run", False)),
+            "sla_config": sla_config,
         }
 
     @task(task_id="build_reporting_dates")
@@ -173,6 +231,7 @@ def obs_event_backfill_dag():
         frequency = params.get("frequency")
         tenant_id = params["tenant_id"]
         dry_run = params.get("dry_run", False)
+        sla_config = params.get("sla_config", {})
 
         # 1. Fetch
         starts_raw = fetch_events(config, reporting_date, "STARTED",
@@ -213,15 +272,14 @@ def obs_event_backfill_dag():
         for run_id, start_event in starts_by_run.items():
             complete_event = completes_by_run.get(run_id)
             run_number = run_numbers[run_id]
-            rd = (
-                start_event.get("context", {}).get("data", {}).get("reporting-date")
-                or reporting_date
-            )
+            _ctx_data = start_event.get("context", {}).get("data", {})
+            rd = _ctx_data.get("reporting-date") or reporting_date
+            sla_time = resolve_sla_time(sla_config, _ctx_data.get("class"), _ctx_data.get("frequency"), run_number)
 
             if dry_run:
                 logger.info(
-                    "[DRY-RUN] would POST /start run_id=%s reporting_date=%s run_number=%d has_complete=%s",
-                    run_id, rd, run_number, complete_event is not None,
+                    "[DRY-RUN] would POST /start run_id=%s reporting_date=%s run_number=%d has_complete=%s sla_time=%s",
+                    run_id, rd, run_number, complete_event is not None, sla_time,
                 )
                 if complete_event:
                     posted_both += 1
@@ -230,7 +288,8 @@ def obs_event_backfill_dag():
                 continue
 
             try:
-                posted_run_id = obs_start_run(start_event, tenant_id, run_number=run_number) or run_id
+                sla_kwargs = {"sla_time": sla_time} if sla_time else {}
+                posted_run_id = obs_start_run(start_event, tenant_id, run_number=run_number, **sla_kwargs) or run_id
                 if complete_event:
                     obs_complete_run(posted_run_id, complete_event, tenant_id, rd)
                     posted_both += 1
@@ -291,10 +350,15 @@ def obs_event_backfill_dag():
         return summary
 
     # ── Wiring ────────────────────────────────────────────────────────────────
+    start = EmptyOperator(task_id="start")
     params = validate_params()
     dates = build_reporting_dates(params)
     per_date_results = backfill_one_date.partial(params=params).expand(reporting_date=dates)
-    summarise(per_date_results)
+    summary = summarise(per_date_results)
+    finish = EmptyOperator(task_id="finish")
+
+    start >> params
+    summary >> finish
 
 
 obs_event_backfill_dag()
