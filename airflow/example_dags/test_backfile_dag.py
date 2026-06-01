@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
@@ -17,33 +18,16 @@ logger = logging.getLogger(__name__)
 # the module stays importable without them:
 #   get_config() → dict
 #   get_events(config, query_params) → list[dict]  (raises RuntimeError on empty)
-#    def obs_start_run(
-#     enriched_event: dict[str, Any],
-#     tenant_id: str = DEFAULT_TENANT,
-#     **kwargs,
-# ) -> str | None:
-#     event_wrapper = (
-#         enriched_event if "event" in enriched_event else {"event": enriched_event}
-#     )
-#     payload = build_calculator_start_payload(
-#         event_wrapper,
-#         tenant_id=tenant_id,
-#         **kwargs,
-#     )
-
-# def build_calculator_start_payload(
-#     event_wrapper: dict[str, Any],
-#     tenant_id: str = DEFAULT_TENANT,
-#     **kwargs,
-# ) -> dict[str, Any]:
-#     ...
-#     # existing payload construction
-#     run_number = kwargs.get("run_number")
-#     if run_number is not None:
-#         payload["runNumber"] = str(run_number)   # matches StartRunRequest.runNumber (String)
-#     return payload
+#   obs_start_run(enriched_event, tenant_id, calculator_metadata=None, **kwargs) → str | None
+#   obs_complete_run(run_id, event, tenant_id, reporting_date) → None
 
 _FAILED_ID_CAP = 50
+
+
+@dataclass(frozen=True)
+class CalculatorMetadata:
+    name: str
+    sla_time: str | None = None
 
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -181,6 +165,15 @@ def resolve_sla_time(
         "frequency": Param(None, type=["string", "null"], description="Optional filter: D or M"),
         "tenant_id": Param("default", type="string"),
         "dry_run": Param(False, type="boolean", description="Log intended calls without posting"),
+        "excluded_calculators": Param(
+            [],
+            type="array",
+            # Additive at runtime — merges with the 'calculator_backfill_exclusions' Airflow Variable.
+            # To skip extra calculators for a single run, trigger with:
+            #   {"excluded_calculators": ["MyCalcName", "AnotherCalc"]}
+            # Names are case-insensitive. The Variable list is always applied as the base.
+            description="Extra calculator class names to skip for this run (merged with calculator_backfill_exclusions Variable)",
+        ),
     },
 )
 def obs_event_backfill_dag():
@@ -206,6 +199,20 @@ def obs_event_backfill_dag():
 
         sla_config = Variable.get("calculator_sla_config", default_var=None, deserialize_json=True) or {}
 
+        # Base exclusion list — set per environment via Airflow Variable.
+        # Example value: ["housekeepingtask", "capitalsnapshotdev", "companyregionmappingtask", "altercolumnorder"]
+        env_excluded: list[str] = Variable.get(
+            "calculator_backfill_exclusions", default_var=[], deserialize_json=True
+        ) or []
+
+        raw_excluded = conf.get("excluded_calculators") or []
+        if not isinstance(raw_excluded, list) or not all(isinstance(c, str) for c in raw_excluded):
+            raise ValueError("excluded_calculators must be a list of strings")
+
+        # Merge env baseline + runtime overrides (case-insensitive dedup)
+        merged = {c.lower() for c in env_excluded if c} | {c.lower() for c in raw_excluded if c}
+        excluded_calculators = sorted(merged)
+
         return {
             "n_days": n_days,
             "end_date": raw_end,
@@ -214,6 +221,7 @@ def obs_event_backfill_dag():
             "tenant_id": conf.get("tenant_id", "default"),
             "dry_run": bool(conf.get("dry_run", False)),
             "sla_config": sla_config,
+            "excluded_calculators": excluded_calculators,
         }
 
     @task(task_id="build_reporting_dates")
@@ -248,6 +256,18 @@ def obs_event_backfill_dag():
 
         # 2. Correlate
         starts_by_run = index_latest_by_run_id(starts_raw, extract_start_run_id)
+
+        excluded = set(params.get("excluded_calculators") or [])  # already lowercased
+        if excluded:
+            starts_by_run = {
+                rid: ev for rid, ev in starts_by_run.items()
+                if (ev.get("context", {}).get("data", {}).get("class") or "").lower() not in excluded
+            }
+            logger.info(
+                "date=%s excluded_calculators=%s starts_after_exclusion=%d",
+                reporting_date, sorted(excluded), len(starts_by_run),
+            )
+
         completes_by_run = index_latest_by_run_id(finished_raw + failed_raw, extract_complete_run_id)
 
         # A run is "successful" only if it has a matching FINISHED event (FAILED does not count).
@@ -274,12 +294,14 @@ def obs_event_backfill_dag():
             run_number = run_numbers[run_id]
             _ctx_data = start_event.get("context", {}).get("data", {})
             rd = _ctx_data.get("reporting-date") or reporting_date
-            sla_time = resolve_sla_time(sla_config, _ctx_data.get("class"), _ctx_data.get("frequency"), run_number)
+            calc_name = _ctx_data.get("class")
+            sla_time = resolve_sla_time(sla_config, calc_name, _ctx_data.get("frequency"), run_number)
+            calc_metadata = CalculatorMetadata(name=calc_name, sla_time=sla_time) if calc_name else None
 
             if dry_run:
                 logger.info(
-                    "[DRY-RUN] would POST /start run_id=%s reporting_date=%s run_number=%d has_complete=%s sla_time=%s",
-                    run_id, rd, run_number, complete_event is not None, sla_time,
+                    "[DRY-RUN] would POST /start run_id=%s reporting_date=%s run_number=%d has_complete=%s calc_metadata=%s",
+                    run_id, rd, run_number, complete_event is not None, calc_metadata,
                 )
                 if complete_event:
                     posted_both += 1
@@ -288,8 +310,9 @@ def obs_event_backfill_dag():
                 continue
 
             try:
-                sla_kwargs = {"sla_time": sla_time} if sla_time else {}
-                posted_run_id = obs_start_run(start_event, tenant_id, run_number=run_number, **sla_kwargs) or run_id
+                posted_run_id = obs_start_run(
+                    start_event, tenant_id, calculator_metadata=calc_metadata, run_number=run_number
+                ) or run_id
                 if complete_event:
                     obs_complete_run(posted_run_id, complete_event, tenant_id, rd)
                     posted_both += 1
