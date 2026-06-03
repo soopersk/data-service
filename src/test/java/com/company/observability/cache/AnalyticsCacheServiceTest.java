@@ -1,5 +1,6 @@
 package com.company.observability.cache;
 
+import com.company.observability.config.CalculatorAliasProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
@@ -9,6 +10,7 @@ import com.company.observability.event.RunCompletedEvent;
 import com.company.observability.event.RunStartedEvent;
 import com.company.observability.event.SlaBreachedEvent;
 import com.company.observability.domain.SlaEvaluationResult;
+import com.company.observability.service.CalculatorNameResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -55,7 +57,8 @@ class AnalyticsCacheServiceTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        service = new AnalyticsCacheService(redisTemplate, objectMapper, new SimpleMeterRegistry());
+        service = new AnalyticsCacheService(redisTemplate, objectMapper, new SimpleMeterRegistry(),
+                new CalculatorNameResolver(new CalculatorAliasProperties()));
         // lenient: used by eviction tests only — getFromCache/putInCache tests don't need opsForSet from setUp
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
     }

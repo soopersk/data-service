@@ -5,6 +5,7 @@ import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
+import com.company.observability.service.CalculatorNameResolver;
 import com.company.observability.service.CalculatorStateService;
 import com.company.observability.service.RunQueryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,14 +19,18 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import org.junit.jupiter.api.BeforeEach;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -52,6 +57,20 @@ class RunQueryControllerTest {
 
     @MockitoBean
     private CalculatorStateService calculatorStateService;
+
+    @MockitoBean
+    private CalculatorNameResolver nameResolver;
+
+    @BeforeEach
+    void configurePassthroughResolver() {
+        // Default: each alias resolves to itself (no alias config in controller tests)
+        lenient().when(nameResolver.resolveAll(any())).thenAnswer(inv -> {
+            List<String> aliases = inv.getArgument(0);
+            Map<String, List<String>> result = new LinkedHashMap<>();
+            for (String a : aliases) result.put(a, List.of(a));
+            return result;
+        });
+    }
 
     @Test
     void getCalculatorStatus_returnsCacheableResponse_whenBypassCacheFalse() throws Exception {

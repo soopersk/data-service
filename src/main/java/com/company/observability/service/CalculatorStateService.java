@@ -99,7 +99,7 @@ public class CalculatorStateService {
                 .collect(Collectors.groupingBy(CalculatorRun::getCorrelationId));
 
         List<RunEntry> splitEntries = splitGroups.values().stream()
-                .map(this::collapseSplitGroup)
+                .map(group -> collapseSplitGroup(group, calculatorName))
                 .toList();
 
         // Phase 2: deduplicate sequential reruns (null correlationId) by (region, runType) — latest wins
@@ -113,7 +113,7 @@ public class CalculatorStateService {
                             .max(Comparator.comparing(CalculatorRun::getCreatedAt))
                             .orElseThrow();
                     latest.setRerun(group.size() > 1);
-                    return toRunEntry(latest);
+                    return toRunEntry(latest, calculatorName);
                 })
                 .toList();
 
@@ -170,7 +170,7 @@ public class CalculatorStateService {
         return new CalculatorEntry(name, calculatorId, List.of(synthetic));
     }
 
-    private RunEntry collapseSplitGroup(List<CalculatorRun> splits) {
+    private RunEntry collapseSplitGroup(List<CalculatorRun> splits, String entryName) {
         CalculatorRun first = splits.stream()
                 .min(Comparator.comparing(CalculatorRun::getCreatedAt))
                 .orElseThrow();
@@ -216,11 +216,18 @@ public class CalculatorStateService {
         rep.setEstimatedEndTime(first.getEstimatedEndTime());
         rep.setRerun(false);  // parallel splits are not sequential reruns
 
-        return toRunEntry(rep);
+        return toRunEntry(rep, entryName);
     }
 
-    private RunEntry toRunEntry(CalculatorRun run) {
+    private RunEntry toRunEntry(CalculatorRun run, String entryName) {
+        // Populate calculatorName on RunEntry only when the run originates from a
+        // differently-named real calculator (multi-alias merge). Null otherwise → omitted in JSON.
+        String runCalcName = run.getCalculatorName() != null
+                && !run.getCalculatorName().equals(entryName)
+                ? run.getCalculatorName() : null;
+
         return RunEntry.builder()
+                .calculatorName(runCalcName)
                 .runId(run.getRunId())
                 .region(run.getRegion())
                 .runType(run.getRunType())

@@ -1,6 +1,7 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.AnalyticsCacheService;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.DailyAggregate;
 import com.company.observability.domain.RunWithSlaStatus;
@@ -8,6 +9,7 @@ import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.SlaBand;
+import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.dto.enums.SlaStatus;
 import com.company.observability.dto.response.*;
 import com.company.observability.service.projection.LogicalRunGrouper;
@@ -39,6 +41,8 @@ public class AnalyticsService {
     private final AnalyticsCacheService cacheService;
     private final CalculatorProfileService calculatorProfileService;
     private final com.company.observability.config.DurationBasedSlaProperties slaProperties;
+    private final SlaProperties slaModeProperties;
+    private final CalculatorNameResolver nameResolver;
 
     private static final String CACHE_RUNTIME = "runtime";
     private static final String CACHE_SLA_CORE = "sla-core";
@@ -383,6 +387,7 @@ public class AnalyticsService {
         // Normalize blank → null so empty ?run_number= means "all runs" (not filter on empty string)
         String rn = (runNumber == null || runNumber.isBlank()) ? null : runNumber;
 
+        // Cache is keyed by the alias/name as supplied by the caller
         RunPerformanceData cached = cacheService.getFromCache(
                 CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn,
                 RunPerformanceData.class);
@@ -392,11 +397,17 @@ public class AnalyticsService {
             return cached;
         }
 
-        log.debug("event=executions.db_fetch outcome=start calculatorName={} frequency={} days={} runNumber={}",
-                calculatorName, frequency, days, rn);
+        // Expand alias to real DB calculator_name values; unknown names pass through unchanged
+        List<String> realNames = nameResolver.resolve(calculatorName);
 
-        List<RunWithSlaStatus> rawRuns = calculatorRunRepository
-                .findRunsByName(calculatorName, frequency, days, rn);
+        log.debug("event=executions.db_fetch outcome=start calculatorName={} realNames={} frequency={} days={} runNumber={}",
+                calculatorName, realNames, frequency, days, rn);
+
+        List<RunWithSlaStatus> rawRuns = realNames.stream()
+                .flatMap(name -> calculatorRunRepository.findRunsByName(name, frequency, days, rn).stream())
+                .sorted(Comparator.comparing(RunWithSlaStatus::reportingDate)
+                        .thenComparing(RunWithSlaStatus::startTime, Comparator.nullsFirst(Comparator.naturalOrder())))
+                .toList();
 
         RunPerformanceData response = buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
         cacheService.putInCache(CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn, response);
@@ -508,6 +519,12 @@ public class AnalyticsService {
         if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
             java.time.Instant estStart = com.company.observability.util.TimeUtils
                     .instantFromUtcMinuteOfDay(latestRaw.reportingDate(), profile.avgStartMinUtc());
+
+            if (slaModeProperties.getMode() == SlaMode.CLOCK_TIME) {
+                // In clock-time mode the deadline is a stored absolute — use it directly as the SLA reference line.
+                return new ReferenceLines(estStart, latestRaw.slaTime());
+            }
+
             long bufferedMs = Math.round(profile.avgDurationMs() * (1 + slaProperties.getThresholdPercent() / 100.0))
                     + slaProperties.lateBandMs();
             return new ReferenceLines(estStart, estStart.plusMillis(bufferedMs));

@@ -3,6 +3,7 @@ package com.company.observability.controller;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
+import com.company.observability.service.CalculatorNameResolver;
 import com.company.observability.service.CalculatorStateService;
 import com.company.observability.service.RunQueryService;
 import com.company.observability.util.ObservabilityConstants;
@@ -22,10 +23,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Query controller with enum support
@@ -40,6 +40,7 @@ public class RunQueryController {
 
     private final RunQueryService queryService;
     private final CalculatorStateService calculatorStateService;
+    private final CalculatorNameResolver nameResolver;
     private final MeterRegistry meterRegistry;
 
     @GetMapping("/{calculatorId}/status")
@@ -144,23 +145,40 @@ public class RunQueryController {
             @Parameter(description = "Pipe-separated calculator_name values, e.g. capitalcalc|portfoliocalc")
             @RequestParam @NotBlank String keys) {
 
-        List<String> calculatorNames = Arrays.stream(keys.split("\\|"))
+        List<String> aliases = Arrays.stream(keys.split("\\|"))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
-        if (calculatorNames.isEmpty()) {
-            throw new IllegalArgumentException("keys must contain at least one non-blank calculator_name");
+        if (aliases.isEmpty()) {
+            throw new IllegalArgumentException("keys must contain at least one non-blank calculator name");
         }
 
         Frequency freq = Frequency.fromStrict(frequency);
 
-        log.info("event=batch_runs.request outcome=accepted reportingDate={} frequency={} keyCount={} runNumber={}",
-                reportingDate, freq, calculatorNames.size(), runNumber);
+        // Expand aliases → {alias: [realName, ...]}; unknown names pass through unchanged
+        Map<String, List<String>> aliasToRealNames = nameResolver.resolveAll(aliases);
+
+        List<String> allRealNames = aliasToRealNames.values().stream()
+                .flatMap(Collection::stream)
+                .distinct()
+                .toList();
+
+        log.info("event=batch_runs.request outcome=accepted reportingDate={} frequency={} aliasCount={} realNameCount={} runNumber={}",
+                reportingDate, freq, aliases.size(), allRealNames.size(), runNumber);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
+            Map<String, CalculatorBatchRunsResponse.CalculatorEntry> byRealName =
+                    calculatorStateService.getState(reportingDate, freq, runNumber, allRealNames);
+
+            // Re-group by alias: merge entries from all real names under each alias key
             Map<String, CalculatorBatchRunsResponse.CalculatorEntry> calculators =
-                    calculatorStateService.getState(reportingDate, freq, runNumber, calculatorNames);
+                    aliasToRealNames.entrySet().stream().collect(Collectors.toMap(
+                            Map.Entry::getKey,
+                            e -> mergeEntries(e.getKey(), e.getValue(), byRealName),
+                            (a, b) -> a,
+                            LinkedHashMap::new
+                    ));
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())
@@ -170,5 +188,37 @@ public class RunQueryController {
             sample.stop(meterRegistry.timer(ObservabilityConstants.API_ANALYTICS_DURATION,
                     "endpoint", "/calculators/batch/runs"));
         }
+    }
+
+    private CalculatorBatchRunsResponse.CalculatorEntry mergeEntries(
+            String alias,
+            List<String> realNames,
+            Map<String, CalculatorBatchRunsResponse.CalculatorEntry> byRealName) {
+
+        List<CalculatorBatchRunsResponse.CalculatorEntry> parts = realNames.stream()
+                .map(byRealName::get)
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (parts.isEmpty()) {
+            return new CalculatorBatchRunsResponse.CalculatorEntry(alias, null, List.of());
+        }
+        if (parts.size() == 1) {
+            CalculatorBatchRunsResponse.CalculatorEntry single = parts.get(0);
+            return new CalculatorBatchRunsResponse.CalculatorEntry(alias, single.calculatorId(), single.runs());
+        }
+
+        // Multi: merge runs; calculatorId only when all real calculators agree (unusual)
+        Set<String> ids = parts.stream()
+                .map(CalculatorBatchRunsResponse.CalculatorEntry::calculatorId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        String mergedId = ids.size() == 1 ? ids.iterator().next() : null;
+
+        List<CalculatorBatchRunsResponse.RunEntry> allRuns = parts.stream()
+                .flatMap(e -> e.runs().stream())
+                .toList();
+
+        return new CalculatorBatchRunsResponse.CalculatorEntry(alias, mergedId, allRuns);
     }
 }

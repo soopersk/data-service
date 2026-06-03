@@ -31,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.company.observability.config.CalculatorAliasProperties;
+
 
 @ExtendWith(MockitoExtension.class)
 class AnalyticsServiceTest {
@@ -48,6 +50,9 @@ class AnalyticsServiceTest {
 
     private AnalyticsService service;
 
+    // Passthrough resolver — any unknown name maps to itself (no aliases configured)
+    private final CalculatorNameResolver passthroughResolver = passthroughResolver();
+
     @BeforeEach
     void setUp() {
         service = new AnalyticsService(
@@ -56,8 +61,16 @@ class AnalyticsServiceTest {
                 calculatorRunRepository,
                 cacheService,
                 calculatorProfileService,
-                new com.company.observability.config.DurationBasedSlaProperties()
+                new com.company.observability.config.DurationBasedSlaProperties(),
+                new com.company.observability.config.SlaProperties(),
+                passthroughResolver
         );
+    }
+
+    private static CalculatorNameResolver passthroughResolver() {
+        CalculatorAliasProperties props = new CalculatorAliasProperties();
+        // empty map → all names pass through unchanged
+        return new CalculatorNameResolver(props);
     }
 
     @Test
@@ -291,7 +304,50 @@ class AnalyticsServiceTest {
     }
 
     @Test
-    void getRunExecutions_referenceLinesSourcedFromProfileWhenSufficientSamples() {
+    void getRunExecutions_clockTimeMode_referenceLinesUsesStoredSlaTime() {
+        // In CLOCK_TIME mode with sufficient profile samples: estStart comes from profile avg,
+        // slaTime reference line is the stored absolute deadline (not a re-derived buffered value).
+        LocalDate day = LocalDate.of(2026, 5, 11);
+        Instant start = Instant.parse("2026-05-11T05:00:00Z");
+        Instant end = Instant.parse("2026-05-11T05:30:00Z");
+        Instant runSla = Instant.parse("2026-05-11T06:30:00Z"); // stored clock-time deadline
+
+        RunWithSlaStatus run = new RunWithSlaStatus(
+                "run-1", "calc-1", "Portfolio", day,
+                start, end, 1_800_000L,
+                runSla, start, Frequency.DAILY,
+                RunStatus.SUCCESS, null, null, null, "1", 300000L);
+
+        when(calculatorRunRepository.findRunsWithSlaStatus(
+                "calc-1", Frequency.DAILY, 30, null))
+                .thenReturn(List.of(run));
+        // avg start = 270 min UTC (04:30); 10 samples → trusted.
+        when(calculatorProfileService.getProfile("Portfolio", Frequency.DAILY))
+                .thenReturn(new com.company.observability.domain.CalculatorProfile(
+                        "Portfolio", "DAILY", 3_600_000L, 270, 330, 10));
+
+        RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
+
+        Instant expectedStart = Instant.parse("2026-05-11T04:30:00Z"); // day @ 270 min UTC
+        assertEquals(expectedStart, result.estimatedStartTime());
+        // Clock-time mode: deadline reference = stored slaTime, not a re-buffered duration
+        assertEquals(runSla, result.slaTime());
+    }
+
+    @Test
+    void getRunExecutions_durationMode_referenceLinesBuffersProfileAverage() {
+        // In DURATION mode with sufficient profile samples: reference deadline is buffered from profile avg.
+        service = new AnalyticsService(
+                dailyAggregateRepository,
+                slaBreachEventRepository,
+                calculatorRunRepository,
+                cacheService,
+                calculatorProfileService,
+                new com.company.observability.config.DurationBasedSlaProperties(),
+                durationModeProperties(),
+                passthroughResolver
+        );
+
         LocalDate day = LocalDate.of(2026, 5, 11);
         Instant start = Instant.parse("2026-05-11T05:00:00Z");
         Instant end = Instant.parse("2026-05-11T05:30:00Z");
@@ -306,7 +362,6 @@ class AnalyticsServiceTest {
         when(calculatorRunRepository.findRunsWithSlaStatus(
                 "calc-1", Frequency.DAILY, 30, null))
                 .thenReturn(List.of(run));
-        // avg start = 270 min UTC (04:30); avg duration = 1h; 10 samples → trusted.
         when(calculatorProfileService.getProfile("Portfolio", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
                         "Portfolio", "DAILY", 3_600_000L, 270, 330, 10));
@@ -317,6 +372,12 @@ class AnalyticsServiceTest {
         Instant expectedStart = Instant.parse("2026-05-11T04:30:00Z");
         assertEquals(expectedStart, result.estimatedStartTime());
         assertEquals(expectedStart.plusMillis(87L * 60 * 1000), result.slaTime());
+    }
+
+    private com.company.observability.config.SlaProperties durationModeProperties() {
+        com.company.observability.config.SlaProperties p = new com.company.observability.config.SlaProperties();
+        p.setMode(com.company.observability.domain.enums.SlaMode.DURATION);
+        return p;
     }
 
     // ── getRunExecutionsByName — cache behaviour ──────────────────────────────
@@ -382,6 +443,82 @@ class AnalyticsServiceTest {
                 eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any());
         verify(calculatorRunRepository)
                 .findRunsByName("cap", Frequency.DAILY, 30, null);
+    }
+
+    @Test
+    void getRunExecutionsByName_multiAlias_mergesRunsFromAllRealCalculators() {
+        CalculatorAliasProperties props = new CalculatorAliasProperties();
+        props.setCalculatorAliases(Map.of(
+                "capital", List.of("capitalcalc", "capitalcalcmedium")
+        ));
+        AnalyticsService aliasService = new AnalyticsService(
+                dailyAggregateRepository,
+                slaBreachEventRepository,
+                calculatorRunRepository,
+                cacheService,
+                calculatorProfileService,
+                new com.company.observability.config.DurationBasedSlaProperties(),
+                new com.company.observability.config.SlaProperties(),
+                new CalculatorNameResolver(props)
+        );
+
+        when(cacheService.getFromCache(any(), eq("capital"), any(), anyInt(), any(), any()))
+                .thenReturn(null);
+
+        LocalDate day = LocalDate.of(2026, 6, 1);
+        Instant start = Instant.parse("2026-06-01T05:00:00Z");
+        Instant end = Instant.parse("2026-06-01T06:00:00Z");
+
+        RunWithSlaStatus run1 = new RunWithSlaStatus(
+                "run-1", "id-1", "capitalcalc", day,
+                start, end, 3_600_000L, null, start,
+                Frequency.DAILY, RunStatus.SUCCESS, null, null, null, null, null);
+        RunWithSlaStatus run2 = new RunWithSlaStatus(
+                "run-2", "id-2", "capitalcalcmedium", day,
+                start, end, 1_800_000L, null, start,
+                Frequency.DAILY, RunStatus.SUCCESS, null, null, null, null, null);
+
+        when(calculatorRunRepository.findRunsByName(eq("capitalcalc"), any(), anyInt(), any()))
+                .thenReturn(List.of(run1));
+        when(calculatorRunRepository.findRunsByName(eq("capitalcalcmedium"), any(), anyInt(), any()))
+                .thenReturn(List.of(run2));
+        when(calculatorProfileService.getProfile(any(), any()))
+                .thenReturn(new com.company.observability.domain.CalculatorProfile("capitalcalc", "DAILY", 0, 0, 0, 0));
+
+        RunPerformanceData result = aliasService.getRunExecutionsByName("capital", 30, Frequency.DAILY, null);
+
+        assertEquals("capital", result.calculatorId());
+        assertEquals(2, result.runs().size());
+        verify(calculatorRunRepository).findRunsByName(eq("capitalcalc"), any(), anyInt(), any());
+        verify(calculatorRunRepository).findRunsByName(eq("capitalcalcmedium"), any(), anyInt(), any());
+        verify(cacheService).putInCache(eq("executions"), eq("capital"), any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void getRunExecutionsByName_singleAlias_queriesRealNameOnly() {
+        CalculatorAliasProperties props = new CalculatorAliasProperties();
+        props.setCalculatorAliases(Map.of("portfolio", List.of("portfoliocalc")));
+        AnalyticsService aliasService = new AnalyticsService(
+                dailyAggregateRepository,
+                slaBreachEventRepository,
+                calculatorRunRepository,
+                cacheService,
+                calculatorProfileService,
+                new com.company.observability.config.DurationBasedSlaProperties(),
+                new com.company.observability.config.SlaProperties(),
+                new CalculatorNameResolver(props)
+        );
+
+        when(cacheService.getFromCache(any(), eq("portfolio"), any(), anyInt(), any(), any()))
+                .thenReturn(null);
+        when(calculatorRunRepository.findRunsByName(eq("portfoliocalc"), any(), anyInt(), any()))
+                .thenReturn(List.of());
+
+        aliasService.getRunExecutionsByName("portfolio", 30, Frequency.DAILY, null);
+
+        verify(calculatorRunRepository).findRunsByName(eq("portfoliocalc"), any(), anyInt(), any());
+        verify(calculatorRunRepository, never()).findRunsByName(eq("portfolio"), any(), anyInt(), any());
+        verify(cacheService).putInCache(eq("executions"), eq("portfolio"), any(), anyInt(), any(), any());
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

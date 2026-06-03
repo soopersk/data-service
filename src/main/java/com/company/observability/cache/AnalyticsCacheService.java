@@ -4,6 +4,7 @@ import com.company.observability.domain.CalculatorRun;
 import com.company.observability.event.RunCompletedEvent;
 import com.company.observability.event.RunStartedEvent;
 import com.company.observability.event.SlaBreachedEvent;
+import com.company.observability.service.CalculatorNameResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class AnalyticsCacheService {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final CalculatorNameResolver nameResolver;
 
     private static final String ANALYTICS_PREFIX = "obs:analytics:";
     private static final String ANALYTICS_INDEX_PREFIX = "obs:analytics:index:";
@@ -168,6 +170,9 @@ public class AnalyticsCacheService {
         if (run.getCalculatorName() != null && !run.getCalculatorName().equals(run.getCalculatorId())) {
             evictIndex(buildIndexKey(run.getCalculatorName()), run.getCalculatorName());
         }
+        // Also evict the alias cache entry when this real calculator belongs to a UI alias
+        nameResolver.findAliasFor(run.getCalculatorName())
+                .ifPresent(alias -> evictIndex(buildIndexKey(alias), alias));
     }
 
     private void evictIndex(String indexKey, String calculatorKey) {
@@ -195,6 +200,9 @@ public class AnalyticsCacheService {
         if (run.getCalculatorName() != null && !run.getCalculatorName().equals(run.getCalculatorId())) {
             evictIndexByPrefix(buildIndexKey(run.getCalculatorName()), fullKeyPrefix, run.getCalculatorName());
         }
+        // Also evict the alias cache entry when this real calculator belongs to a UI alias
+        nameResolver.findAliasFor(run.getCalculatorName())
+                .ifPresent(alias -> evictIndexByPrefix(buildIndexKey(alias), fullKeyPrefix, alias));
     }
 
     private void evictIndexByPrefix(String indexKey, String fullKeyPrefix, String calculatorKey) {
