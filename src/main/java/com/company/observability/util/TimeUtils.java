@@ -26,6 +26,21 @@ public class TimeUtils {
     }
 
     /**
+     * Derive an absolute UTC deadline from a clock time (HH:mm UTC) anchored to the run's start date.
+     * If the derived deadline is at or before {@code startTime}, it is rolled forward by one day
+     * to handle overnight SLA windows (e.g. start 23:00Z, sla 06:00Z → next day 06:00Z).
+     */
+    public static Instant clockTimeDeadlineUtc(Instant startTime, LocalTime slaTimeUtc) {
+        if (startTime == null || slaTimeUtc == null) return null;
+        LocalDate startDateUtc = startTime.atZone(ZoneOffset.UTC).toLocalDate();
+        Instant deadline = ZonedDateTime.of(startDateUtc, slaTimeUtc, ZoneOffset.UTC).toInstant();
+        if (!deadline.isAfter(startTime)) {
+            deadline = deadline.plus(Duration.ofDays(1));
+        }
+        return deadline;
+    }
+
+    /**
      * Calculate estimated end time from start time and expected duration
      */
     public static Instant calculateEstimatedEndTime(Instant startTime, Long expectedDurationMs) {

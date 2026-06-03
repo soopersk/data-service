@@ -1,8 +1,11 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.SlaMonitoringCache;
+import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
+import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.SlaBand;
@@ -59,8 +62,13 @@ class RunIngestionServiceTest {
     private static final CalculatorProfile EMPTY_PROFILE =
             new CalculatorProfile("Calculator 1", "DAILY", 0, 0, 0, 0);
 
+    private SlaProperties slaProperties;
+    private DurationBasedSlaProperties durationProps;
+
     @BeforeEach
     void setUp() {
+        slaProperties = new SlaProperties(); // defaults to CLOCK_TIME
+        durationProps = new DurationBasedSlaProperties();
         service = new RunIngestionService(
                 runRepository,
                 slaEvaluationService,
@@ -69,7 +77,9 @@ class RunIngestionServiceTest {
                 eventPublisher,
                 new SimpleMeterRegistry(),
                 slaMonitoringCache,
-                new com.company.observability.logging.LifecycleLogger()
+                new com.company.observability.logging.LifecycleLogger(),
+                slaProperties,
+                durationProps
         );
     }
 
@@ -197,7 +207,9 @@ class RunIngestionServiceTest {
     }
 
     @Test
-    void startRun_persistsResolvedBaselineAsExpectedDuration() {
+    void startRun_durationMode_persistsResolvedBaselineAsExpectedDuration() {
+        // In DURATION mode the resolver's baseline IS the expectedDurationMs.
+        slaProperties.setMode(SlaMode.DURATION);
         ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
 
         LocalDate reportingDate = LocalDate.of(2026, 2, 20);
@@ -219,16 +231,78 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY)).thenReturn(EMPTY_PROFILE);
         when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
-                .thenReturn(new SlaBaselineResolver.SlaResolution(
-                        3_600_000L,
-                        derivedDeadline
-                ));
+                .thenReturn(new SlaBaselineResolver.SlaResolution(3_600_000L, derivedDeadline));
 
         service.startRun(request, "tenant-1");
 
         verify(runRepository).upsert(argThat(run ->
                 Long.valueOf(3_600_000L).equals(run.getExpectedDurationMs())
                         && derivedDeadline.equals(run.getSlaTime())));
+    }
+
+    @Test
+    void startRun_clockMode_persistsRequestExpectedDurationMs() {
+        // In CLOCK_TIME mode expectedDurationMs comes from the request, not the SLA resolution.
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+
+        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+        Instant clockDeadline = Instant.parse("2026-02-20T22:00:00Z");
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-clock")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(Frequency.DAILY)
+                .reportingDate(reportingDate)
+                .startTime(start)
+                .slaTime("22:00")
+                .expectedDurationMs(7_200_000L)
+                .build();
+
+        when(runRepository.findById("run-clock", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY)).thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(null, clockDeadline));
+
+        service.startRun(request, "tenant-1");
+
+        verify(runRepository).upsert(argThat(run ->
+                Long.valueOf(7_200_000L).equals(run.getExpectedDurationMs())
+                        && clockDeadline.equals(run.getSlaTime())));
+    }
+
+    @Test
+    void startRun_clockMode_estimatedEndDefaultsToDeadlineWhenNoDuration() {
+        // In CLOCK_TIME mode with no duration baseline, estimatedEndTime = deadline.
+        ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
+
+        LocalDate reportingDate = LocalDate.of(2026, 2, 20);
+        Instant start = Instant.parse("2026-02-20T05:00:00Z");
+        Instant clockDeadline = Instant.parse("2026-02-20T22:00:00Z");
+
+        StartRunRequest request = StartRunRequest.builder()
+                .runId("run-clock-end")
+                .calculatorId("calc-1")
+                .calculatorName("Calculator 1")
+                .frequency(Frequency.DAILY)
+                .reportingDate(reportingDate)
+                .startTime(start)
+                .slaTime("22:00")
+                .build(); // no expectedDurationMs, no estimatedEndTime
+
+        when(runRepository.findById("run-clock-end", reportingDate)).thenReturn(Optional.empty());
+        when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY)).thenReturn(EMPTY_PROFILE);
+        when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
+                .thenReturn(new SlaBaselineResolver.SlaResolution(null, clockDeadline));
+
+        service.startRun(request, "tenant-1");
+
+        verify(runRepository).upsert(argThat(run ->
+                clockDeadline.equals(run.getEstimatedEndTime())
+                        && clockDeadline.equals(run.getSlaTime())));
     }
 
     @Test

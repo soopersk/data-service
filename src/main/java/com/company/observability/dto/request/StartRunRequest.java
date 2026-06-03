@@ -41,8 +41,10 @@ public class StartRunRequest {
     @Schema(example = "2026-02-06T23:22:32Z")
     private Instant startTime;
 
-    @Schema(description = "Optional SLA baseline in ISO-8601 duration format (for example, PT2H30M). " +
-            "The persisted/response slaTime remains a derived absolute deadline instant.")
+    @Schema(description = "Phase-1 (CLOCK_TIME mode): UTC clock time HH:mm at which this run must complete " +
+            "(e.g. \"22:00\"). Rolled forward +1 day when the clock time is at or before startTime (overnight SLAs). " +
+            "Phase-2 (DURATION mode): ISO-8601 duration (e.g. \"PT2H30M\"). " +
+            "The persisted/response slaTime is always the derived absolute deadline instant (UTC).")
     private String slaTime;
 
     // Optional fields

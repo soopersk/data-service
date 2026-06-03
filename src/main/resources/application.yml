@@ -91,6 +91,9 @@ observability:
       username: ${OBS_ADMIN_USER:ops}
       password: ${OBS_ADMIN_PASSWORD:ops}
   sla:
+    # Phase-1: clock-time SLA (HH:mm UTC). Set to DURATION to restore legacy behaviour.
+    mode: CLOCK_TIME
+
     live-tracking:
       enabled: true
 

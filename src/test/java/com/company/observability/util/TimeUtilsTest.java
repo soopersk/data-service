@@ -16,6 +16,56 @@ import static org.junit.jupiter.api.Assertions.*;
 class TimeUtilsTest {
 
     // -----------------------------------------------------------------------
+    // clockTimeDeadlineUtc
+    // -----------------------------------------------------------------------
+
+    @Nested
+    class ClockTimeDeadlineUtc {
+
+        @Test
+        void sameDay_deadlineIsAfterStart() {
+            // start 04:00Z, sla 22:00Z → same day 22:00Z
+            Instant start = Instant.parse("2026-02-22T04:00:00Z");
+            Instant result = TimeUtils.clockTimeDeadlineUtc(start, LocalTime.of(22, 0));
+            assertEquals(Instant.parse("2026-02-22T22:00:00Z"), result);
+        }
+
+        @Test
+        void overnight_rollsForwardOneDay() {
+            // start 23:00Z, sla 06:00Z → clock time already passed → next day 06:00Z
+            Instant start = Instant.parse("2026-02-22T23:00:00Z");
+            Instant result = TimeUtils.clockTimeDeadlineUtc(start, LocalTime.of(6, 0));
+            assertEquals(Instant.parse("2026-02-23T06:00:00Z"), result);
+        }
+
+        @Test
+        void exactlyEqualToStartTime_rollsForwardOneDay() {
+            // When deadline == startTime it is NOT after startTime → roll forward
+            Instant start = Instant.parse("2026-02-22T22:00:00Z");
+            Instant result = TimeUtils.clockTimeDeadlineUtc(start, LocalTime.of(22, 0));
+            assertEquals(Instant.parse("2026-02-23T22:00:00Z"), result);
+        }
+
+        @Test
+        void dstIrrelevant_pureUtcAnchor() {
+            // DST transition date — pure UTC means no ambiguity
+            Instant start = Instant.parse("2026-03-29T01:00:00Z");
+            Instant result = TimeUtils.clockTimeDeadlineUtc(start, LocalTime.of(22, 0));
+            assertEquals(Instant.parse("2026-03-29T22:00:00Z"), result);
+        }
+
+        @Test
+        void nullStartTime_returnsNull() {
+            assertNull(TimeUtils.clockTimeDeadlineUtc(null, LocalTime.of(22, 0)));
+        }
+
+        @Test
+        void nullSlaTime_returnsNull() {
+            assertNull(TimeUtils.clockTimeDeadlineUtc(Instant.now(), null));
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // calculateSlaDeadline
     // -----------------------------------------------------------------------
 

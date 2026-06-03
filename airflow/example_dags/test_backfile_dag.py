@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Mapping
 
 import pendulum
 from airflow.decorators import dag, task
@@ -24,10 +24,33 @@ logger = logging.getLogger(__name__)
 _FAILED_ID_CAP = 50
 
 
+def _normalize_frequency(freq: str | None) -> str | None:
+    if not freq:
+        return None
+    upper = freq.upper()
+    if upper in {"D", "DAILY"}:
+        return "DAILY"
+    if upper in {"M", "MONTHLY"}:
+        return "MONTHLY"
+    return None
+
+
 @dataclass(frozen=True)
 class CalculatorMetadata:
+    """Mirror of the shared CalculatorMetadata injected by the runtime loader.
+
+    `sla` is the per-(frequency, run) duration matrix, e.g.
+        {"DAILY": {"RUN1": "PT2H30M", "RUN2": "PT3H"}, "MONTHLY": {"RUN1": "PT6H"}}
+    """
     name: str
-    sla_time: str | None = None
+    id: str | None = None
+    sla: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+
+    def sla_for(self, frequency: str | None, run_number: int) -> str | None:
+        freq = _normalize_frequency(frequency)
+        if not freq:
+            return None
+        return self.sla.get(freq, {}).get(f"RUN{run_number}")
 
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -117,37 +140,6 @@ def fetch_events(
     return _safe_get_events(config=config, query_params=query_params)
 
 
-# ── SLA helpers ──────────────────────────────────────────────────────────────
-
-def _normalize_frequency(freq: str | None) -> str | None:
-    if not freq:
-        return None
-    upper = freq.upper()
-    if upper in {"D", "DAILY"}:
-        return "DAILY"
-    if upper in {"M", "MONTHLY"}:
-        return "MONTHLY"
-    return None
-
-
-def resolve_sla_time(
-    sla_config: dict[str, Any],
-    calculator_name: str | None,
-    frequency: str | None,
-    run_number: int,
-) -> str | None:
-    """Return ISO-8601 SLA duration from calculator_sla_config for this run, or None."""
-    if not calculator_name or not sla_config:
-        return None
-    freq_norm = _normalize_frequency(frequency)
-    if not freq_norm:
-        return None
-    calc_key = next((k for k in sla_config if k.lower() == calculator_name.lower()), None)
-    if not calc_key:
-        return None
-    return sla_config[calc_key].get(freq_norm, {}).get(f"RUN{run_number}")
-
-
 # ── DAG ───────────────────────────────────────────────────────────────────────
 
 @dag(
@@ -197,7 +189,7 @@ def obs_event_backfill_dag():
         if frequency and frequency.upper() not in {"D", "M", "DAILY", "MONTHLY"}:
             raise ValueError(f"frequency must be one of D, M, DAILY, MONTHLY — got {frequency!r}")
 
-        sla_config = Variable.get("calculator_sla_config", default_var=None, deserialize_json=True) or {}
+        calculator_metadata = Variable.get("calculator_metadata", default_var=None, deserialize_json=True) or {}
 
         # Base exclusion list — set per environment via Airflow Variable.
         # Example value: ["housekeepingtask", "capitalsnapshotdev", "companyregionmappingtask", "altercolumnorder"]
@@ -220,7 +212,7 @@ def obs_event_backfill_dag():
             "frequency": frequency,
             "tenant_id": conf.get("tenant_id", "default"),
             "dry_run": bool(conf.get("dry_run", False)),
-            "sla_config": sla_config,
+            "calculator_metadata": calculator_metadata,
             "excluded_calculators": excluded_calculators,
         }
 
@@ -239,7 +231,8 @@ def obs_event_backfill_dag():
         frequency = params.get("frequency")
         tenant_id = params["tenant_id"]
         dry_run = params.get("dry_run", False)
-        sla_config = params.get("sla_config", {})
+        metadata_map = params.get("calculator_metadata", {})
+        metadata_index = {k.lower(): v for k, v in metadata_map.items()}
 
         # 1. Fetch
         starts_raw = fetch_events(config, reporting_date, "STARTED",
@@ -295,13 +288,19 @@ def obs_event_backfill_dag():
             _ctx_data = start_event.get("context", {}).get("data", {})
             rd = _ctx_data.get("reporting-date") or reporting_date
             calc_name = _ctx_data.get("class")
-            sla_time = resolve_sla_time(sla_config, calc_name, _ctx_data.get("frequency"), run_number)
-            calc_metadata = CalculatorMetadata(name=calc_name, sla_time=sla_time) if calc_name else None
+            freq = _ctx_data.get("frequency")
+            calc_metadata = None
+            if calc_name:
+                entry = metadata_index.get(calc_name.lower(), {})
+                calc_metadata = CalculatorMetadata(
+                    name=calc_name, id=entry.get("id"), sla=entry.get("sla", {})
+                )
 
             if dry_run:
+                sla_time = calc_metadata.sla_for(freq, run_number) if calc_metadata else None
                 logger.info(
-                    "[DRY-RUN] would POST /start run_id=%s reporting_date=%s run_number=%d has_complete=%s calc_metadata=%s",
-                    run_id, rd, run_number, complete_event is not None, calc_metadata,
+                    "[DRY-RUN] would POST /start run_id=%s reporting_date=%s run_number=%d has_complete=%s sla_time=%s calc_metadata=%s",
+                    run_id, rd, run_number, complete_event is not None, sla_time, calc_metadata,
                 )
                 if complete_event:
                     posted_both += 1

@@ -1,10 +1,13 @@
 package com.company.observability.service;
 
 import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.enums.Frequency;
+import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.exception.DomainValidationException;
+import com.company.observability.util.TimeUtils;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,32 +15,21 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
 
 /**
- * Resolves a run's SLA deadline at start time from a duration baseline, then freezes it
- * into {@code slaTime} so the rest of the SLA machinery (on-write evaluation, Redis live
- * detection) continues to operate on a single absolute instant.
+ * Resolves a run's SLA deadline at start time and freezes it into {@code slaTime} so the
+ * rest of the SLA machinery (on-write evaluation, Redis live detection) operates on a
+ * single absolute instant.
  *
- * <p>The deadline marks the ON_TIME upper edge (entry into the LATE band):
- * <pre>
- *   baseline  = best available duration estimate (see below)
- *   buffered  = baseline * (1 + thresholdPercent/100)
- *   deadline  = startTime + buffered + lateBand
- * </pre>
+ * <p><b>CLOCK_TIME mode (phase-1 default):</b> {@code slaTime} in the request is a UTC
+ * clock time {@code HH:mm}. The deadline is anchored to the run's start date and rolled
+ * forward +1 day when the clock time is at or before {@code startTime} (overnight SLAs).
+ * {@code baselineDurationMs} is null in this mode — SLA is not a duration.
  *
- * <p>Baseline resolution is a fallback chain:
- * <ol>
- *   <li><b>Request slaTime</b> — preferred external input as ISO-8601 duration
- *       (for example, {@code PT2H30M}).</li>
- *   <li><b>expectedDurationMs</b> — external duration fallback.</li>
- *   <li><b>Average</b> — the cached {@link CalculatorProfile}'s avg duration, gated by
- *       {@code minSampleSize}.</li>
- *   <li><b>None</b> — no deadline; the run is left ungraded (ON_TIME) until history accrues.</li>
- * </ol>
- *
- * <p>The profile is fetched once by {@code RunIngestionService} (Redis-cached) and passed in,
- * so the resolver issues no DB query of its own.
+ * <p><b>DURATION mode (phase-2 / legacy):</b> {@code slaTime} is an ISO-8601 duration
+ * (e.g. {@code PT2H30M}). Deadline = {@code startTime + buffered + lateBand}.
  */
 @Service
 @RequiredArgsConstructor
@@ -45,6 +37,7 @@ import java.time.format.DateTimeParseException;
 public class SlaBaselineResolver {
 
     private final DurationBasedSlaProperties props;
+    private final SlaProperties slaProperties;
     private final MeterRegistry meterRegistry;
 
     public record SlaResolution(
@@ -57,13 +50,17 @@ public class SlaBaselineResolver {
      * @return baseline + deadline resolution details for persistence and estimated-end fallback.
      */
     public SlaResolution resolve(StartRunRequest request, Frequency frequency, CalculatorProfile profile) {
-        // Feature disabled -> do not derive a deadline.
-        if (!props.isEnabled()) {
+        Instant startTime = request.getStartTime();
+        if (startTime == null) {
             return new SlaResolution(null, null);
         }
 
-        Instant startTime = request.getStartTime();
-        if (startTime == null) {
+        if (slaProperties.getMode() == SlaMode.CLOCK_TIME) {
+            return resolveClockTime(request);
+        }
+
+        // DURATION mode — original logic
+        if (!props.isEnabled()) {
             return new SlaResolution(null, null);
         }
 
@@ -81,6 +78,26 @@ public class SlaBaselineResolver {
         log.debug("event=sla.baseline.resolve outcome=success calculatorId={} frequency={} baselineMs={} deadline={}",
                 request.getCalculatorId(), frequency, baselineMs, deadline);
         return new SlaResolution(baselineMs, deadline);
+    }
+
+    private SlaResolution resolveClockTime(StartRunRequest request) {
+        String raw = request.getSlaTime();
+        if (raw == null || raw.isBlank()) {
+            return new SlaResolution(null, null);
+        }
+
+        LocalTime parsed;
+        try {
+            parsed = LocalTime.parse(raw.trim());
+        } catch (DateTimeParseException ex) {
+            throw new DomainValidationException(
+                    "Invalid slaTime. Use clock time HH:mm (UTC), e.g. 22:00.");
+        }
+
+        Instant deadline = TimeUtils.clockTimeDeadlineUtc(request.getStartTime(), parsed);
+        log.debug("event=sla.baseline.resolve mode=CLOCK_TIME calculatorId={} slaTime={} deadline={}",
+                request.getCalculatorId(), raw, deadline);
+        return new SlaResolution(null, deadline);
     }
 
     private Long resolveBaselineMs(StartRunRequest request, CalculatorProfile profile) {

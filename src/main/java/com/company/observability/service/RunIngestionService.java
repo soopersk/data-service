@@ -1,10 +1,13 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.SlaMonitoringCache;
+import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaEvaluationResult;
 import com.company.observability.domain.enums.Frequency;
+import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.*;
@@ -45,6 +48,8 @@ public class RunIngestionService {
     private final MeterRegistry meterRegistry;
     private final SlaMonitoringCache slaMonitoringCache;
     private final LifecycleLogger lifecycleLogger;
+    private final SlaProperties slaProperties;
+    private final DurationBasedSlaProperties durationProps;
 
     @Value("${observability.sla.live-tracking.enabled:true}")
     private boolean liveTrackingEnabled;
@@ -87,7 +92,6 @@ public class RunIngestionService {
         // Derive SLA baseline + deadline once and reuse for persistence + estimated-end fallback.
         SlaBaselineResolver.SlaResolution slaResolution = slaBaselineResolver.resolve(request, frequency, profile);
         Instant slaDeadline = slaResolution.deadline();
-        Long resolvedBaselineDurationMs = slaResolution.baselineDurationMs();
 
         Instant estimatedStartTime = resolveEstimatedStart(request, profile);
         Instant estimatedEndTime = resolveEstimatedEnd(request, estimatedStartTime, profile, slaResolution);
@@ -102,7 +106,7 @@ public class RunIngestionService {
                 .startTime(request.getStartTime())
                 .status(RunStatus.RUNNING)
                 .slaTime(slaDeadline)
-                .expectedDurationMs(resolvedBaselineDurationMs)
+                .expectedDurationMs(resolveExpectedDuration(request, profile, slaResolution))
                 .estimatedStartTime(estimatedStartTime)
                 .estimatedEndTime(estimatedEndTime)
                 .runNumber(resolveField(request.getRunNumber(), request.getRunParameters(), "run_number"))
@@ -128,8 +132,8 @@ public class RunIngestionService {
                 "frequency", run.getFrequency().name()
         ).increment();
 
-        log.info("event=run.start.persist outcome=success baselineMs={} slaDeadline={} liveTracking={}",
-                resolvedBaselineDurationMs, slaDeadline, liveTrackingEnabled);
+        log.info("event=run.start.persist outcome=success slaDeadline={} liveTracking={}",
+                slaDeadline, liveTrackingEnabled);
 
         return run;
     }
@@ -265,9 +269,8 @@ public class RunIngestionService {
     }
 
     /**
-     * Estimated end precedence: request value (Airflow) → resolved baseline fallback
-     * (anchored to start for external inputs, estimatedStart for profile average) →
-     * estimatedStart + historical avg duration (cached profile) → null.
+     * Estimated end precedence: request value (Airflow) → in clock-time mode, deadline when no
+     * duration baseline is available → duration baseline fallback → profile avg → null.
      */
     private Instant resolveEstimatedEnd(
             StartRunRequest request,
@@ -288,9 +291,37 @@ public class RunIngestionService {
             return TimeUtils.calculateEstimatedEndTime(request.getStartTime(), slaResolution.baselineDurationMs());
         }
 
+        // Clock-time mode: no duration baseline, but we have a frozen deadline — use it as estimated end.
+        if (slaResolution != null && slaResolution.deadline() != null
+                && slaProperties.getMode() == SlaMode.CLOCK_TIME) {
+            return slaResolution.deadline();
+        }
+
         if (profile != null && profile.avgDurationMs() > 0 && estimatedStart != null) {
             return estimatedStart.plusMillis(profile.avgDurationMs());
         }
         return null;
+    }
+
+    /**
+     * Resolves the value to persist in {@code expected_duration_ms}.
+     * <ul>
+     *   <li>CLOCK_TIME mode: duration is a performance metric independent of SLA —
+     *       use request value, else profile avg (when sufficient samples), else null.
+     *   <li>DURATION mode: the baseline duration IS the SLA estimate — use the resolved baseline.
+     * </ul>
+     */
+    private Long resolveExpectedDuration(StartRunRequest request, CalculatorProfile profile,
+                                         SlaBaselineResolver.SlaResolution slaResolution) {
+        if (slaProperties.getMode() == SlaMode.CLOCK_TIME) {
+            if (request.getExpectedDurationMs() != null && request.getExpectedDurationMs() > 0) {
+                return request.getExpectedDurationMs();
+            }
+            if (profile != null && profile.hasSufficientSamples(durationProps.getMinSampleSize()) && profile.avgDurationMs() > 0) {
+                return profile.avgDurationMs();
+            }
+            return null;
+        }
+        return slaResolution.baselineDurationMs();
     }
 }
