@@ -382,7 +382,8 @@ public class AnalyticsService {
      * so no upstream UUID appears in the response.
      */
     public RunPerformanceData getRunExecutionsByName(
-            String calculatorName, int days, Frequency frequency, String runNumber) {
+            String calculatorName, int days, Frequency frequency, String runNumber,
+            LocalDate asOfDate) {
 
         // Normalize blank → null so empty ?run_number= means "all runs" (not filter on empty string)
         String rn = (runNumber == null || runNumber.isBlank()) ? null : runNumber;
@@ -390,27 +391,27 @@ public class AnalyticsService {
         // Cache is keyed by the alias/name as supplied by the caller
         RunPerformanceData cached = cacheService.getFromCache(
                 CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn,
-                RunPerformanceData.class);
+                asOfDate, RunPerformanceData.class);
         if (cached != null) {
-            log.debug("event=executions.cache outcome=hit calculatorName={} frequency={} days={} runNumber={}",
-                    calculatorName, frequency, days, rn);
+            log.debug("event=executions.cache outcome=hit calculatorName={} frequency={} days={} runNumber={} asOfDate={}",
+                    calculatorName, frequency, days, rn, asOfDate);
             return cached;
         }
 
         // Expand alias to real DB calculator_name values; unknown names pass through unchanged
         List<String> realNames = nameResolver.resolve(calculatorName);
 
-        log.debug("event=executions.db_fetch outcome=start calculatorName={} realNames={} frequency={} days={} runNumber={}",
-                calculatorName, realNames, frequency, days, rn);
+        log.debug("event=executions.db_fetch outcome=start calculatorName={} realNames={} frequency={} days={} runNumber={} asOfDate={}",
+                calculatorName, realNames, frequency, days, rn, asOfDate);
 
         List<RunWithSlaStatus> rawRuns = realNames.stream()
-                .flatMap(name -> calculatorRunRepository.findRunsByName(name, frequency, days, rn).stream())
+                .flatMap(name -> calculatorRunRepository.findRunsByName(name, frequency, days, rn, asOfDate).stream())
                 .sorted(Comparator.comparing(RunWithSlaStatus::reportingDate)
                         .thenComparing(RunWithSlaStatus::startTime, Comparator.nullsFirst(Comparator.naturalOrder())))
                 .toList();
 
         RunPerformanceData response = buildExecutionsResponse(calculatorName, rawRuns, days, frequency);
-        cacheService.putInCache(CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn, response);
+        cacheService.putInCache(CACHE_EXECUTIONS, calculatorName, frequency.name(), days, rn, asOfDate, response);
         return response;
     }
 

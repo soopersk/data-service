@@ -213,16 +213,17 @@ class AnalyticsCacheServiceTest {
                 "Calc", "Calc", "DAILY", 30, 3_600_000L, 1, 0, 1, 0, 0,
                 List.of(dp), Instant.parse("2026-05-01T04:00:00Z"), Instant.parse("2026-05-01T06:00:00Z"));
 
-        String key = "obs:analytics:executions:Calc:DAILY:30:all";
+        LocalDate asOfDate = LocalDate.of(2026, 5, 1);
+        String key = "obs:analytics:executions:Calc:DAILY:30:all:" + asOfDate;
 
         // Capture the JSON the service writes, then feed it back on read — a true round-trip.
         ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
-        service.putInCache("executions", "Calc", "DAILY", 30, null, response);
+        service.putInCache("executions", "Calc", "DAILY", 30, null, asOfDate, response);
         verify(valueOperations).set(eq(key), jsonCaptor.capture(), eq(Duration.ofMinutes(5)));
 
         when(valueOperations.get(key)).thenReturn(jsonCaptor.getValue());
         RunPerformanceData result =
-                service.getFromCache("executions", "Calc", "DAILY", 30, null, RunPerformanceData.class);
+                service.getFromCache("executions", "Calc", "DAILY", 30, null, asOfDate, RunPerformanceData.class);
 
         assertThat(result).isNotNull();
         assertThat(result.runs()).hasSize(1);

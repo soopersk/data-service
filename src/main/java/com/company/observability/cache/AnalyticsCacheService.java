@@ -16,6 +16,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -103,12 +104,12 @@ public class AnalyticsCacheService {
 
     /**
      * runNumber-aware get — for executions cache keyed by calculatorName.
-     * Key: obs:analytics:executions:{name}:{freq}:{days}:{runNumber|all}
+     * Key: obs:analytics:executions:{name}:{freq}:{days}:{runNumber|all}:{asOfDate}
      */
     public <T> T getFromCache(String keyPrefix, String calculatorKey,
                               String frequency, int days, String runNumber,
-                              Class<T> responseType) {
-        String key = buildKeyWithRunNumber(keyPrefix, calculatorKey, frequency, days, runNumber);
+                              LocalDate asOfDate, Class<T> responseType) {
+        String key = buildKeyWithRunNumber(keyPrefix, calculatorKey, frequency, days, runNumber, asOfDate);
         try {
             String json = redisTemplate.opsForValue().get(key);
             if (json != null) {
@@ -127,8 +128,9 @@ public class AnalyticsCacheService {
      * runNumber-aware put — for executions cache keyed by calculatorName.
      */
     public void putInCache(String keyPrefix, String calculatorKey,
-                           String frequency, int days, String runNumber, Object response) {
-        String key = buildKeyWithRunNumber(keyPrefix, calculatorKey, frequency, days, runNumber);
+                           String frequency, int days, String runNumber,
+                           LocalDate asOfDate, Object response) {
+        String key = buildKeyWithRunNumber(keyPrefix, calculatorKey, frequency, days, runNumber, asOfDate);
         // Track under both calculatorKey (name) index so eviction covers name-keyed entries
         String indexKey = buildIndexKey(calculatorKey);
         try {
@@ -245,10 +247,11 @@ public class AnalyticsCacheService {
     }
 
     private String buildKeyWithRunNumber(String prefix, String calculatorKey,
-                                         String frequency, int days, String runNumber) {
+                                         String frequency, int days, String runNumber,
+                                         LocalDate asOfDate) {
         String rn = (runNumber == null) ? "all" : runNumber;
         return ANALYTICS_PREFIX + prefix + ":" + calculatorKey
-                + ":" + frequency + ":" + days + ":" + rn;
+                + ":" + frequency + ":" + days + ":" + rn + ":" + asOfDate;
     }
 
     private String buildIndexKey(String calculatorId) {

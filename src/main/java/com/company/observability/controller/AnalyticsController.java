@@ -18,6 +18,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.format.annotation.DateTimeFormat;
+
+import java.time.LocalDate;
 import java.util.concurrent.TimeUnit;
 
 @RestController
@@ -163,17 +166,21 @@ public class AnalyticsController {
             @Parameter(description = "Frequency: DAILY or MONTHLY")
             @RequestParam(defaultValue = "DAILY") String frequency,
             @Parameter(description = "Run number bucket: 1 or 2. Omit to return all buckets.")
-            @RequestParam(value = "run_number", required = false) String runNumber) {
+            @RequestParam(value = "run_number", required = false) String runNumber,
+            @Parameter(description = "Anchor date for the lookback window (ISO-8601: yyyy-MM-dd). Defaults to today.")
+            @RequestParam(value = "data_as_of_date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataAsOfDate) {
 
         Frequency freq = Frequency.fromStrict(frequency);
+        LocalDate effectiveAsOfDate = (dataAsOfDate != null) ? dataAsOfDate : LocalDate.now();
 
-        log.info("event=executions.request outcome=accepted calculatorName={} days={} frequency={} runNumber={}",
-                calculatorName, days, freq, runNumber);
+        log.info("event=executions.request outcome=accepted calculatorName={} days={} frequency={} runNumber={} asOfDate={}",
+                calculatorName, days, freq, runNumber, effectiveAsOfDate);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RunPerformanceData response = analyticsService
-                    .getRunExecutionsByName(calculatorName, days, freq, runNumber);
+                    .getRunExecutionsByName(calculatorName, days, freq, runNumber, effectiveAsOfDate);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate())

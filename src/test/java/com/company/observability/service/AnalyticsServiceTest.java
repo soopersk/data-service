@@ -389,10 +389,10 @@ class AnalyticsServiceTest {
                 List.of(), null, null);
         when(cacheService.getFromCache(
                 eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(),
-                eq(RunPerformanceData.class)))
+                any(LocalDate.class), eq(RunPerformanceData.class)))
                 .thenReturn(cached);
 
-        RunPerformanceData result = service.getRunExecutionsByName("cap", 30, Frequency.DAILY, null);
+        RunPerformanceData result = service.getRunExecutionsByName("cap", 30, Frequency.DAILY, null, LocalDate.now());
 
         assertEquals(cached, result);
         verifyNoInteractions(calculatorRunRepository);
@@ -400,49 +400,49 @@ class AnalyticsServiceTest {
 
     @Test
     void getRunExecutionsByName_cacheMiss_queriesDbAndPopulatesCache() {
-        when(cacheService.getFromCache(any(), any(), any(), anyInt(), any(), any()))
+        when(cacheService.getFromCache(any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(null);
         when(calculatorRunRepository.findRunsByName(
-                eq("cap"), eq(Frequency.DAILY), eq(30), isNull()))
+                eq("cap"), eq(Frequency.DAILY), eq(30), isNull(), any(LocalDate.class)))
                 .thenReturn(List.of());
 
-        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, null);
+        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, null, LocalDate.now());
 
         verify(calculatorRunRepository)
-                .findRunsByName("cap", Frequency.DAILY, 30, null);
+                .findRunsByName(eq("cap"), eq(Frequency.DAILY), eq(30), isNull(), any(LocalDate.class));
         verify(cacheService).putInCache(
-                eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any());
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any(LocalDate.class), any());
     }
 
     @Test
     void getRunExecutionsByName_runNumberDistinguishesKeys() {
-        when(cacheService.getFromCache(any(), any(), any(), anyInt(), eq("2"), any()))
+        when(cacheService.getFromCache(any(), any(), any(), anyInt(), eq("2"), any(), any()))
                 .thenReturn(null);
         when(calculatorRunRepository.findRunsByName(
-                eq("cap"), any(), anyInt(), eq("2")))
+                eq("cap"), any(), anyInt(), eq("2"), any(LocalDate.class)))
                 .thenReturn(List.of());
 
-        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, "2");
+        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, "2", LocalDate.now());
 
         verify(cacheService).getFromCache(
-                eq("executions"), eq("cap"), eq("DAILY"), eq(30), eq("2"), any());
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), eq("2"), any(LocalDate.class), any());
         verify(cacheService).putInCache(
-                eq("executions"), eq("cap"), eq("DAILY"), eq(30), eq("2"), any());
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), eq("2"), any(LocalDate.class), any());
     }
 
     @Test
     void getRunExecutionsByName_blankRunNumber_normalisedToNull() {
-        when(cacheService.getFromCache(any(), any(), any(), anyInt(), isNull(), any()))
+        when(cacheService.getFromCache(any(), any(), any(), anyInt(), isNull(), any(), any()))
                 .thenReturn(null);
-        when(calculatorRunRepository.findRunsByName(any(), any(), anyInt(), isNull()))
+        when(calculatorRunRepository.findRunsByName(any(), any(), anyInt(), isNull(), any(LocalDate.class)))
                 .thenReturn(List.of());
 
-        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, "  ");
+        service.getRunExecutionsByName("cap", 30, Frequency.DAILY, "  ", LocalDate.now());
 
         verify(cacheService).getFromCache(
-                eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any());
+                eq("executions"), eq("cap"), eq("DAILY"), eq(30), isNull(), any(LocalDate.class), any());
         verify(calculatorRunRepository)
-                .findRunsByName("cap", Frequency.DAILY, 30, null);
+                .findRunsByName(eq("cap"), eq(Frequency.DAILY), eq(30), isNull(), any(LocalDate.class));
     }
 
     @Test
@@ -462,7 +462,7 @@ class AnalyticsServiceTest {
                 new CalculatorNameResolver(props)
         );
 
-        when(cacheService.getFromCache(any(), eq("capital"), any(), anyInt(), any(), any()))
+        when(cacheService.getFromCache(any(), eq("capital"), any(), anyInt(), any(), any(), any()))
                 .thenReturn(null);
 
         LocalDate day = LocalDate.of(2026, 6, 1);
@@ -478,20 +478,20 @@ class AnalyticsServiceTest {
                 start, end, 1_800_000L, null, start,
                 Frequency.DAILY, RunStatus.SUCCESS, null, null, null, null, null);
 
-        when(calculatorRunRepository.findRunsByName(eq("capitalcalc"), any(), anyInt(), any()))
+        when(calculatorRunRepository.findRunsByName(eq("capitalcalc"), any(), anyInt(), any(), any(LocalDate.class)))
                 .thenReturn(List.of(run1));
-        when(calculatorRunRepository.findRunsByName(eq("capitalcalcmedium"), any(), anyInt(), any()))
+        when(calculatorRunRepository.findRunsByName(eq("capitalcalcmedium"), any(), anyInt(), any(), any(LocalDate.class)))
                 .thenReturn(List.of(run2));
         when(calculatorProfileService.getProfile(any(), any()))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile("capitalcalc", "DAILY", null, 0, 0, 0, 0));
 
-        RunPerformanceData result = aliasService.getRunExecutionsByName("capital", 30, Frequency.DAILY, null);
+        RunPerformanceData result = aliasService.getRunExecutionsByName("capital", 30, Frequency.DAILY, null, LocalDate.now());
 
         assertEquals("capital", result.calculatorId());
         assertEquals(2, result.runs().size());
-        verify(calculatorRunRepository).findRunsByName(eq("capitalcalc"), any(), anyInt(), any());
-        verify(calculatorRunRepository).findRunsByName(eq("capitalcalcmedium"), any(), anyInt(), any());
-        verify(cacheService).putInCache(eq("executions"), eq("capital"), any(), anyInt(), any(), any());
+        verify(calculatorRunRepository).findRunsByName(eq("capitalcalc"), any(), anyInt(), any(), any(LocalDate.class));
+        verify(calculatorRunRepository).findRunsByName(eq("capitalcalcmedium"), any(), anyInt(), any(), any(LocalDate.class));
+        verify(cacheService).putInCache(eq("executions"), eq("capital"), any(), anyInt(), any(), any(LocalDate.class), any());
     }
 
     @Test
@@ -509,16 +509,16 @@ class AnalyticsServiceTest {
                 new CalculatorNameResolver(props)
         );
 
-        when(cacheService.getFromCache(any(), eq("portfolio"), any(), anyInt(), any(), any()))
+        when(cacheService.getFromCache(any(), eq("portfolio"), any(), anyInt(), any(), any(), any()))
                 .thenReturn(null);
-        when(calculatorRunRepository.findRunsByName(eq("portfoliocalc"), any(), anyInt(), any()))
+        when(calculatorRunRepository.findRunsByName(eq("portfoliocalc"), any(), anyInt(), any(), any(LocalDate.class)))
                 .thenReturn(List.of());
 
-        aliasService.getRunExecutionsByName("portfolio", 30, Frequency.DAILY, null);
+        aliasService.getRunExecutionsByName("portfolio", 30, Frequency.DAILY, null, LocalDate.now());
 
-        verify(calculatorRunRepository).findRunsByName(eq("portfoliocalc"), any(), anyInt(), any());
-        verify(calculatorRunRepository, never()).findRunsByName(eq("portfolio"), any(), anyInt(), any());
-        verify(cacheService).putInCache(eq("executions"), eq("portfolio"), any(), anyInt(), any(), any());
+        verify(calculatorRunRepository).findRunsByName(eq("portfoliocalc"), any(), anyInt(), any(), any(LocalDate.class));
+        verify(calculatorRunRepository, never()).findRunsByName(eq("portfolio"), any(), anyInt(), any(), any(LocalDate.class));
+        verify(cacheService).putInCache(eq("executions"), eq("portfolio"), any(), anyInt(), any(), any(LocalDate.class), any());
     }
 
     private SlaBreachEvent breach(long breachId, Instant createdAt) {

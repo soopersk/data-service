@@ -503,7 +503,8 @@ public class CalculatorRunRepository {
      *                  are included alongside the requested bucket.
      */
     public List<RunWithSlaStatus> findRunsByName(
-            String calculatorName, Frequency frequency, int days, String runNumber) {
+            String calculatorName, Frequency frequency, int days, String runNumber,
+            LocalDate asOfDate) {
 
         StringBuilder sql = new StringBuilder("""
             SELECT cr.run_id, cr.calculator_id, cr.calculator_name, cr.reporting_date,
@@ -513,8 +514,8 @@ public class CalculatorRunRepository {
                    cr.run_number, cr.expected_duration_ms
             FROM calculator_runs cr
             WHERE cr.calculator_name = :calculatorName AND cr.frequency = :frequency
-            AND cr.reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
-            AND cr.reporting_date <= CURRENT_DATE
+            AND cr.reporting_date >= :asOfDate - CAST(:days AS INTEGER) * INTERVAL '1 day'
+            AND cr.reporting_date <= :asOfDate
             """);
         if (runNumber != null) {
             sql.append("AND (cr.run_number = :runNumber OR cr.run_number IS NULL)\n");
@@ -524,13 +525,14 @@ public class CalculatorRunRepository {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorName", calculatorName)
                 .addValue("frequency", frequency.name())
-                .addValue("days", days);
+                .addValue("days", days)
+                .addValue("asOfDate", asOfDate);
         if (runNumber != null) {
             params.addValue("runNumber", runNumber);
         }
 
-        log.debug("event=db.query outcome=start query=find_runs_by_name calculatorName={} frequency={} days={} runNumber={}",
-                calculatorName, frequency, days, runNumber);
+        log.debug("event=db.query outcome=start query=find_runs_by_name calculatorName={} frequency={} days={} runNumber={} asOfDate={}",
+                calculatorName, frequency, days, runNumber, asOfDate);
 
         Timer.Sample sample = Timer.start(meterRegistry);
         List<RunWithSlaStatus> results = jdbcTemplate.query(sql.toString(), params, runWithSlaStatusMapper());

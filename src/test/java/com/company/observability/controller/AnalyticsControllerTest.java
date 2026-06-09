@@ -18,6 +18,9 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -184,7 +187,8 @@ class AnalyticsControllerTest {
                 Instant.parse("2026-05-11T04:00:00Z"),
                 Instant.parse("2026-05-11T06:30:00Z"));
 
-        when(analyticsService.getRunExecutionsByName("capitalcalc", 30, Frequency.DAILY, null))
+        when(analyticsService.getRunExecutionsByName(eq("capitalcalc"), eq(30),
+                eq(Frequency.DAILY), isNull(), any(LocalDate.class)))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/analytics/calculators/capitalcalc/executions")
@@ -199,12 +203,14 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.runs[1].runId").value("run-split-2"))
                 .andExpect(jsonPath("$.runs[0].subRunIds").doesNotExist());
 
-        verify(analyticsService).getRunExecutionsByName("capitalcalc", 30, Frequency.DAILY, null);
+        verify(analyticsService).getRunExecutionsByName(eq("capitalcalc"), eq(30),
+                eq(Frequency.DAILY), isNull(), any(LocalDate.class));
     }
 
     @Test
     void getRunExecutions_withRunNumber_passesRunNumberToService() throws Exception {
-        when(analyticsService.getRunExecutionsByName("capitalcalc", 30, Frequency.DAILY, "1"))
+        when(analyticsService.getRunExecutionsByName(eq("capitalcalc"), eq(30),
+                eq(Frequency.DAILY), eq("1"), any(LocalDate.class)))
                 .thenReturn(new RunPerformanceData("capitalcalc", "capitalcalc", "DAILY", 30, 0L,
                         0, 0, 0, 0, 0, List.of(), null, null));
 
@@ -214,12 +220,33 @@ class AnalyticsControllerTest {
                         .param("run_number", "1"))
                 .andExpect(status().isOk());
 
-        verify(analyticsService).getRunExecutionsByName("capitalcalc", 30, Frequency.DAILY, "1");
+        verify(analyticsService).getRunExecutionsByName(eq("capitalcalc"), eq(30),
+                eq(Frequency.DAILY), eq("1"), any(LocalDate.class));
+    }
+
+    @Test
+    void getRunExecutions_withDataAsOfDate_passesDateToService() throws Exception {
+        LocalDate pastDate = LocalDate.of(2026, 5, 1);
+        RunPerformanceData response = new RunPerformanceData("capitalcalc", "capitalcalc", "DAILY", 30, 0L,
+                0, 0, 0, 0, 0, List.of(), null, null);
+        when(analyticsService.getRunExecutionsByName(eq("capitalcalc"), eq(30),
+                eq(Frequency.DAILY), isNull(), eq(pastDate)))
+                .thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/analytics/calculators/capitalcalc/executions")
+                        .header(TENANT_HEADER, "tenant-a")
+                        .param("days", "30")
+                        .param("data_as_of_date", "2026-05-01"))
+                .andExpect(status().isOk());
+
+        verify(analyticsService).getRunExecutionsByName(eq("capitalcalc"), eq(30),
+                eq(Frequency.DAILY), isNull(), eq(pastDate));
     }
 
     @Test
     void getRunExecutions_missingTenantId_succeeds() throws Exception {
-        when(analyticsService.getRunExecutionsByName("capitalcalc", 30, Frequency.DAILY, null))
+        when(analyticsService.getRunExecutionsByName(eq("capitalcalc"), eq(30),
+                eq(Frequency.DAILY), isNull(), any(LocalDate.class)))
                 .thenReturn(new RunPerformanceData("capitalcalc", "capitalcalc", "DAILY", 30, 0L,
                         0, 0, 0, 0, 0, List.of(), null, null));
 
