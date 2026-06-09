@@ -270,7 +270,7 @@ class AnalyticsServiceTest {
         // No usable profile → envelope reference lines fall back to latest-run values.
         when(calculatorProfileService.getProfile("Portfolio", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
-                        "Portfolio", "DAILY", 0, 0, 0, 0));
+                        "Portfolio", "DAILY", null, 0, 0, 0, 0));
 
         RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
 
@@ -324,7 +324,7 @@ class AnalyticsServiceTest {
         // avg start = 270 min UTC (04:30); 10 samples → trusted.
         when(calculatorProfileService.getProfile("Portfolio", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
-                        "Portfolio", "DAILY", 3_600_000L, 270, 330, 10));
+                        "Portfolio", "DAILY", null, 3_600_000L, 270, 330, 10));
 
         RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
 
@@ -364,7 +364,7 @@ class AnalyticsServiceTest {
                 .thenReturn(List.of(run));
         when(calculatorProfileService.getProfile("Portfolio", Frequency.DAILY))
                 .thenReturn(new com.company.observability.domain.CalculatorProfile(
-                        "Portfolio", "DAILY", 3_600_000L, 270, 330, 10));
+                        "Portfolio", "DAILY", null, 3_600_000L, 270, 330, 10));
 
         RunPerformanceData result = service.getRunExecutions("calc-1", 30, Frequency.DAILY);
 
@@ -483,7 +483,7 @@ class AnalyticsServiceTest {
         when(calculatorRunRepository.findRunsByName(eq("capitalcalcmedium"), any(), anyInt(), any()))
                 .thenReturn(List.of(run2));
         when(calculatorProfileService.getProfile(any(), any()))
-                .thenReturn(new com.company.observability.domain.CalculatorProfile("capitalcalc", "DAILY", 0, 0, 0, 0));
+                .thenReturn(new com.company.observability.domain.CalculatorProfile("capitalcalc", "DAILY", null, 0, 0, 0, 0));
 
         RunPerformanceData result = aliasService.getRunExecutionsByName("capital", 30, Frequency.DAILY, null);
 

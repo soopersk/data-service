@@ -1,7 +1,9 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.CalculatorStateCacheService;
+import com.company.observability.config.BusinessCalendarProperties;
 import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
@@ -52,16 +54,19 @@ class CalculatorStateServiceTest {
 
     // Zero-sample profile — not enough history to derive estimates.
     private static final CalculatorProfile NO_HISTORY_PROFILE =
-            new CalculatorProfile("test-calc", "DAILY", 0, 0, 0, 0);
+            new CalculatorProfile("test-calc", "DAILY", null, 0, 0, 0, 0);
 
     @BeforeEach
     void setUp() {
-        service = new CalculatorStateService(runRepository, new DurationBasedSlaProperties(), stateCache, profileService);
+        service = new CalculatorStateService(
+                runRepository, new DurationBasedSlaProperties(), new SlaProperties(),
+                stateCache, profileService,
+                new BusinessCalendarService(new BusinessCalendarProperties()));
         // Default: cache returns no hits (all misses) so DB is called — matches all pre-existing tests
         lenient().when(stateCache.getEntries(any(), anyString(), any(), any()))
                 .thenReturn(new HashMap<>());
         // Default: no profile history and no fallback run — empty-runs case returns empty entry
-        lenient().when(profileService.getProfile(anyString(), any(Frequency.class)))
+        lenient().when(profileService.getProfile(anyString(), any(Frequency.class), any()))
                 .thenReturn(NO_HISTORY_PROFILE);
         lenient().when(runRepository.findLatestRunEstimatesByName(anyString(), any(Frequency.class)))
                 .thenReturn(Optional.empty());

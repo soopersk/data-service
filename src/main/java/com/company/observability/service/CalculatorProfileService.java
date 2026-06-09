@@ -40,7 +40,7 @@ public class CalculatorProfileService {
 
     /** Cache-aside read. Never throws; falls back to a DB read (and a zero-sample profile on error). */
     public CalculatorProfile getProfile(String calculatorName, Frequency frequency) {
-        String key = key(calculatorName, frequency);
+        String key = key(calculatorName, frequency, null);
 
         CalculatorProfile cached = readFromCache(key);
         if (cached != null) {
@@ -55,10 +55,45 @@ public class CalculatorProfileService {
         return profile;
     }
 
-    /** Warm a precomputed profile into the cache (called by the nightly job). */
+    /**
+     * Run_number-scoped cache-aside read. Returns a profile aggregated only from runs with
+     * the given {@code runNumber} — gives accurate start/end estimates when a calculator runs
+     * in multiple cycles (T+1 vs T+2) with different timing.
+     *
+     * <p>Falls back to {@link #getProfile(String, Frequency)} for brand-new calculators
+     * with no run_number-scoped history.
+     */
+    public CalculatorProfile getProfile(String calculatorName, Frequency frequency, String runNumber) {
+        if (runNumber == null) {
+            return getProfile(calculatorName, frequency);
+        }
+        String key = key(calculatorName, frequency, runNumber);
+
+        CalculatorProfile cached = readFromCache(key);
+        if (cached != null) {
+            meterRegistry.counter("obs.profile.cache", "result", "hit", "scoped", "true").increment();
+            return cached;
+        }
+        meterRegistry.counter("obs.profile.cache", "result", "miss", "scoped", "true").increment();
+
+        CalculatorProfile profile = dailyAggregateRepository.findProfileByRunNumber(
+                calculatorName, frequency.name(), slaProperties.lookbackDays(frequency), runNumber);
+
+        if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
+            writeToCache(key, profile);
+            return profile;
+        }
+        // Fall back to blended profile for brand-new calcs
+        return getProfile(calculatorName, frequency);
+    }
+
+    /**
+     * Warm a precomputed profile into the cache (called by the nightly job).
+     * Uses {@code profile.runNumber()} to select between blended and scoped cache keys.
+     */
     public void warm(CalculatorProfile profile) {
         writeToCache(key(profile.calculatorName(),
-                Frequency.from(profile.frequency())), profile);
+                Frequency.from(profile.frequency()), profile.runNumber()), profile);
     }
 
     private CalculatorProfile readFromCache(String key) {
@@ -85,7 +120,8 @@ public class CalculatorProfileService {
         }
     }
 
-    private String key(String calculatorName, Frequency frequency) {
-        return PROFILE_PREFIX + calculatorName + ":" + frequency.name();
+    private String key(String calculatorName, Frequency frequency, String runNumber) {
+        String base = PROFILE_PREFIX + calculatorName + ":" + frequency.name();
+        return runNumber != null ? base + ":" + runNumber : base;
     }
 }

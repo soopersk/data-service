@@ -498,7 +498,9 @@ public class CalculatorRunRepository {
      * No sla_breach_events join: the SLA grade is derived downstream from sla_breached +
      * sla_breach_reason (both set on-write by SlaEvaluationService), so severity() is always null.
      *
-     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
+     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants).
+     *                  When set, rows with a NULL run_number (un-numbered / single-bucket runs)
+     *                  are included alongside the requested bucket.
      */
     public List<RunWithSlaStatus> findRunsByName(
             String calculatorName, Frequency frequency, int days, String runNumber) {
@@ -515,7 +517,7 @@ public class CalculatorRunRepository {
             AND cr.reporting_date <= CURRENT_DATE
             """);
         if (runNumber != null) {
-            sql.append("AND cr.run_number = :runNumber\n");
+            sql.append("AND (cr.run_number = :runNumber OR cr.run_number IS NULL)\n");
         }
         sql.append("ORDER BY cr.reporting_date ASC, cr.created_at ASC");
 
@@ -544,7 +546,9 @@ public class CalculatorRunRepository {
      * Filters by calculator_name (human-readable, unique per tenant), not the upstream UUID
      * stored in calculator_id. Deduplication (splits, reruns) is handled in CalculatorStateService.
      *
-     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants)
+     * @param runNumber e.g. "1" or "2" — pass null to skip the filter (single-bucket tenants).
+     *                  When set, rows with a NULL run_number (un-numbered / single-bucket runs)
+     *                  are included alongside the requested bucket.
      */
     public List<CalculatorRun> findAllRunsByDateAndDimension(
             LocalDate reportingDate,
@@ -564,7 +568,7 @@ public class CalculatorRunRepository {
                   AND calculator_name IN (:calculatorNames)
                 """);
         if (runNumber != null) {
-            sql.append("  AND run_number = :runNumber\n");
+            sql.append("  AND (run_number = :runNumber OR run_number IS NULL)\n");
         }
         sql.append("""
                 ORDER BY calculator_name,

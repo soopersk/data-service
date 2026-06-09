@@ -94,6 +94,40 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
     }
 
     // ---------------------------------------------------------------
+    // run_number filter — NULL (single-bucket) rows included with a bucket
+    // ---------------------------------------------------------------
+
+    @Test
+    void findRunsByName_withRunNumber_includesNullRunNumberRows() {
+        LocalDate reportDate = LocalDate.now();
+        Instant base = Instant.parse("2026-02-22T10:00:00Z");
+        insertRunWithRunNumber("run-rn1",    "Calculator 1", reportDate, base.plusSeconds(100), "1");
+        insertRunWithRunNumber("run-rn2",    "Calculator 1", reportDate, base.plusSeconds(200), "2");
+        insertRunWithRunNumber("run-rnnull", "Calculator 1", reportDate, base.plusSeconds(300), null);
+
+        List<RunWithSlaStatus> result = repository.findRunsByName(
+                "Calculator 1", Frequency.DAILY, 3, "1");
+
+        assertThat(result).extracting(RunWithSlaStatus::runId)
+                .containsExactlyInAnyOrder("run-rn1", "run-rnnull");
+    }
+
+    @Test
+    void findAllRunsByDateAndDimension_withRunNumber_includesNullRunNumberRows() {
+        LocalDate reportDate = LocalDate.now();
+        Instant base = Instant.parse("2026-02-22T10:00:00Z");
+        insertRunWithRunNumber("run-rn1",    "Calculator 1", reportDate, base.plusSeconds(100), "1");
+        insertRunWithRunNumber("run-rn2",    "Calculator 1", reportDate, base.plusSeconds(200), "2");
+        insertRunWithRunNumber("run-rnnull", "Calculator 1", reportDate, base.plusSeconds(300), null);
+
+        List<CalculatorRun> result = repository.findAllRunsByDateAndDimension(
+                reportDate, Frequency.DAILY, "1", List.of("Calculator 1"));
+
+        assertThat(result).extracting(CalculatorRun::getRunId)
+                .containsExactlyInAnyOrder("run-rn1", "run-rnnull");
+    }
+
+    // ---------------------------------------------------------------
     // upsert — immutable-column protection
     // ---------------------------------------------------------------
 
@@ -172,6 +206,25 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         Optional<CalculatorRun> run = repository.findById("run-complete", date);
         assertThat(run).isPresent();
         assertThat(run.get().getSlaBand()).isNull();
+    }
+
+    private void insertRunWithRunNumber(String runId, String calculatorName, LocalDate reportingDate,
+                                        Instant createdAt, String runNumber) {
+        jdbcTemplate.update("""
+            INSERT INTO calculator_runs (
+                run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
+                start_time, end_time, duration_ms, status, sla_band, run_number, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+            """,
+                runId, "calc-1", calculatorName, "tenant-1", "DAILY", reportingDate,
+                Timestamp.from(createdAt.minusSeconds(60)),
+                Timestamp.from(createdAt),
+                60000L,
+                "SUCCESS",
+                runNumber,
+                Timestamp.from(createdAt),
+                Timestamp.from(createdAt)
+        );
     }
 
     private void insertRunWithStatus(String runId, String calculatorId,

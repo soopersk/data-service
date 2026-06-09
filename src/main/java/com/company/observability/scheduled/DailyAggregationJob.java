@@ -85,9 +85,20 @@ public class DailyAggregationJob {
     private long warmProfiles() {
         long count = 0;
         for (Frequency frequency : Frequency.values()) {
-            List<CalculatorProfile> profiles = dailyAggregateRepository.findAllProfiles(
-                    frequency.name(), slaProperties.lookbackDays(frequency));
-            for (CalculatorProfile profile : profiles) {
+            int lookback = slaProperties.lookbackDays(frequency);
+
+            // Warm blended (cross-run_number) profiles — backward-compat key obs:profile:{name}:{freq}
+            List<CalculatorProfile> blended = dailyAggregateRepository.findAllProfiles(
+                    frequency.name(), lookback);
+            for (CalculatorProfile profile : blended) {
+                calculatorProfileService.warm(profile);
+                count++;
+            }
+
+            // Warm run_number-scoped profiles — key obs:profile:{name}:{freq}:{runNumber}
+            List<CalculatorProfile> scoped = dailyAggregateRepository.findAllProfilesByRunNumber(
+                    frequency.name(), lookback);
+            for (CalculatorProfile profile : scoped) {
                 calculatorProfileService.warm(profile);
                 count++;
             }

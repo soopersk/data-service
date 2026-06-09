@@ -37,7 +37,7 @@ class CalculatorProfileServiceTest {
 
     private static final String KEY = "obs:profile:calc-1:DAILY";
     private final CalculatorProfile profile =
-            new CalculatorProfile("calc-1", "DAILY", 600_000L, 300, 360, 10);
+            new CalculatorProfile("calc-1", "DAILY", null, 600_000L, 300, 360, 10);
 
     @BeforeEach
     void setUp() {
@@ -80,7 +80,7 @@ class CalculatorProfileServiceTest {
 
     @Test
     void emptyProfile_cachedWithShortTtl() {
-        CalculatorProfile empty = new CalculatorProfile("calc-1", "DAILY", 0, 0, 0, 0);
+        CalculatorProfile empty = new CalculatorProfile("calc-1", "DAILY", null, 0, 0, 0, 0);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(KEY)).thenReturn(null);
         when(dailyAggregateRepository.findProfile("calc-1", "DAILY", 30)).thenReturn(empty);

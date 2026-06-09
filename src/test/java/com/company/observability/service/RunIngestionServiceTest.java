@@ -60,7 +60,7 @@ class RunIngestionServiceTest {
     private RunIngestionService service;
 
     private static final CalculatorProfile EMPTY_PROFILE =
-            new CalculatorProfile("Calculator 1", "DAILY", 0, 0, 0, 0);
+            new CalculatorProfile("Calculator 1", "DAILY", null, 0, 0, 0, 0);
 
     private SlaProperties slaProperties;
     private DurationBasedSlaProperties durationProps;
@@ -513,7 +513,7 @@ class RunIngestionServiceTest {
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(inv -> inv.getArgument(0));
         // Profile has samples, but request values must take precedence.
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY))
-                .thenReturn(new CalculatorProfile("Calculator 1", "DAILY", 3_600_000L, 200, 300, 10));
+                .thenReturn(new CalculatorProfile("Calculator 1", "DAILY", null, 3_600_000L, 200, 300, 10));
         when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
                 .thenReturn(new SlaBaselineResolver.SlaResolution(
                         null,
@@ -542,7 +542,7 @@ class RunIngestionServiceTest {
         when(runRepository.findById("run-est2", reportingDate)).thenReturn(Optional.empty());
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(inv -> inv.getArgument(0));
         when(calculatorProfileService.getProfile("Calculator 1", Frequency.DAILY))
-                .thenReturn(new CalculatorProfile("Calculator 1", "DAILY", 3_600_000L, 270, 330, 10));
+                .thenReturn(new CalculatorProfile("Calculator 1", "DAILY", null, 3_600_000L, 270, 330, 10));
         when(slaBaselineResolver.resolve(any(StartRunRequest.class), eq(Frequency.DAILY), any()))
                 .thenReturn(new SlaBaselineResolver.SlaResolution(
                         3_600_000L,

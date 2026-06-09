@@ -32,6 +32,7 @@ public record CalculatorBatchRunsResponse(
             String runType,
             String status,
             String slaStatus,
+            Boolean slaBreached,
             Instant startTime,
             Instant endTime,
             Instant estimatedStartTime,

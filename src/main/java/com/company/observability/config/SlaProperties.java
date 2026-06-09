@@ -18,4 +18,11 @@ public class SlaProperties {
 
     /** Global SLA interpretation mode. Default CLOCK_TIME for phase-1. */
     private SlaMode mode = SlaMode.CLOCK_TIME;
+
+    /**
+     * Timezone used when converting the SLA clock time to a UTC instant.
+     * Default UTC. Use {@code "Europe/London"} for CET/BST-aware SLAs.
+     * Must be a valid {@link java.time.ZoneId} string.
+     */
+    private String slaTimezone = "UTC";
 }

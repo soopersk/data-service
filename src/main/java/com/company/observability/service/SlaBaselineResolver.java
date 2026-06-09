@@ -7,7 +7,6 @@ import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.exception.DomainValidationException;
-import com.company.observability.util.TimeUtils;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +15,8 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 
 /**
@@ -38,6 +39,7 @@ public class SlaBaselineResolver {
 
     private final DurationBasedSlaProperties props;
     private final SlaProperties slaProperties;
+    private final BusinessCalendarService businessCalendar;
     private final MeterRegistry meterRegistry;
 
     public record SlaResolution(
@@ -86,6 +88,10 @@ public class SlaBaselineResolver {
             return new SlaResolution(null, null);
         }
 
+        if (request.getReportingDate() == null) {
+            return new SlaResolution(null, null);
+        }
+
         LocalTime parsed;
         try {
             parsed = LocalTime.parse(raw.trim());
@@ -94,10 +100,30 @@ public class SlaBaselineResolver {
                     "Invalid slaTime. Use clock time HH:mm (UTC), e.g. 22:00.");
         }
 
-        Instant deadline = TimeUtils.clockTimeDeadlineUtc(request.getStartTime(), parsed);
-        log.debug("event=sla.baseline.resolve mode=CLOCK_TIME calculatorId={} slaTime={} deadline={}",
-                request.getCalculatorId(), raw, deadline);
+        int n = parseRunNumber(request.getRunNumber());
+        ZoneId zone = ZoneId.of(slaProperties.getSlaTimezone());
+        java.time.LocalDate executionDate = businessCalendar.nextBusinessDay(request.getReportingDate(), n);
+        Instant deadline = ZonedDateTime.of(executionDate, parsed, zone).toInstant();
+
+        log.debug("event=sla.baseline.resolve mode=CLOCK_TIME calculatorId={} slaTime={} runNumber={} executionDate={} deadline={}",
+                request.getCalculatorId(), raw, n, executionDate, deadline);
         return new SlaResolution(null, deadline);
+    }
+
+    /**
+     * Parses run_number string to an integer offset for business-day advancement.
+     * Null or non-numeric → 2 (T+2 default, matching {@code COALESCE(run_number, '2')} convention).
+     */
+    static int parseRunNumber(String runNumber) {
+        if (runNumber == null || runNumber.isBlank()) {
+            return 2;
+        }
+        try {
+            int n = Integer.parseInt(runNumber.trim());
+            return n > 0 ? n : 2;
+        } catch (NumberFormatException e) {
+            return 2;
+        }
     }
 
     private Long resolveBaselineMs(StartRunRequest request, CalculatorProfile profile) {

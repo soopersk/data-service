@@ -5,6 +5,7 @@ import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
+import com.company.observability.service.CalculatorDimensionService;
 import com.company.observability.service.CalculatorNameResolver;
 import com.company.observability.service.CalculatorStateService;
 import com.company.observability.service.RunQueryService;
@@ -61,6 +62,9 @@ class RunQueryControllerTest {
     @MockitoBean
     private CalculatorNameResolver nameResolver;
 
+    @MockitoBean
+    private CalculatorDimensionService dimensionService;
+
     @BeforeEach
     void configurePassthroughResolver() {
         // Default: each alias resolves to itself (no alias config in controller tests)
@@ -70,6 +74,9 @@ class RunQueryControllerTest {
             for (String a : aliases) result.put(a, List.of(a));
             return result;
         });
+        // Default: padDimensions is a no-op pass-through (no dimension config in controller tests)
+        lenient().when(dimensionService.padDimensions(any(), any(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
