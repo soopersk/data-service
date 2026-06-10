@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.company.observability.config.CalculatorAliasProperties;
+import com.company.observability.config.CalculatorProperties;
 
 
 @ExtendWith(MockitoExtension.class)
@@ -68,7 +68,7 @@ class AnalyticsServiceTest {
     }
 
     private static CalculatorNameResolver passthroughResolver() {
-        CalculatorAliasProperties props = new CalculatorAliasProperties();
+        CalculatorProperties props = new CalculatorProperties();
         // empty map → all names pass through unchanged
         return new CalculatorNameResolver(props);
     }
@@ -447,8 +447,8 @@ class AnalyticsServiceTest {
 
     @Test
     void getRunExecutionsByName_multiAlias_mergesRunsFromAllRealCalculators() {
-        CalculatorAliasProperties props = new CalculatorAliasProperties();
-        props.setCalculatorAliases(Map.of(
+        CalculatorProperties props = new CalculatorProperties();
+        props.setAliases(Map.of(
                 "capital", List.of("capitalcalc", "capitalcalcmedium")
         ));
         AnalyticsService aliasService = new AnalyticsService(
@@ -496,8 +496,8 @@ class AnalyticsServiceTest {
 
     @Test
     void getRunExecutionsByName_singleAlias_queriesRealNameOnly() {
-        CalculatorAliasProperties props = new CalculatorAliasProperties();
-        props.setCalculatorAliases(Map.of("portfolio", List.of("portfoliocalc")));
+        CalculatorProperties props = new CalculatorProperties();
+        props.setAliases(Map.of("portfolio", List.of("portfoliocalc")));
         AnalyticsService aliasService = new AnalyticsService(
                 dailyAggregateRepository,
                 slaBreachEventRepository,

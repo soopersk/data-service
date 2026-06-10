@@ -5,7 +5,7 @@ import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
 import com.company.observability.dto.response.RunStatusInfo;
-import com.company.observability.service.CalculatorDimensionService;
+import com.company.observability.service.ExpectedRunsService;
 import com.company.observability.service.CalculatorNameResolver;
 import com.company.observability.service.CalculatorStateService;
 import com.company.observability.service.RunQueryService;
@@ -63,7 +63,7 @@ class RunQueryControllerTest {
     private CalculatorNameResolver nameResolver;
 
     @MockitoBean
-    private CalculatorDimensionService dimensionService;
+    private ExpectedRunsService expectedRunsService;
 
     @BeforeEach
     void configurePassthroughResolver() {
@@ -74,8 +74,8 @@ class RunQueryControllerTest {
             for (String a : aliases) result.put(a, List.of(a));
             return result;
         });
-        // Default: padDimensions is a no-op pass-through (no dimension config in controller tests)
-        lenient().when(dimensionService.padDimensions(any(), any(), any(), any()))
+        // Default: padToExpected is a no-op pass-through (no dimension config in controller tests)
+        lenient().when(expectedRunsService.padToExpected(any()))
                 .thenAnswer(inv -> inv.getArgument(0));
     }
 

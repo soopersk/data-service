@@ -1,6 +1,6 @@
 package com.company.observability.service;
 
-import com.company.observability.config.CalculatorAliasProperties;
+import com.company.observability.config.CalculatorProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -15,8 +15,8 @@ class CalculatorNameResolverTest {
 
     @BeforeEach
     void setUp() {
-        CalculatorAliasProperties props = new CalculatorAliasProperties();
-        props.setCalculatorAliases(Map.of(
+        CalculatorProperties props = new CalculatorProperties();
+        props.setAliases(Map.of(
                 "capital", List.of("capitalcalc", "capitalcalcmedium"),
                 "portfolio", List.of("portfoliocalc")
         ));

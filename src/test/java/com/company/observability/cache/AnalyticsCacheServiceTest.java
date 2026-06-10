@@ -1,6 +1,6 @@
 package com.company.observability.cache;
 
-import com.company.observability.config.CalculatorAliasProperties;
+import com.company.observability.config.CalculatorProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
@@ -58,7 +58,7 @@ class AnalyticsCacheServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         service = new AnalyticsCacheService(redisTemplate, objectMapper, new SimpleMeterRegistry(),
-                new CalculatorNameResolver(new CalculatorAliasProperties()));
+                new CalculatorNameResolver(new CalculatorProperties()));
         // lenient: used by eviction tests only — getFromCache/putInCache tests don't need opsForSet from setUp
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
     }

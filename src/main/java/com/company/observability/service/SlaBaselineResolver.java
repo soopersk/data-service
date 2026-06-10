@@ -7,6 +7,7 @@ import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.dto.request.StartRunRequest;
 import com.company.observability.exception.DomainValidationException;
+import com.company.observability.util.TimeUtils;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,7 +40,6 @@ public class SlaBaselineResolver {
 
     private final DurationBasedSlaProperties props;
     private final SlaProperties slaProperties;
-    private final BusinessCalendarService businessCalendar;
     private final MeterRegistry meterRegistry;
 
     public record SlaResolution(
@@ -102,7 +102,7 @@ public class SlaBaselineResolver {
 
         int n = parseRunNumber(request.getRunNumber());
         ZoneId zone = ZoneId.of(slaProperties.getSlaTimezone());
-        java.time.LocalDate executionDate = businessCalendar.nextBusinessDay(request.getReportingDate(), n);
+        java.time.LocalDate executionDate = TimeUtils.nextBusinessDay(request.getReportingDate(), n);
         Instant deadline = ZonedDateTime.of(executionDate, parsed, zone).toInstant();
 
         log.debug("event=sla.baseline.resolve mode=CLOCK_TIME calculatorId={} slaTime={} runNumber={} executionDate={} deadline={}",

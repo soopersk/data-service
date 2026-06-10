@@ -16,6 +16,51 @@ import static org.junit.jupiter.api.Assertions.*;
 class TimeUtilsTest {
 
     // -----------------------------------------------------------------------
+    // nextBusinessDay
+    // -----------------------------------------------------------------------
+
+    @Nested
+    class NextBusinessDay {
+
+        @Test
+        void fridayPlusOne_givesMonday() {
+            // Fri 2026-02-20 + 1 business day → Mon 2026-02-23 (skips Sat/Sun)
+            assertEquals(LocalDate.of(2026, 2, 23),
+                    TimeUtils.nextBusinessDay(LocalDate.of(2026, 2, 20), 1));
+        }
+
+        @Test
+        void fridayPlusTwo_givesTuesday() {
+            // Fri 2026-02-20 + 2 → Tue 2026-02-24
+            assertEquals(LocalDate.of(2026, 2, 24),
+                    TimeUtils.nextBusinessDay(LocalDate.of(2026, 2, 20), 2));
+        }
+
+        @Test
+        void mondayPlusOne_givesTuesday() {
+            assertEquals(LocalDate.of(2026, 2, 24),
+                    TimeUtils.nextBusinessDay(LocalDate.of(2026, 2, 23), 1));
+        }
+
+        @Test
+        void zero_returnsSameDay() {
+            LocalDate fri = LocalDate.of(2026, 2, 20);
+            assertEquals(fri, TimeUtils.nextBusinessDay(fri, 0));
+        }
+
+        @Test
+        void negative_returnsSameDay() {
+            LocalDate fri = LocalDate.of(2026, 2, 20);
+            assertEquals(fri, TimeUtils.nextBusinessDay(fri, -3));
+        }
+
+        @Test
+        void nullStart_returnsNull() {
+            assertNull(TimeUtils.nextBusinessDay(null, 2));
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // clockTimeDeadlineUtc
     // -----------------------------------------------------------------------
 

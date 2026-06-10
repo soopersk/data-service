@@ -3,7 +3,7 @@ package com.company.observability.controller;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse;
 import com.company.observability.dto.response.CalculatorStatusResponse;
-import com.company.observability.service.CalculatorDimensionService;
+import com.company.observability.service.ExpectedRunsService;
 import com.company.observability.service.CalculatorNameResolver;
 import com.company.observability.service.CalculatorStateService;
 import com.company.observability.service.RunQueryService;
@@ -42,7 +42,7 @@ public class RunQueryController {
     private final RunQueryService queryService;
     private final CalculatorStateService calculatorStateService;
     private final CalculatorNameResolver nameResolver;
-    private final CalculatorDimensionService dimensionService;
+    private final ExpectedRunsService expectedRunsService;
     private final MeterRegistry meterRegistry;
 
     @GetMapping("/{calculatorId}/status")
@@ -182,8 +182,8 @@ public class RunQueryController {
                             LinkedHashMap::new
                     ));
 
-            // Pad each configured alias to its full declared dimension set
-            calculators = dimensionService.padDimensions(calculators, reportingDate, freq, runNumber);
+            // Pad each configured alias to its full declared set of expected runs
+            calculators = expectedRunsService.padToExpected(calculators);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())

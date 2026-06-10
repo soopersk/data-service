@@ -18,6 +18,34 @@ public class TimeUtils {
      * @param slaTimeCet Target completion time in CET (e.g., 06:15:00)
      * @return Absolute deadline time in UTC
      */
+    /**
+     * Advance {@code start} by {@code n} business days, skipping weekends (Sat/Sun).
+     *
+     * <p>An SLA deadline is a <em>business fact</em>: anchoring to {@code reportingDate + n}
+     * makes it independent of when Airflow happened to trigger the run.
+     *
+     * <ul>
+     *   <li>{@code n=1} → next business day after {@code start} (Fri+1 → Mon)</li>
+     *   <li>{@code n=2} → T+2 (Fri+2 → Tue)</li>
+     *   <li>{@code n<=0} → {@code start} unchanged (guard for null/missing run_number)</li>
+     * </ul>
+     */
+    public static LocalDate nextBusinessDay(LocalDate start, int n) {
+        if (start == null || n <= 0) {
+            return start;
+        }
+        LocalDate result = start;
+        int stepsTaken = 0;
+        while (stepsTaken < n) {
+            result = result.plusDays(1);
+            DayOfWeek dow = result.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+                stepsTaken++;
+            }
+        }
+        return result;
+    }
+
     public static Instant calculateSlaDeadline(LocalDate reportingDate, LocalTime slaTimeCet) {
         if (reportingDate == null || slaTimeCet == null) return null;
 

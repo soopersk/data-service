@@ -1,6 +1,5 @@
 package com.company.observability.service;
 
-import com.company.observability.config.BusinessCalendarProperties;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
@@ -23,7 +22,6 @@ class SlaBaselineResolverTest {
 
     private DurationBasedSlaProperties durationProps;
     private SlaProperties slaProperties;
-    private BusinessCalendarService businessCalendar;
     private SlaBaselineResolver resolver;
 
     // reportingDate = 2026-02-22 (Sunday).
@@ -36,8 +34,7 @@ class SlaBaselineResolverTest {
     void setUp() {
         durationProps = new DurationBasedSlaProperties();
         slaProperties = new SlaProperties(); // defaults to CLOCK_TIME, slaTimezone=UTC
-        businessCalendar = new BusinessCalendarService(new BusinessCalendarProperties()); // no holidays
-        resolver = new SlaBaselineResolver(durationProps, slaProperties, businessCalendar, new SimpleMeterRegistry());
+        resolver = new SlaBaselineResolver(durationProps, slaProperties, new SimpleMeterRegistry());
     }
 
     private StartRunRequest.StartRunRequestBuilder baseRequest() {

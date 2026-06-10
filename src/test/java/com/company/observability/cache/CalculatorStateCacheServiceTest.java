@@ -35,7 +35,8 @@ class CalculatorStateCacheServiceTest {
     private CalculatorStateCacheService service;
     private ObjectMapper objectMapper;
 
-    private static final LocalDate DATE  = LocalDate.of(2026, 5, 1);
+    private static final LocalDate DATE  = LocalDate.of(2026, 5, 1);   // old reporting date (> 3 days ago)
+    private static final LocalDate TODAY = LocalDate.now();            // current cycle
     private static final String    FREQ  = "DAILY";
 
     @BeforeEach
@@ -50,31 +51,53 @@ class CalculatorStateCacheServiceTest {
     @Test
     void determineTtl_emptyRuns_returnsNotStarted() {
         CalculatorEntry entry = new CalculatorEntry("calc", null, List.of());
-        assertThat(service.determineTtl(entry)).isEqualTo(TTL_NOT_STARTED);
+        assertThat(service.determineTtl(entry, DATE)).isEqualTo(TTL_NOT_STARTED);
     }
 
     @Test
     void determineTtl_anyRunning_returns30s() {
         CalculatorEntry entry = new CalculatorEntry("calc", null, List.of(runEntry("RUNNING", null)));
-        assertThat(service.determineTtl(entry)).isEqualTo(TTL_ANY_RUNNING);
+        assertThat(service.determineTtl(entry, DATE)).isEqualTo(TTL_ANY_RUNNING);
     }
 
     @Test
     void determineTtl_slaBreached_returnsTerminalWithFailures() {
         CalculatorEntry entry = new CalculatorEntry("calc", null, List.of(runEntry("SUCCESS", "VERY_LATE")));
-        assertThat(service.determineTtl(entry)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
+        assertThat(service.determineTtl(entry, DATE)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
     }
 
     @Test
     void determineTtl_terminalFailure_returnsTerminalWithFailures() {
         CalculatorEntry entry = new CalculatorEntry("calc", null, List.of(runEntry("FAILED", null)));
-        assertThat(service.determineTtl(entry)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
+        assertThat(service.determineTtl(entry, DATE)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
     }
 
     @Test
-    void determineTtl_terminalClean_returns4h() {
+    void determineTtl_cleanSuccessOnOldDate_returns4h() {
         CalculatorEntry entry = new CalculatorEntry("calc", null, List.of(runEntry("SUCCESS", null)));
-        assertThat(service.determineTtl(entry)).isEqualTo(TTL_TERMINAL_CLEAN);
+        assertThat(service.determineTtl(entry, DATE)).isEqualTo(TTL_TERMINAL_CLEAN);
+    }
+
+    @Test
+    void determineTtl_cleanSuccessOnCurrentDate_returns5min() {
+        // Snapshot may still be partial (later regions / re-triggers) on the current cycle → short TTL.
+        CalculatorEntry entry = new CalculatorEntry("calc", null, List.of(runEntry("SUCCESS", null)));
+        assertThat(service.determineTtl(entry, TODAY)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
+    }
+
+    @Test
+    void determineTtl_mixedSuccessAndNotStarted_returns5min() {
+        // Not all NOT_STARTED, and not all SUCCESS-clean → short TTL, never the 4h bucket.
+        CalculatorEntry entry = new CalculatorEntry("calc", null,
+                List.of(runEntry("SUCCESS", null), runEntry("NOT_STARTED", "ON_TIME")));
+        assertThat(service.determineTtl(entry, DATE)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
+    }
+
+    @Test
+    void determineTtl_cancelledOnOldDate_returns5min() {
+        // CANCELLED runs are the most likely to be re-triggered → never the long TTL.
+        CalculatorEntry entry = new CalculatorEntry("calc", null, List.of(runEntry("CANCELLED", null)));
+        assertThat(service.determineTtl(entry, DATE)).isEqualTo(TTL_TERMINAL_WITH_FAILURES);
     }
 
     // ── get/put round-trip ────────────────────────────────────────────────────

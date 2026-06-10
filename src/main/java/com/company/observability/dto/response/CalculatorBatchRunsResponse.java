@@ -23,7 +23,7 @@ public record CalculatorBatchRunsResponse(
             List<RunEntry> runs
     ) {}
 
-    @Builder
+    @Builder(toBuilder = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RunEntry(
             String calculatorName,

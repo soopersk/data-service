@@ -1,6 +1,6 @@
 package com.company.observability.service;
 
-import com.company.observability.config.CalculatorAliasProperties;
+import com.company.observability.config.CalculatorProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -13,14 +13,14 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class CalculatorNameResolver {
 
-    private final CalculatorAliasProperties aliasProperties;
+    private final CalculatorProperties calculatorProperties;
 
     /**
      * Resolves an alias to its list of real {@code calculator_name} values.
      * If the name is not a known alias, returns it as a singleton list (passthrough).
      */
     public List<String> resolve(String nameOrAlias) {
-        List<String> mapped = aliasProperties.getCalculatorAliases().get(nameOrAlias);
+        List<String> mapped = calculatorProperties.getAliases().get(nameOrAlias);
         return mapped != null ? mapped : List.of(nameOrAlias);
     }
 
@@ -42,7 +42,7 @@ public class CalculatorNameResolver {
      */
     public Optional<String> findAliasFor(String realName) {
         if (realName == null) return Optional.empty();
-        return aliasProperties.getCalculatorAliases().entrySet().stream()
+        return calculatorProperties.getAliases().entrySet().stream()
                 .filter(e -> e.getValue().contains(realName))
                 .map(Map.Entry::getKey)
                 .findFirst();

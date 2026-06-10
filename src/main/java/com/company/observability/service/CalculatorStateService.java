@@ -37,7 +37,6 @@ public class CalculatorStateService {
     private final SlaProperties slaProperties;
     private final CalculatorStateCacheService stateCache;
     private final CalculatorProfileService profileService;
-    private final BusinessCalendarService businessCalendar;
 
     // Lower index = worse status (worst-wins ordering mirrors LogicalRunGrouper)
     private static final List<RunStatus> STATUS_PRECEDENCE = List.of(
@@ -138,17 +137,23 @@ public class CalculatorStateService {
      */
     private CalculatorEntry buildNotStartedEntry(String name, LocalDate date, Frequency freq,
                                                   String runNumber) {
+        // Runs execute T+n business days after the reporting date — anchor estimates there, not on
+        // the reporting date itself (otherwise a Friday reporting date queried on Monday grades the
+        // synthetic against Friday and falsely reports VERY_LATE).
+        LocalDate executionDate = TimeUtils.nextBusinessDay(date, SlaBaselineResolver.parseRunNumber(runNumber));
+
         // 1. Try run_number-scoped profile (Redis-cached 26h — very cheap); calculatorId not available here
         CalculatorProfile profile = profileService.getProfile(name, freq, runNumber);
         if (profile.hasSufficientSamples(slaProps.getMinSampleSize())) {
-            Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(date, profile.avgStartMinUtc());
+            Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, profile.avgStartMinUtc());
             Instant estEnd = estStart.plusMillis(profile.avgDurationMs());
-            log.debug("event=batch_runs.not_started source=profile calculator={} date={}", name, date);
+            log.debug("event=batch_runs.not_started source=profile calculator={} date={} executionDate={}",
+                    name, date, executionDate);
             // No historical slaTime available from profile alone — sla projection omitted
             return entryWithSyntheticRun(name, null, estStart, estEnd, profile.avgDurationMs(), null);
         }
 
-        // 2. Fallback: most recent run's stored estimates, projected onto the queried date
+        // 2. Fallback: most recent run's stored estimates, projected onto the execution date
         Optional<CalculatorRun> latest = runRepository.findLatestRunEstimatesByName(name, freq);
         if (latest.isPresent()) {
             CalculatorRun r = latest.get();
@@ -156,7 +161,7 @@ public class CalculatorStateService {
                 int minuteOfDay = (int) Duration.between(
                         r.getEstimatedStartTime().truncatedTo(ChronoUnit.DAYS),
                         r.getEstimatedStartTime()).toMinutes();
-                Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(date, minuteOfDay);
+                Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, minuteOfDay);
                 Instant estEnd = estStart.plusMillis(r.getExpectedDurationMs());
                 // Re-anchor historical sla deadline to the target reporting date + runNumber
                 Instant projectedSla = r.getSlaTime() != null
@@ -174,7 +179,7 @@ public class CalculatorStateService {
 
     /**
      * Re-anchors a historical frozen SLA deadline onto a new reporting date using the
-     * business-calendar formula. Extracts the time-of-day from the historical instant in the
+     * next-business-day rule. Extracts the time-of-day from the historical instant in the
      * configured timezone (correct for DST) and advances {@code targetDate} by
      * {@code parseRunNumber(runNumber)} business days.
      */
@@ -182,15 +187,18 @@ public class CalculatorStateService {
         ZoneId zone = ZoneId.of(slaProperties.getSlaTimezone());
         LocalTime clockTime = historicalSlaTime.atZone(zone).toLocalTime();
         int n = SlaBaselineResolver.parseRunNumber(runNumber);
-        LocalDate executionDate = businessCalendar.nextBusinessDay(targetDate, n);
+        LocalDate executionDate = TimeUtils.nextBusinessDay(targetDate, n);
         return ZonedDateTime.of(executionDate, clockTime, zone).toInstant();
     }
 
     private CalculatorEntry entryWithSyntheticRun(String name, String calculatorId,
                                                    Instant estStart, Instant estEnd,
                                                    long expectedMs, Instant projectedSla) {
-        CalculatorDimensionService.SlaEval sla =
-                CalculatorDimensionService.evaluateSlaStatus(estEnd, slaProps.bandGapMs());
+        // Grade against the projected SLA deadline when we have one; only fall back to the
+        // estimated end (profile path, no historical SLA) when no deadline is projectable.
+        Instant gradeAgainst = projectedSla != null ? projectedSla : estEnd;
+        ExpectedRunsService.SlaEval sla =
+                ExpectedRunsService.evaluateSlaStatus(gradeAgainst, slaProps.bandGapMs());
         RunEntry synthetic = RunEntry.builder()
                 .status("NOT_STARTED")
                 .slaStatus(sla.slaStatus())

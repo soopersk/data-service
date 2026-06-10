@@ -1,7 +1,6 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.CalculatorStateCacheService;
-import com.company.observability.config.BusinessCalendarProperties;
 import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
@@ -60,8 +59,7 @@ class CalculatorStateServiceTest {
     void setUp() {
         service = new CalculatorStateService(
                 runRepository, new DurationBasedSlaProperties(), new SlaProperties(),
-                stateCache, profileService,
-                new BusinessCalendarService(new BusinessCalendarProperties()));
+                stateCache, profileService);
         // Default: cache returns no hits (all misses) so DB is called — matches all pre-existing tests
         lenient().when(stateCache.getEntries(any(), anyString(), any(), any()))
                 .thenReturn(new HashMap<>());
@@ -282,6 +280,32 @@ class CalculatorStateServiceTest {
         // Blank must normalise to null before reaching cache and repo
         verify(stateCache).getEntries(eq(DATE), eq(FREQ_NAME), isNull(), any());
         verify(runRepository).findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), isNull(), any());
+    }
+
+    // ── Not-started business-day anchoring (bug fix) ────────────────────────
+
+    /**
+     * A Friday reporting date with run_number=1 must anchor the synthetic not-started estimate
+     * to the following Monday (T+1 business day), not to the reporting date itself — otherwise the
+     * estimate (and its SLA grading) would sit on Friday and falsely read VERY_LATE when queried
+     * on Monday.
+     */
+    @Test
+    void notStartedEntry_anchorsEstimatesToNextBusinessDay() {
+        LocalDate friday = LocalDate.of(2026, 2, 20);
+        // Profile with enough samples and a known avg start minute (08:00 UTC = 480)
+        CalculatorProfile profile = new CalculatorProfile("calc", "DAILY", null, 3_600_000L, 480, 540, 10);
+        when(profileService.getProfile(eq("calc"), eq(FREQ), eq("1"))).thenReturn(profile);
+        when(runRepository.findAllRunsByDateAndDimension(eq(friday), eq(FREQ), eq("1"), any()))
+                .thenReturn(List.of());
+
+        var entries = service.getState(friday, FREQ, "1", List.of("calc")).get("calc").runs();
+
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).status()).isEqualTo("NOT_STARTED");
+        // Anchored to Monday 2026-02-23 at 08:00Z, NOT Friday 2026-02-20
+        assertThat(entries.get(0).estimatedStartTime()).isEqualTo(Instant.parse("2026-02-23T08:00:00Z"));
+        assertThat(entries.get(0).estimatedEndTime()).isEqualTo(Instant.parse("2026-02-23T09:00:00Z"));
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

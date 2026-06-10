@@ -25,13 +25,16 @@ import static com.company.observability.util.ObservabilityConstants.*;
  * <p>TTL is state-aware:
  * <ul>
  *   <li>any RUNNING → 30 s</li>
- *   <li>empty / all NOT_STARTED → 60 s</li>
- *   <li>all terminal with any failure or slaBreached → 5 min</li>
- *   <li>all terminal clean → 4 h</li>
+ *   <li>empty / any null status / all NOT_STARTED → 60 s</li>
+ *   <li>not all-SUCCESS-clean (failure, breach, cancellation, unknown) → 5 min</li>
+ *   <li>all SUCCESS &amp; clean, but a recent reporting date → 5 min (snapshot may still be partial)</li>
+ *   <li>all SUCCESS &amp; clean and an old reporting date (&gt;3 days) → 4 h</li>
  * </ul>
  *
- * <p>Invalidation is TTL-only — no event listeners. The state-aware TTL bounds staleness to ≤30 s
- * while any run is active; once terminal the data is stable.
+ * <p>Invalidation is TTL-only — no event listeners. A SUCCESS snapshot can be <em>partial</em>
+ * (e.g. a multi-region calculator where one region finished before the next started, or a
+ * re-trigger after SUCCESS). The 4 h bucket is therefore allowlist-only and gated on the reporting
+ * date being old enough that no new runs are plausible; the current cycle stays at 5 min.
  *
  * <p>All Redis ops are best-effort: exceptions are swallowed and the caller falls back to DB.
  */
@@ -94,7 +97,7 @@ public class CalculatorStateCacheService {
 
         entries.forEach((name, entry) -> {
             String key = buildKey(name, reportingDate, frequency, runNumber);
-            Duration ttl = determineTtl(entry);
+            Duration ttl = determineTtl(entry, reportingDate);
             try {
                 String json = objectMapper.writeValueAsString(entry);
                 redisTemplate.opsForValue().set(key, json, ttl);
@@ -108,16 +111,16 @@ public class CalculatorStateCacheService {
     // ── TTL selection ─────────────────────────────────────────────────────────
 
     /**
-     * State-aware TTL selection based on the run states in the entry list.
+     * State-aware TTL selection based on the run states in the entry and the reporting date.
      */
-    Duration determineTtl(CalculatorEntry entry) {
+    Duration determineTtl(CalculatorEntry entry, LocalDate reportingDate) {
         List<RunEntry> runs = entry.runs();
 
         if (runs == null || runs.isEmpty()) {
             return TTL_NOT_STARTED;
         }
 
-        // Synthetic not-started entry: status is null (omitted from JSON via @JsonInclude NON_NULL)
+        // Empty / any null status / any NOT_STARTED → not yet a stable terminal snapshot
         if (runs.stream().anyMatch(r -> r.status() == null)) {
             return TTL_NOT_STARTED;
         }
@@ -134,12 +137,21 @@ public class CalculatorStateCacheService {
             return TTL_NOT_STARTED;
         }
 
-        boolean anyFailureOrBreach = runs.stream()
-                .anyMatch(r -> ("LATE".equals(r.slaStatus()) || "VERY_LATE".equals(r.slaStatus()))
-                        || "FAILED".equals(r.status())
-                        || "TIMEOUT".equals(r.status()));
+        // Allowlist-only: only an all-SUCCESS, SLA-clean snapshot is a candidate for the long TTL.
+        // Anything else (FAILED/TIMEOUT/CANCELLED/breached/unknown status) → short TTL.
+        boolean allSuccessClean = runs.stream().allMatch(r ->
+                "SUCCESS".equals(r.status())
+                        && !"LATE".equals(r.slaStatus())
+                        && !"VERY_LATE".equals(r.slaStatus()));
+        if (!allSuccessClean) {
+            return TTL_TERMINAL_WITH_FAILURES;
+        }
 
-        return anyFailureOrBreach ? TTL_TERMINAL_WITH_FAILURES : TTL_TERMINAL_CLEAN;
+        // A SUCCESS snapshot may still be partial (later regions / re-triggers after SUCCESS).
+        // Only an old reporting date is truly stable. The 3-day horizon mirrors the DAILY query window.
+        return reportingDate.isBefore(LocalDate.now().minusDays(3))
+                ? TTL_TERMINAL_CLEAN
+                : TTL_TERMINAL_WITH_FAILURES;
     }
 
     // ── Key builder ───────────────────────────────────────────────────────────

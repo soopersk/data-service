@@ -90,6 +90,7 @@ observability:
     admin:
       username: ${OBS_ADMIN_USER:ops}
       password: ${OBS_ADMIN_PASSWORD:ops}
+
   sla:
     # Phase-1: clock-time SLA (HH:mm UTC). Set to DURATION to restore legacy behaviour.
     mode: CLOCK_TIME
@@ -136,124 +137,14 @@ observability:
   alerts:
     channel: logging
 
-  regional-batch:
-    overall-sla-time-cet: "17:45"
-    region-order: [WMAP, WMDE, ASIA, WMUS, AUNZ, WMCH, ZURI, LDNL, AMER, EURO]
-
-  # Unified Calculator Dashboard — section definitions
-  # Calculator IDs are placeholders; replace with real IDs from the Airflow team.
-  dashboard:
-    late-threshold-ms: 3600000
-    sections:
-      - section-key: REGIONAL
-        display-name: Regional
-        display-order: 1
-        sla-time-cet: "17:45"
-        frequency-applicable: [DAILY, MONTHLY]
-        nodes:
-          - node-key: REGIONAL_MATRIX
-            display-name: Regional
-            display-order: 1
-            matrix-config:
-              dimension: REGION
-              row-label: "Run status"
-              columns:
-                - key: WMAP
-                  calculator-id: regional-batch-wmap
-                - key: WMDE
-                  calculator-id: regional-batch-wmde
-                - key: ASIA
-                  calculator-id: regional-batch-asia
-                - key: WMUS
-                  calculator-id: regional-batch-wmus
-                - key: AUNZ
-                  calculator-id: regional-batch-aunz
-                - key: WMCH
-                  calculator-id: regional-batch-wmch
-                - key: ZURI
-                  calculator-id: regional-batch-zuri
-                - key: LDNL
-                  calculator-id: regional-batch-ldnl
-                - key: AMER
-                  calculator-id: regional-batch-amer
-                - key: EURO
-                  calculator-id: regional-batch-euro
-
-      - section-key: PORTFOLIO
-        display-name: Portfolio
-        display-order: 2
-        sla-time-cet: "18:30"
-        depends-on: REGIONAL
-        frequency-applicable: [DAILY, MONTHLY]
-        nodes:
-          - node-key: PORTFOLIO
-            display-name: Portfolio
-            display-order: 1
-            calculator-id: portfolio-calc
-            display-labels:
-              - "CAP 8 - Securitization"
-              - "CAP 10 - Counterparty credit risk on derivatives and SFTs"
-              - "CAP 12 - Leverage ratio denominator"
-              - "CAP 13 - Credit valuation adjustments"
-              - "CAP 14 - Business indicator component"
-
-      - section-key: GROUP_PORTFOLIO
-        display-name: Group portfolio
-        display-order: 3
-        sla-time-cet: "19:00"
-        depends-on: PORTFOLIO
-        frequency-applicable: [DAILY, MONTHLY]
-        nodes:
-          - node-key: GROUP_PORTFOLIO
-            display-name: Group portfolio
-            display-order: 1
-            calculator-id: group-portfolio-calc
-
-      - section-key: RISK_GOVERNED
-        display-name: Risk governed
-        display-order: 4
-        sla-time-cet: "20:30"
-        frequency-applicable: [DAILY, MONTHLY]
-        nodes:
-          - node-key: MODELLED_EXPOSURE
-            display-name: Modelled Exposure
-            display-order: 1
-            matrix-config:
-              dimension: TYPE
-              row-label: "Run status"
-              columns:
-                - key: OTC
-                  calculator-id: model-exposure-otc
-                - key: ETD
-                  calculator-id: model-exposure-etd
-                - key: SFT
-                  calculator-id: model-exposure-sft
-
-          - node-key: GEMINI_HEDGE
-            display-name: Gemini Hedge
-            display-order: 2
-            matrix-config:
-              dimension: TYPE
-              row-label: "Run status"
-              columns:
-                - key: OTC
-                  calculator-id: gemini-hedge-otc
-                - key: ETD
-                  calculator-id: gemini-hedge-etd
-                - key: SFT
-                  calculator-id: gemini-hedge-sft
-
-      - section-key: CONSOLIDATION
-        display-name: Consolidation
-        display-order: 5
-        sla-time-cet: "21:00"
-        depends-on: GROUP_PORTFOLIO
-        frequency-applicable: [DAILY, MONTHLY]
-        nodes:
-          - node-key: CONSOLIDATION
-            display-name: Consolidation
-            display-order: 1
-            calculator-id: consolidation-calc
+  calculator:
+    # Aliases are env-specific → defined in application-dev/uat/prod.yml.
+    # Regions / run-types are env-invariant → defined once here (Spring merges map keys across profiles).
+    regions:
+      capital: [WMAP, WMDE, ASIA, WMUS, AUNZ, WMCH, ZURI, LDNL, AMER, EURO]
+    run-types:
+      modelled-exposure: [ETD, OTC, SFT]
+      gemini-hedge: [ETD, OTC, SFT]
 
   cache:
     eviction:
