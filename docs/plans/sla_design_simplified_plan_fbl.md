@@ -274,3 +274,18 @@ RunEntry gained @Builder(toBuilder = true) for template cloning.
   modified:   src/test/java/com/company/observability/service/SlaBaselineResolverTest.java
   modified:   src/test/java/com/company/observability/util/TimeUtilsTest.java
 ```
+
+```
+
+File	Change
+V9__calculator_sli_daily_dimension.sql	New migration: adds dimension_value VARCHAR(20) NOT NULL DEFAULT 'ALL' to calculator_sli_daily, new 5-col PK, new index
+DailyAggregateRepository.java	Recompute SQL now groups by COALESCE(region, run_type, 'ALL'); two new reads: findProfileByRunNumberAndDimension + findAllProfilesByRunNumberAndDimension
+CalculatorProfile.java	Added nullable dimensionValue field to record + @JsonCreator + fromSums (old JSON without field deserializes to null)
+CalculatorProfileService.java	New 4-arg getProfile(name, freq, runNumber, dim) overload; key() and warm() updated for dimension tier
+DailyAggregationJob.java	Third warming tier via findAllProfilesByRunNumberAndDimension
+ExpectedRunsService.java	New 4-arg signature; per-dimension estimates from dimension profile; calculator-level deadline from sibling runs → template → null
+CalculatorStateService.java	buildNotStartedEntry restructured: estimates and deadline resolved independently; profile path now also carries projected SLA
+RunQueryController.java	Updated padToExpected call site to 4-arg signature
+5 test classes + 3 test call-site fixes	All unit tests green (373 passing, 2 Docker-only integration tests skipped per plan)
+
+```

@@ -1,39 +1,43 @@
 package com.company.observability.service;
 
 import com.company.observability.config.CalculatorProperties;
+import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.domain.CalculatorProfile;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.RunEntry;
+import com.company.observability.util.TimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.time.LocalDate;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Pads a calculator's run list to its full declared set of expected runs.
  *
- * <p>An alias is region-dimensioned if it appears in {@code observability.calculator.regions},
- * or run-type-dimensioned if it appears in {@code observability.calculator.run-types}. For such
- * aliases the entry is padded to exactly one {@link RunEntry} per declared value, in declared
- * order; missing values get a synthetic NOT_STARTED placeholder. Aliases in neither map pass
- * through unchanged.
+ * <p>For partial batches (Case B), missing dimension values receive per-dimension estimates
+ * sourced from the dimension-scoped profile and grade against the calculator-level SLA deadline
+ * shared with the real sibling runs.
  */
 @Service
 @RequiredArgsConstructor
 public class ExpectedRunsService {
 
     private final CalculatorProperties props;
+    private final CalculatorProfileService profileService;
+    private final DurationBasedSlaProperties slaProps;
 
     /**
      * For each alias with a declared region/run-type set, pads its {@link CalculatorEntry} to the
-     * full declared dimension set. Unconfigured aliases pass through unchanged.
+     * full declared dimension set. Missing values get per-dimension estimates and are graded
+     * against the calculator-level SLA deadline. Unconfigured aliases pass through unchanged.
      */
-    public Map<String, CalculatorEntry> padToExpected(Map<String, CalculatorEntry> calculators) {
+    public Map<String, CalculatorEntry> padToExpected(Map<String, CalculatorEntry> calculators,
+                                                       LocalDate reportingDate, Frequency frequency,
+                                                       String runNumber) {
         Map<String, List<String>> regions = props.getRegions();
         Map<String, List<String>> runTypes = props.getRunTypes();
         if (regions.isEmpty() && runTypes.isEmpty()) {
@@ -54,24 +58,25 @@ public class ExpectedRunsService {
             } else {
                 continue;
             }
-            result.put(alias, pad(entry.getValue(), declaredValues, isRegion));
+            result.put(alias, pad(entry.getValue(), alias, declaredValues, isRegion,
+                    reportingDate, frequency, runNumber));
         }
         return result;
     }
 
-    private CalculatorEntry pad(CalculatorEntry existing, List<String> declaredValues, boolean isRegion) {
-        // Index real runs by their dimension value. The not-started synthetic built upstream has a
-        // null dimension value, so it is excluded here and reused below as a cloning template.
+    private CalculatorEntry pad(CalculatorEntry existing, String alias, List<String> declaredValues,
+                                 boolean isRegion, LocalDate reportingDate, Frequency frequency,
+                                 String runNumber) {
+        // Index real runs by their dimension value; null-dimension runs (upstream synthetic template) excluded.
         Map<String, RunEntry> byDimension = existing.runs().stream()
                 .filter(r -> dimensionValue(r, isRegion) != null)
                 .collect(Collectors.toMap(
                         r -> dimensionValue(r, isRegion),
                         r -> r,
-                        (a, b) -> a  // keep first on collision
+                        (a, b) -> a
                 ));
 
         if (byDimension.size() == declaredValues.size()) {
-            // All dimensions present — reorder to declared order and return
             List<RunEntry> ordered = declaredValues.stream()
                     .map(byDimension::get)
                     .filter(Objects::nonNull)
@@ -79,31 +84,73 @@ public class ExpectedRunsService {
             return new CalculatorEntry(existing.calculatorName(), existing.calculatorId(), ordered);
         }
 
-        // Template = the upstream not-started synthetic (carries projected SLA + estimates), if any.
-        // Absent (partial batch, or no-history calc) → a bare NOT_STARTED placeholder.
+        // Calculator-level deadline: sibling runs' frozen SLA first (Case B), then template's projected SLA (Case A).
+        Instant calculatorDeadline = existing.runs().stream()
+                .map(RunEntry::sla)
+                .filter(Objects::nonNull)
+                .max(Comparator.naturalOrder())
+                .orElse(null);
+
+        // Template = the upstream not-started synthetic (null region/runType), carries projected SLA + estimates.
         RunEntry template = existing.runs().stream()
                 .filter(r -> r.region() == null && r.runType() == null)
                 .findFirst()
                 .orElse(null);
 
+        if (calculatorDeadline == null && template != null) {
+            calculatorDeadline = template.sla();
+        }
+
+        // Profiles are keyed by real calculator_name, not alias.
+        String realName = props.getAliases().getOrDefault(alias, List.of(alias)).get(0);
+        LocalDate executionDate = TimeUtils.nextBusinessDay(reportingDate,
+                SlaBaselineResolver.parseRunNumber(runNumber));
+
+        final Instant deadline = calculatorDeadline;
         List<RunEntry> padded = new ArrayList<>(declaredValues.size());
         for (String dimValue : declaredValues) {
             RunEntry actual = byDimension.get(dimValue);
-            padded.add(actual != null ? actual : placeholder(dimValue, isRegion, template));
+            padded.add(actual != null ? actual
+                    : placeholder(dimValue, isRegion, template, realName, frequency, runNumber,
+                                  executionDate, deadline));
         }
         return new CalculatorEntry(existing.calculatorName(), existing.calculatorId(), padded);
     }
 
-    private static RunEntry placeholder(String dimValue, boolean isRegion, RunEntry template) {
-        RunEntry.RunEntryBuilder builder = template != null
-                ? template.toBuilder()
-                : RunEntry.builder()
-                        .status("NOT_STARTED")
-                        .slaStatus("ON_TIME")
-                        .isRerun(false);
-        return builder
+    private RunEntry placeholder(String dimValue, boolean isRegion, RunEntry template,
+                                  String realName, Frequency frequency, String runNumber,
+                                  LocalDate executionDate, Instant calculatorDeadline) {
+        // Estimates: dimension-scoped profile → template estimates → none.
+        Instant estStart = null;
+        Instant estEnd = null;
+        Long expectedMs = null;
+
+        CalculatorProfile dimProfile = profileService.getProfile(realName, frequency, runNumber, dimValue);
+        if (dimProfile.hasSufficientSamples(slaProps.getMinSampleSize())) {
+            estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, dimProfile.avgStartMinUtc());
+            estEnd = estStart.plusMillis(dimProfile.avgDurationMs());
+            expectedMs = dimProfile.avgDurationMs();
+        } else if (template != null) {
+            estStart = template.estimatedStartTime();
+            estEnd = template.estimatedEndTime();
+            expectedMs = template.expectedDurationMs();
+        }
+
+        // Grade against calculator-level deadline; fall back to estEnd only when no deadline is derivable.
+        Instant gradeAgainst = calculatorDeadline != null ? calculatorDeadline : estEnd;
+        SlaEval eval = evaluateSlaStatus(gradeAgainst, slaProps.bandGapMs());
+
+        return RunEntry.builder()
+                .status("NOT_STARTED")
+                .slaStatus(eval.slaStatus())
+                .slaBreached(eval.slaBreached() ? Boolean.TRUE : null)
+                .estimatedStartTime(estStart)
+                .estimatedEndTime(estEnd)
+                .expectedDurationMs(expectedMs)
+                .sla(calculatorDeadline)
                 .region(isRegion ? dimValue : null)
                 .runType(isRegion ? null : dimValue)
+                .isRerun(false)
                 .build();
     }
 

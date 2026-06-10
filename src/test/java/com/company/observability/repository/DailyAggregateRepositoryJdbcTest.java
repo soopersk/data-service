@@ -60,6 +60,21 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
                 start, end, durationMs, status);
     }
 
+    /** Insert one completed run carrying a dimension (region) and explicit run_number. */
+    private void insertRunDim(String runId, String calcId, LocalDate reportingDate,
+                             String region, String runNumber, long durationMs) {
+        OffsetDateTime start = reportingDate.atStartOfDay(ZoneOffset.UTC).toOffsetDateTime().plusMinutes(300);
+        OffsetDateTime end = start.plusNanos(durationMs * 1_000_000L);
+        jdbcTemplate.update("""
+                INSERT INTO calculator_runs (
+                    run_id, calculator_id, calculator_name, tenant_id, frequency, reporting_date,
+                    region, run_number, start_time, end_time, duration_ms, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                runId, calcId, calcId, "tenant-1", "DAILY", reportingDate,
+                region, runNumber, start, end, durationMs, "SUCCESS");
+    }
+
     // ---------------------------------------------------------------
     // recomputeForDateRange — build aggregate from source runs
     // ---------------------------------------------------------------
@@ -142,5 +157,87 @@ class DailyAggregateRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
 
         assertThat(result.totalRuns()).isZero();
         assertThat(result.avgDurationMs()).isZero();
+    }
+
+    // ---------------------------------------------------------------
+    // Dimension split (V9) — per-region rows, blended invariance, null-rn bind
+    // ---------------------------------------------------------------
+
+    /** recompute writes one row per dimension value; runs with no region/run_type collapse to 'ALL'. */
+    @Test
+    void recompute_producesPerDimensionRows_andAllBucketForNonDimensional() {
+        insertRunDim("w1", "calc-R", DATE,           "WMAP", "1", 100L);
+        insertRunDim("e1", "calc-R", DATE,           "EMEA", "1", 200L);
+        insertRunDim("w2", "calc-R", DATE.minusDays(1), "WMAP", "1", 100L);
+        insertRunDim("n1", "calc-N", DATE,           null,   "1", 50L);
+
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
+
+        List<String> dimsR = jdbcTemplate.queryForList(
+                "SELECT DISTINCT dimension_value FROM calculator_sli_daily WHERE calculator_name = 'calc-R'",
+                String.class);
+        assertThat(dimsR).containsExactlyInAnyOrder("WMAP", "EMEA");
+
+        List<String> dimsN = jdbcTemplate.queryForList(
+                "SELECT DISTINCT dimension_value FROM calculator_sli_daily WHERE calculator_name = 'calc-N'",
+                String.class);
+        assertThat(dimsN).containsExactly("ALL");
+    }
+
+    /** Blended findProfile collapses across dimension: same averages whether or not runs carry a region. */
+    @Test
+    void findProfile_blendedAveragesIdenticalBeforeAndAfterDimensionSplit() {
+        // Pre-split: two runs, no region → both land in 'ALL'
+        insertRun("p1", "calc-1", "tenant-1", "DAILY", DATE, 300, 100L, "SUCCESS", false);
+        insertRun("p2", "calc-1", "tenant-1", "DAILY", DATE, 300, 300L, "SUCCESS", false);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
+        CalculatorProfile preSplit = repository.findProfile("calc-1", "DAILY", 3);
+
+        clean();
+
+        // Post-split: same two durations, now across distinct regions
+        insertRunDim("s1", "calc-1", DATE, "WMAP", "1", 100L);
+        insertRunDim("s2", "calc-1", DATE, "EMEA", "1", 300L);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
+        CalculatorProfile postSplit = repository.findProfile("calc-1", "DAILY", 3);
+
+        assertThat(postSplit.totalRuns()).isEqualTo(preSplit.totalRuns()).isEqualTo(2);
+        assertThat(postSplit.avgDurationMs()).isEqualTo(preSplit.avgDurationMs()).isEqualTo(200L);
+    }
+
+    /**
+     * findProfileByRunNumberAndDimension with a null runNumber exercises the
+     * {@code (:runNumber IS NULL OR run_number = :runNumber)} bind against real Postgres
+     * (the classic pgjdbc untyped-null pitfall). Must not error and must sum across run_numbers.
+     */
+    @Test
+    void findProfileByRunNumberAndDimension_nullRunNumber_sumsAcrossRunNumbers() {
+        insertRunDim("w1", "calc-R", DATE, "WMAP", "1", 100L);
+        insertRunDim("w2", "calc-R", DATE, "WMAP", "2", 300L);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
+
+        CalculatorProfile allRns = repository.findProfileByRunNumberAndDimension(
+                "calc-R", "DAILY", 3, null, "WMAP");
+        assertThat(allRns.totalRuns()).isEqualTo(2);
+        assertThat(allRns.avgDurationMs()).isEqualTo(200L);
+
+        CalculatorProfile rn1 = repository.findProfileByRunNumberAndDimension(
+                "calc-R", "DAILY", 3, "1", "WMAP");
+        assertThat(rn1.totalRuns()).isEqualTo(1);
+        assertThat(rn1.avgDurationMs()).isEqualTo(100L);
+    }
+
+    /** The nightly third-tier warm query excludes the 'ALL' bucket (covered by blended/scoped keys). */
+    @Test
+    void findAllProfilesByRunNumberAndDimension_excludesAllBucket() {
+        insertRunDim("w1", "calc-R", DATE, "WMAP", "1", 100L);
+        insertRunDim("n1", "calc-N", DATE, null,   "1", 50L);
+        repository.recomputeForDateRange(DATE.minusDays(1), DATE);
+
+        List<CalculatorProfile> profiles = repository.findAllProfilesByRunNumberAndDimension("DAILY", 3);
+
+        assertThat(profiles).extracting(CalculatorProfile::dimensionValue)
+                .contains("WMAP")
+                .doesNotContain("ALL");
     }
 }

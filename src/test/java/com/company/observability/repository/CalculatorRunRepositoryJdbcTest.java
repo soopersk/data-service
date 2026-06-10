@@ -106,7 +106,7 @@ class CalculatorRunRepositoryJdbcTest extends PostgresJdbcIntegrationTestBase {
         insertRunWithRunNumber("run-rnnull", "Calculator 1", reportDate, base.plusSeconds(300), null);
 
         List<RunWithSlaStatus> result = repository.findRunsByName(
-                "Calculator 1", Frequency.DAILY, 3, "1");
+                "Calculator 1", Frequency.DAILY, 3, "1", reportDate);
 
         assertThat(result).extracting(RunWithSlaStatus::runId)
                 .containsExactlyInAnyOrder("run-rn1", "run-rnnull");

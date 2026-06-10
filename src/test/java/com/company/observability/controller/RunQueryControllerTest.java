@@ -75,7 +75,7 @@ class RunQueryControllerTest {
             return result;
         });
         // Default: padToExpected is a no-op pass-through (no dimension config in controller tests)
-        lenient().when(expectedRunsService.padToExpected(any()))
+        lenient().when(expectedRunsService.padToExpected(any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0));
     }
 

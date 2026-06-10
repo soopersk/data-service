@@ -40,24 +40,35 @@ class DailyAggregationJobTest {
     }
 
     @Test
-    void runDailyAggregation_recomputesTrailingWindow_andWarmsProfiles() {
+    void runDailyAggregation_recomputesTrailingWindow_andWarmsAllThreeTiers() {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate from = today.minusDays(3); // default recompute-window-days
 
         when(dailyAggregateRepository.recomputeForDateRange(from, today)).thenReturn(5);
-        CalculatorProfile dailyProfile = new CalculatorProfile("calc-1", "DAILY", null, 100L, 0, 0, 10);
-        CalculatorProfile monthlyProfile = new CalculatorProfile("calc-1", "MONTHLY", null, 200L, 0, 0, 3);
-        when(dailyAggregateRepository.findAllProfiles("DAILY", 30)).thenReturn(List.of(dailyProfile));
-        when(dailyAggregateRepository.findAllProfiles("MONTHLY", 395)).thenReturn(List.of(monthlyProfile));
-        // findAllProfilesByRunNumber returns empty by default — only blended profiles are warmed in this test
-        when(dailyAggregateRepository.findAllProfilesByRunNumber(anyString(), anyInt()))
+
+        CalculatorProfile dailyBlended  = new CalculatorProfile("calc-1", "DAILY",   null, null, 100L, 0, 0, 10);
+        CalculatorProfile monthlyBlended = new CalculatorProfile("calc-1", "MONTHLY", null, null, 200L, 0, 0, 3);
+        CalculatorProfile dailyScoped   = new CalculatorProfile("calc-1", "DAILY",   "1",  null, 120L, 0, 0, 5);
+        CalculatorProfile dailyDim      = new CalculatorProfile("calc-1", "DAILY",   "1",  "WMAP", 130L, 0, 0, 4);
+
+        when(dailyAggregateRepository.findAllProfiles("DAILY", 30)).thenReturn(List.of(dailyBlended));
+        when(dailyAggregateRepository.findAllProfiles("MONTHLY", 395)).thenReturn(List.of(monthlyBlended));
+        when(dailyAggregateRepository.findAllProfilesByRunNumber(eq("DAILY"), anyInt()))
+                .thenReturn(List.of(dailyScoped));
+        when(dailyAggregateRepository.findAllProfilesByRunNumber(eq("MONTHLY"), anyInt()))
+                .thenReturn(List.of());
+        when(dailyAggregateRepository.findAllProfilesByRunNumberAndDimension(eq("DAILY"), anyInt()))
+                .thenReturn(List.of(dailyDim));
+        when(dailyAggregateRepository.findAllProfilesByRunNumberAndDimension(eq("MONTHLY"), anyInt()))
                 .thenReturn(List.of());
 
         job.runDailyAggregation();
 
         verify(dailyAggregateRepository).recomputeForDateRange(eq(from), eq(today));
-        verify(calculatorProfileService).warm(dailyProfile);
-        verify(calculatorProfileService).warm(monthlyProfile);
-        verify(calculatorProfileService, times(2)).warm(org.mockito.ArgumentMatchers.any());
+        // Third warming tier must be invoked for each frequency
+        verify(dailyAggregateRepository, times(2)).findAllProfilesByRunNumberAndDimension(anyString(), anyInt());
+        // Four profiles total warmed: blended daily, blended monthly, scoped daily, dim-scoped daily
+        verify(calculatorProfileService, times(4)).warm(org.mockito.ArgumentMatchers.any());
+        verify(calculatorProfileService).warm(dailyDim);
     }
 }

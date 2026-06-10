@@ -102,6 +102,14 @@ public class DailyAggregationJob {
                 calculatorProfileService.warm(profile);
                 count++;
             }
+
+            // Warm dimension-scoped profiles — key obs:profile:{name}:{freq}:{runNumber|*}:{dim}
+            List<CalculatorProfile> dimScoped = dailyAggregateRepository.findAllProfilesByRunNumberAndDimension(
+                    frequency.name(), lookback);
+            for (CalculatorProfile profile : dimScoped) {
+                calculatorProfileService.warm(profile);
+                count++;
+            }
         }
         return count;
     }

@@ -53,7 +53,7 @@ class CalculatorStateServiceTest {
 
     // Zero-sample profile — not enough history to derive estimates.
     private static final CalculatorProfile NO_HISTORY_PROFILE =
-            new CalculatorProfile("test-calc", "DAILY", null, 0, 0, 0, 0);
+            new CalculatorProfile("test-calc", "DAILY", null, null, 0, 0, 0, 0);
 
     @BeforeEach
     void setUp() {
@@ -293,8 +293,7 @@ class CalculatorStateServiceTest {
     @Test
     void notStartedEntry_anchorsEstimatesToNextBusinessDay() {
         LocalDate friday = LocalDate.of(2026, 2, 20);
-        // Profile with enough samples and a known avg start minute (08:00 UTC = 480)
-        CalculatorProfile profile = new CalculatorProfile("calc", "DAILY", null, 3_600_000L, 480, 540, 10);
+        CalculatorProfile profile = new CalculatorProfile("calc", "DAILY", null, null, 3_600_000L, 480, 540, 10);
         when(profileService.getProfile(eq("calc"), eq(FREQ), eq("1"))).thenReturn(profile);
         when(runRepository.findAllRunsByDateAndDimension(eq(friday), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of());
@@ -306,6 +305,88 @@ class CalculatorStateServiceTest {
         // Anchored to Monday 2026-02-23 at 08:00Z, NOT Friday 2026-02-20
         assertThat(entries.get(0).estimatedStartTime()).isEqualTo(Instant.parse("2026-02-23T08:00:00Z"));
         assertThat(entries.get(0).estimatedEndTime()).isEqualTo(Instant.parse("2026-02-23T09:00:00Z"));
+    }
+
+    // ── buildNotStartedEntry: estimates and deadline resolved independently ──
+
+    /**
+     * Profile path: when the profile has sufficient samples AND the latest run has a frozen SLA,
+     * the synthetic entry carries the projected SLA and grades against it — not estEnd.
+     * This fixes the previous early-return that skipped the latest-run SLA lookup on the profile path.
+     */
+    @Test
+    void notStartedEntry_profilePath_carriesProjectedSlaFromLatestRun() {
+        // Profile has samples → estimates sourced from profile
+        CalculatorProfile profile = new CalculatorProfile("calc", "DAILY", null, null, 3_600_000L, 540, 600, 10);
+        when(profileService.getProfile(eq("calc"), eq(FREQ), eq("1"))).thenReturn(profile);
+
+        // Latest run has a frozen SLA well in the future
+        CalculatorRun latest = new CalculatorRun();
+        latest.setCalculatorId("calc-id");
+        latest.setCalculatorName("calc");
+        latest.setSlaTime(Instant.parse("2026-03-10T15:00:00Z")); // future clock-time SLA
+        latest.setEstimatedStartTime(Instant.parse("2026-03-05T09:00:00Z"));
+        latest.setExpectedDurationMs(3_600_000L);
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
+                .thenReturn(List.of());
+        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(FREQ)))
+                .thenReturn(Optional.of(latest));
+
+        var entries = service.getState(DATE, FREQ, "1", List.of("calc")).get("calc").runs();
+
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).status()).isEqualTo("NOT_STARTED");
+        // Profile-sourced estimates must be present
+        assertThat(entries.get(0).estimatedStartTime()).isNotNull();
+        assertThat(entries.get(0).estimatedEndTime()).isNotNull();
+        // SLA must be projected from the latest run's frozen clock-time (not null)
+        assertThat(entries.get(0).sla()).isNotNull();
+    }
+
+    /**
+     * When the profile has no sufficient samples and the latest run has no stored estimates,
+     * but it does have a frozen SLA, the entry is still created (deadline-only) rather than
+     * returning the empty brand-new entry.
+     */
+    @Test
+    void notStartedEntry_noEstimates_butHasSla_returnsEntryWithSlaOnly() {
+        // Profile insufficient
+        when(profileService.getProfile(eq("calc"), eq(FREQ), isNull())).thenReturn(NO_HISTORY_PROFILE);
+
+        // Latest run: no estimate data, but has SLA
+        CalculatorRun latest = new CalculatorRun();
+        latest.setCalculatorId("calc-id");
+        latest.setCalculatorName("calc");
+        latest.setSlaTime(Instant.parse("2026-03-10T15:00:00Z"));
+        latest.setEstimatedStartTime(null);
+        latest.setExpectedDurationMs(null);
+
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), isNull(), any()))
+                .thenReturn(List.of());
+        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(FREQ)))
+                .thenReturn(Optional.of(latest));
+
+        var entries = service.getState(DATE, FREQ, null, List.of("calc")).get("calc").runs();
+
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).status()).isEqualTo("NOT_STARTED");
+        assertThat(entries.get(0).sla()).isNotNull();
+        assertThat(entries.get(0).estimatedStartTime()).isNull();
+    }
+
+    /**
+     * Brand-new calculator with no profile and no latest run → empty entry (no history at all).
+     */
+    @Test
+    void notStartedEntry_noProfileNoLatestRun_returnsEmptyEntry() {
+        when(profileService.getProfile(eq("new-calc"), eq(FREQ), isNull())).thenReturn(NO_HISTORY_PROFILE);
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), isNull(), any()))
+                .thenReturn(List.of());
+        // findLatestRunEstimatesByName already returns Optional.empty() from setUp
+
+        var entries = service.getState(DATE, FREQ, null, List.of("new-calc")).get("new-calc").runs();
+
+        assertThat(entries).isEmpty();
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

@@ -48,10 +48,10 @@ class SlaBaselineResolverTest {
     }
 
     private CalculatorProfile profile(long avgDurationMs, int totalRuns) {
-        return new CalculatorProfile("calc-1", "DAILY", null, avgDurationMs, 0, 0, totalRuns);
+        return new CalculatorProfile("calc-1", "DAILY", null, null, avgDurationMs, 0, 0, totalRuns);
     }
 
-    private static final CalculatorProfile EMPTY = new CalculatorProfile("calc-1", "DAILY", null, 0, 0, 0, 0);
+    private static final CalculatorProfile EMPTY = new CalculatorProfile("calc-1", "DAILY", null, null, 0, 0, 0, 0);
 
     // -----------------------------------------------------------------------
     // CLOCK_TIME mode (phase-1 default) — business-calendar deadline

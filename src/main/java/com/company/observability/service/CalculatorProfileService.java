@@ -40,7 +40,7 @@ public class CalculatorProfileService {
 
     /** Cache-aside read. Never throws; falls back to a DB read (and a zero-sample profile on error). */
     public CalculatorProfile getProfile(String calculatorName, Frequency frequency) {
-        String key = key(calculatorName, frequency, null);
+        String key = key(calculatorName, frequency, null, null);
 
         CalculatorProfile cached = readFromCache(key);
         if (cached != null) {
@@ -67,7 +67,7 @@ public class CalculatorProfileService {
         if (runNumber == null) {
             return getProfile(calculatorName, frequency);
         }
-        String key = key(calculatorName, frequency, runNumber);
+        String key = key(calculatorName, frequency, runNumber, null);
 
         CalculatorProfile cached = readFromCache(key);
         if (cached != null) {
@@ -88,12 +88,45 @@ public class CalculatorProfileService {
     }
 
     /**
+     * Dimension-scoped cache-aside read. Returns a profile aggregated only from rows matching
+     * the given {@code dimensionValue} (e.g. "WMAP") and {@code runNumber}.
+     *
+     * <p>Falls back to {@link #getProfile(String, Frequency, String)} (scoped → blended chain)
+     * for calculators with no dimension-specific history yet.
+     */
+    public CalculatorProfile getProfile(String calculatorName, Frequency frequency,
+                                        String runNumber, String dimensionValue) {
+        if (dimensionValue == null) {
+            return getProfile(calculatorName, frequency, runNumber);
+        }
+        String key = key(calculatorName, frequency, runNumber, dimensionValue);
+
+        CalculatorProfile cached = readFromCache(key);
+        if (cached != null) {
+            meterRegistry.counter("obs.profile.cache", "result", "hit", "dim", "true").increment();
+            return cached;
+        }
+        meterRegistry.counter("obs.profile.cache", "result", "miss", "dim", "true").increment();
+
+        CalculatorProfile profile = dailyAggregateRepository.findProfileByRunNumberAndDimension(
+                calculatorName, frequency.name(), slaProperties.lookbackDays(frequency),
+                runNumber, dimensionValue);
+
+        if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
+            writeToCache(key, profile);
+            return profile;
+        }
+        // Fall back to scoped/blended chain for brand-new calcs or new dimension values
+        return getProfile(calculatorName, frequency, runNumber);
+    }
+
+    /**
      * Warm a precomputed profile into the cache (called by the nightly job).
-     * Uses {@code profile.runNumber()} to select between blended and scoped cache keys.
+     * Uses {@code profile.runNumber()} and {@code profile.dimensionValue()} to select the key.
      */
     public void warm(CalculatorProfile profile) {
         writeToCache(key(profile.calculatorName(),
-                Frequency.from(profile.frequency()), profile.runNumber()), profile);
+                Frequency.from(profile.frequency()), profile.runNumber(), profile.dimensionValue()), profile);
     }
 
     private CalculatorProfile readFromCache(String key) {
@@ -120,8 +153,9 @@ public class CalculatorProfileService {
         }
     }
 
-    private String key(String calculatorName, Frequency frequency, String runNumber) {
+    private String key(String calculatorName, Frequency frequency, String runNumber, String dimensionValue) {
         String base = PROFILE_PREFIX + calculatorName + ":" + frequency.name();
-        return runNumber != null ? base + ":" + runNumber : base;
+        String withRn = runNumber != null ? base + ":" + runNumber : base + ":*";
+        return dimensionValue != null ? withRn + ":" + dimensionValue : (runNumber != null ? base + ":" + runNumber : base);
     }
 }

@@ -2,25 +2,46 @@ package com.company.observability.service;
 
 import com.company.observability.config.CalculatorProperties;
 import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.domain.CalculatorProfile;
+import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.RunEntry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class ExpectedRunsServiceTest {
 
     private static final List<String> ALL_REGIONS =
             List.of("WMAP", "WMDE", "ASIA", "WMUS", "AUNZ", "WMCH", "ZURI", "LDNL", "AMER", "EURO");
     private static final List<String> ALL_TYPES = List.of("ETD", "OTC", "SFT");
 
-    private final DurationBasedSlaProperties slaProps = new DurationBasedSlaProperties();
+    private static final LocalDate DATE = LocalDate.of(2026, 3, 6);
+    private static final Frequency FREQ = Frequency.DAILY;
+    private static final String RUN_NUMBER = "2";
 
+    // Zero-sample profile — not enough history; service falls back to template / bare placeholder.
+    private static final CalculatorProfile NO_HISTORY =
+            new CalculatorProfile("capital", "DAILY", "2", null, 0, 0, 0, 0);
+
+    @Mock private CalculatorProfileService profileService;
+
+    private final DurationBasedSlaProperties slaProps = new DurationBasedSlaProperties();
     private CalculatorProperties props;
     private ExpectedRunsService service;
 
@@ -29,7 +50,14 @@ class ExpectedRunsServiceTest {
         props = new CalculatorProperties();
         props.setRegions(Map.of("capital", ALL_REGIONS));
         props.setRunTypes(Map.of("modelled-exposure", ALL_TYPES));
-        service = new ExpectedRunsService(props);
+        // Default: no dimension-specific history — falls back to template/bare
+        lenient().when(profileService.getProfile(anyString(), any(Frequency.class), anyString(), anyString()))
+                .thenReturn(NO_HISTORY);
+        service = new ExpectedRunsService(props, profileService, slaProps);
+    }
+
+    private Map<String, CalculatorEntry> pad(Map<String, CalculatorEntry> in) {
+        return service.padToExpected(in, DATE, FREQ, RUN_NUMBER);
     }
 
     // ── Region-dimensioned padding ─────────────────────────────────────────────
@@ -42,7 +70,7 @@ class ExpectedRunsServiceTest {
         );
         CalculatorEntry existing = new CalculatorEntry("capital", "calc-id", sevenRuns);
 
-        CalculatorEntry padded = service.padToExpected(Map.of("capital", existing)).get("capital");
+        CalculatorEntry padded = pad(Map.of("capital", existing)).get("capital");
 
         assertThat(padded.runs()).hasSize(10);
         assertThat(padded.runs()).extracting(RunEntry::region).containsExactlyElementsOf(ALL_REGIONS);
@@ -53,10 +81,10 @@ class ExpectedRunsServiceTest {
         CalculatorEntry existing = new CalculatorEntry("capital", "calc-id",
                 List.of(realRegionEntry("WMAP"), realRegionEntry("WMDE")));
 
-        List<RunEntry> runs = service.padToExpected(Map.of("capital", existing)).get("capital").runs();
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
 
         assertThat(runs.get(0).region()).isEqualTo("WMAP");
-        assertThat(runs.get(0).status()).isEqualTo("SUCCESS");   // real entry untouched
+        assertThat(runs.get(0).status()).isEqualTo("SUCCESS");
         assertThat(runs.get(1).region()).isEqualTo("WMDE");
         assertThat(runs.get(1).status()).isEqualTo("SUCCESS");
         for (int i = 2; i < 10; i++) {
@@ -71,7 +99,7 @@ class ExpectedRunsServiceTest {
         CalculatorEntry existing = new CalculatorEntry("capital", "calc-id",
                 List.of(realRegionEntry("AMER"), realRegionEntry("EURO")));
 
-        List<RunEntry> runs = service.padToExpected(Map.of("capital", existing)).get("capital").runs();
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
 
         assertThat(runs).extracting(RunEntry::region).containsExactlyElementsOf(ALL_REGIONS);
         assertThat(runs.get(8).status()).isEqualTo("SUCCESS");   // AMER at index 8
@@ -83,7 +111,7 @@ class ExpectedRunsServiceTest {
         List<RunEntry> allRuns = ALL_REGIONS.stream().map(this::realRegionEntry).toList();
         CalculatorEntry existing = new CalculatorEntry("capital", "calc-id", allRuns);
 
-        List<RunEntry> runs = service.padToExpected(Map.of("capital", existing)).get("capital").runs();
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
 
         assertThat(runs).hasSize(10);
         assertThat(runs).extracting(RunEntry::region).containsExactlyElementsOf(ALL_REGIONS);
@@ -96,23 +124,20 @@ class ExpectedRunsServiceTest {
         CalculatorEntry existing = new CalculatorEntry("modelled-exposure", "calc-id",
                 List.of(realRunTypeEntry("ETD")));
 
-        List<RunEntry> runs = service.padToExpected(Map.of("modelled-exposure", existing))
-                .get("modelled-exposure").runs();
+        List<RunEntry> runs = pad(Map.of("modelled-exposure", existing)).get("modelled-exposure").runs();
 
         assertThat(runs).extracting(RunEntry::runType).containsExactlyElementsOf(ALL_TYPES);
-        // Placeholders set runType, never region
         assertThat(runs).allSatisfy(r -> assertThat(r.region()).isNull());
         assertThat(runs.get(1).status()).isEqualTo("NOT_STARTED");
         assertThat(runs.get(2).status()).isEqualTo("NOT_STARTED");
     }
 
-    // ── Template reuse (zero-run bug fix) ──────────────────────────────────────
+    // ── Case A: zero-run template reuse ───────────────────────────────────────
 
     @Test
     void zeroRuns_reusesUpstreamSyntheticAsTemplate_preservingProjectedSla() {
         Instant projectedSla = Instant.parse("2026-02-23T22:00:00Z");
         Instant estEnd = Instant.parse("2026-02-23T20:00:00Z");
-        // Upstream (CalculatorStateService) not-started synthetic: null region/runType, carries SLA.
         RunEntry template = RunEntry.builder()
                 .status("NOT_STARTED")
                 .slaStatus("ON_TIME")
@@ -122,24 +147,22 @@ class ExpectedRunsServiceTest {
                 .build();
         CalculatorEntry existing = new CalculatorEntry("capital", "calc-id", List.of(template));
 
-        List<RunEntry> runs = service.padToExpected(Map.of("capital", existing)).get("capital").runs();
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
 
         assertThat(runs).hasSize(10);
         assertThat(runs).extracting(RunEntry::region).containsExactlyElementsOf(ALL_REGIONS);
-        // Every placeholder carries the projected SLA + estimates from the template
+        // Every placeholder carries the projected SLA from the template
         assertThat(runs).allSatisfy(r -> {
             assertThat(r.status()).isEqualTo("NOT_STARTED");
             assertThat(r.sla()).isEqualTo(projectedSla);
-            assertThat(r.estimatedEndTime()).isEqualTo(estEnd);
         });
     }
 
     @Test
     void zeroRunsWithNoTemplate_emitsBarePlaceholders() {
-        // Brand-new calc: upstream returned an empty entry (no synthetic template).
         CalculatorEntry existing = new CalculatorEntry("capital", null, List.of());
 
-        List<RunEntry> runs = service.padToExpected(Map.of("capital", existing)).get("capital").runs();
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
 
         assertThat(runs).hasSize(10);
         assertThat(runs).allSatisfy(r -> {
@@ -149,12 +172,139 @@ class ExpectedRunsServiceTest {
         });
     }
 
+    // ── Case B: partial batch — per-dimension estimates + calculator-level deadline ──
+
+    @Test
+    void partialBatch_placeholdersGradeAgainstSiblingFrozenSla_beforeDeadline_onTime() {
+        Instant futureDeadline = Instant.now().plusSeconds(3600);
+        List<RunEntry> sevenRuns = List.of(
+                realRegionEntryWithSla("WMAP", futureDeadline),
+                realRegionEntry("WMDE"), realRegionEntry("ASIA"),
+                realRegionEntry("WMUS"), realRegionEntry("AUNZ"),
+                realRegionEntry("WMCH"), realRegionEntry("ZURI")
+        );
+        CalculatorEntry existing = new CalculatorEntry("capital", "calc-id", sevenRuns);
+
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
+
+        // Missing regions LDNL, AMER, EURO must all be ON_TIME (deadline in future)
+        List<RunEntry> placeholders = runs.stream()
+                .filter(r -> r.status().equals("NOT_STARTED")).toList();
+        assertThat(placeholders).hasSize(3);
+        assertThat(placeholders).allSatisfy(r -> {
+            assertThat(r.slaStatus()).isEqualTo("ON_TIME");
+            assertThat(r.slaBreached()).isNull();
+            assertThat(r.sla()).isEqualTo(futureDeadline);
+        });
+    }
+
+    @Test
+    void partialBatch_placeholdersGradeAgainstSiblingFrozenSla_pastDeadline_late() {
+        Instant pastDeadline = Instant.now().minusSeconds(300); // within band gap
+        List<RunEntry> sevenRuns = List.of(
+                realRegionEntryWithSla("WMAP", pastDeadline),
+                realRegionEntry("WMDE"), realRegionEntry("ASIA"),
+                realRegionEntry("WMUS"), realRegionEntry("AUNZ"),
+                realRegionEntry("WMCH"), realRegionEntry("ZURI")
+        );
+        CalculatorEntry existing = new CalculatorEntry("capital", "calc-id", sevenRuns);
+
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
+
+        List<RunEntry> placeholders = runs.stream()
+                .filter(r -> r.status().equals("NOT_STARTED")).toList();
+        assertThat(placeholders).hasSize(3);
+        assertThat(placeholders).allSatisfy(r -> {
+            assertThat(r.slaStatus()).isEqualTo("LATE");
+            assertThat(r.slaBreached()).isTrue();
+            assertThat(r.sla()).isEqualTo(pastDeadline);
+        });
+    }
+
+    @Test
+    void partialBatch_placeholdersGradeAgainstSiblingFrozenSla_veryPastDeadline_veryLate() {
+        Instant veryPastDeadline = Instant.now().minusSeconds(2000); // beyond band gap
+        List<RunEntry> sevenRuns = List.of(
+                realRegionEntryWithSla("WMAP", veryPastDeadline),
+                realRegionEntry("WMDE"), realRegionEntry("ASIA"),
+                realRegionEntry("WMUS"), realRegionEntry("AUNZ"),
+                realRegionEntry("WMCH"), realRegionEntry("ZURI")
+        );
+        CalculatorEntry existing = new CalculatorEntry("capital", "calc-id", sevenRuns);
+
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
+
+        List<RunEntry> placeholders = runs.stream()
+                .filter(r -> r.status().equals("NOT_STARTED")).toList();
+        assertThat(placeholders).allSatisfy(r -> {
+            assertThat(r.slaStatus()).isEqualTo("VERY_LATE");
+            assertThat(r.slaBreached()).isTrue();
+        });
+    }
+
+    @Test
+    void partialBatch_noSiblingDeadline_usesTemplateSla() {
+        Instant templateSla = Instant.now().plusSeconds(7200);
+        Instant estEnd = Instant.now().plusSeconds(3600);
+        RunEntry template = RunEntry.builder()
+                .status("NOT_STARTED").slaStatus("ON_TIME").sla(templateSla)
+                .estimatedEndTime(estEnd).isRerun(false).build();
+        // Mix: one real run (no sla), one template (no region/runType), 8 missing
+        CalculatorEntry existing = new CalculatorEntry("capital", "calc-id",
+                List.of(realRegionEntry("WMAP"), template));
+
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
+
+        List<RunEntry> placeholders = runs.stream()
+                .filter(r -> r.status().equals("NOT_STARTED")).toList();
+        assertThat(placeholders).hasSize(9);
+        assertThat(placeholders).allSatisfy(r -> assertThat(r.sla()).isEqualTo(templateSla));
+    }
+
+    @Test
+    void partialBatch_perDimensionEstimatesFromProfile() {
+        // WMAP has a dimension profile with known avg start (480 min UTC = 08:00)
+        CalculatorProfile wmapProfile = new CalculatorProfile(
+                "capital", "DAILY", "2", "WMAP", 3_600_000L, 480, 540, 8);
+        when(profileService.getProfile("capital", FREQ, "2", "WMAP")).thenReturn(wmapProfile);
+
+        CalculatorEntry existing = new CalculatorEntry("capital", "calc-id",
+                List.of(realRegionEntry("WMDE")));
+
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
+
+        RunEntry wmapPlaceholder = runs.stream()
+                .filter(r -> "WMAP".equals(r.region())).findFirst().orElseThrow();
+        assertThat(wmapPlaceholder.status()).isEqualTo("NOT_STARTED");
+        assertThat(wmapPlaceholder.expectedDurationMs()).isEqualTo(3_600_000L);
+        assertThat(wmapPlaceholder.estimatedStartTime()).isNotNull();
+        assertThat(wmapPlaceholder.estimatedEndTime()).isNotNull();
+    }
+
+    @Test
+    void partialBatch_noDeadlineNoProfile_usesEstEndFallback() {
+        Instant estEnd = Instant.now().minusSeconds(500);  // past
+        RunEntry template = RunEntry.builder()
+                .status("NOT_STARTED").slaStatus("ON_TIME")
+                .estimatedEndTime(estEnd).sla(null).isRerun(false).build();
+        // No real runs, just the template (no sibling sla → fall back to estEnd)
+        CalculatorEntry existing = new CalculatorEntry("capital", "calc-id", List.of(template));
+
+        List<RunEntry> runs = pad(Map.of("capital", existing)).get("capital").runs();
+
+        // estEnd is in the past → at least LATE
+        assertThat(runs).allSatisfy(r ->
+                assertThat(List.of("LATE", "VERY_LATE")).contains(r.slaStatus()));
+    }
+
+    // ── Unconfigured alias / no-config pass-through ───────────────────────────
+
     @Test
     void unconfiguredAliasPassesThroughUnchanged() {
         CalculatorEntry existing = new CalculatorEntry("portfolio", "pid",
                 List.of(realRegionEntry("some-value")));
 
-        CalculatorEntry result = service.padToExpected(Map.of("portfolio", existing)).get("portfolio");
+        CalculatorEntry result = pad(Map.of("portfolio", existing)).get("portfolio");
 
         assertThat(result.runs()).hasSize(1);
         assertThat(result.runs().get(0).region()).isEqualTo("some-value");
@@ -162,11 +312,12 @@ class ExpectedRunsServiceTest {
 
     @Test
     void noDimensionConfig_returnsInputUnchanged() {
-        ExpectedRunsService bare = new ExpectedRunsService(new CalculatorProperties());
+        ExpectedRunsService bare = new ExpectedRunsService(
+                new CalculatorProperties(), profileService, slaProps);
         Map<String, CalculatorEntry> input = Map.of(
                 "capital", new CalculatorEntry("capital", "id", List.of(realRegionEntry("WMAP"))));
 
-        assertThat(bare.padToExpected(input)).isSameAs(input);
+        assertThat(bare.padToExpected(input, DATE, FREQ, RUN_NUMBER)).isSameAs(input);
     }
 
     // ── evaluateSlaStatus branch coverage ──────────────────────────────────────
@@ -203,6 +354,11 @@ class ExpectedRunsServiceTest {
 
     private RunEntry realRegionEntry(String region) {
         return RunEntry.builder().region(region).status("SUCCESS").slaStatus("ON_TIME").isRerun(false).build();
+    }
+
+    private RunEntry realRegionEntryWithSla(String region, Instant sla) {
+        return RunEntry.builder().region(region).status("SUCCESS").slaStatus("ON_TIME")
+                .sla(sla).isRerun(false).build();
     }
 
     private RunEntry realRunTypeEntry(String runType) {

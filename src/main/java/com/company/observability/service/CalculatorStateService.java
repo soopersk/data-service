@@ -131,50 +131,68 @@ public class CalculatorStateService {
 
     /**
      * Build a synthetic "not started" entry for a calculator that has no run on the queried date.
-     * Uses the cached rolling profile (30-day average) as the primary source, falling back to
-     * the most recent run's stored estimated values projected onto the queried date.
-     * Returns an empty entry only for brand-new calculators with no history at all.
+     * Estimates and deadline are resolved independently so the projected SLA is always carried
+     * regardless of whether the profile path or the latest-run path supplies the estimates.
+     *
+     * <p>Returns an empty entry only for brand-new calculators with no history at all.
      */
     private CalculatorEntry buildNotStartedEntry(String name, LocalDate date, Frequency freq,
                                                   String runNumber) {
-        // Runs execute T+n business days after the reporting date — anchor estimates there, not on
-        // the reporting date itself (otherwise a Friday reporting date queried on Monday grades the
-        // synthetic against Friday and falsely reports VERY_LATE).
+        // Runs execute T+n business days after the reporting date — anchor estimates there.
         LocalDate executionDate = TimeUtils.nextBusinessDay(date, SlaBaselineResolver.parseRunNumber(runNumber));
 
-        // 1. Try run_number-scoped profile (Redis-cached 26h — very cheap); calculatorId not available here
+        // ── Estimates (display) ──────────────────────────────────────────────
+        // 1a. Run_number-scoped profile (Redis-cached 26h — very cheap)
         CalculatorProfile profile = profileService.getProfile(name, freq, runNumber);
+        Instant estStart = null;
+        Instant estEnd = null;
+        Long expectedMs = null;
+        String calculatorId = null;
+
         if (profile.hasSufficientSamples(slaProps.getMinSampleSize())) {
-            Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, profile.avgStartMinUtc());
-            Instant estEnd = estStart.plusMillis(profile.avgDurationMs());
+            estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, profile.avgStartMinUtc());
+            estEnd = estStart.plusMillis(profile.avgDurationMs());
+            expectedMs = profile.avgDurationMs();
             log.debug("event=batch_runs.not_started source=profile calculator={} date={} executionDate={}",
                     name, date, executionDate);
-            // No historical slaTime available from profile alone — sla projection omitted
-            return entryWithSyntheticRun(name, null, estStart, estEnd, profile.avgDurationMs(), null);
         }
 
-        // 2. Fallback: most recent run's stored estimates, projected onto the execution date
-        Optional<CalculatorRun> latest = runRepository.findLatestRunEstimatesByName(name, freq);
-        if (latest.isPresent()) {
-            CalculatorRun r = latest.get();
-            if (r.getEstimatedStartTime() != null && r.getExpectedDurationMs() != null) {
-                int minuteOfDay = (int) Duration.between(
-                        r.getEstimatedStartTime().truncatedTo(ChronoUnit.DAYS),
-                        r.getEstimatedStartTime()).toMinutes();
-                Instant estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, minuteOfDay);
-                Instant estEnd = estStart.plusMillis(r.getExpectedDurationMs());
-                // Re-anchor historical sla deadline to the target reporting date + runNumber
-                Instant projectedSla = r.getSlaTime() != null
-                        ? projectSlaTime(r.getSlaTime(), date, runNumber) : null;
-                log.debug("event=batch_runs.not_started source=latest_run calculator={} date={}", name, date);
-                return entryWithSyntheticRun(name, r.getCalculatorId(), estStart, estEnd,
-                        r.getExpectedDurationMs(), projectedSla);
-            }
+        // ── Latest run (needed for both estimate fallback and SLA projection) ──
+        Optional<CalculatorRun> latestOpt = runRepository.findLatestRunEstimatesByName(name, freq);
+        CalculatorRun latest = latestOpt.orElse(null);
+
+        // The profile path supplies estimates but no id; carry the latest run's id when present
+        // so Case A entries are not needlessly missing calculatorId.
+        if (calculatorId == null && latest != null) {
+            calculatorId = latest.getCalculatorId();
         }
 
-        // 3. Brand-new calculator with no history — return empty (same as before)
-        log.debug("event=batch_runs.not_started source=none calculator={} date={}", name, date);
-        return new CalculatorEntry(name, null, List.of());
+        // 1b. Fallback estimates from most recent run's stored values, projected onto execution date
+        if (estStart == null && latest != null
+                && latest.getEstimatedStartTime() != null && latest.getExpectedDurationMs() != null) {
+            int minuteOfDay = (int) Duration.between(
+                    latest.getEstimatedStartTime().truncatedTo(ChronoUnit.DAYS),
+                    latest.getEstimatedStartTime()).toMinutes();
+            estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, minuteOfDay);
+            estEnd = estStart.plusMillis(latest.getExpectedDurationMs());
+            expectedMs = latest.getExpectedDurationMs();
+            calculatorId = latest.getCalculatorId();
+            log.debug("event=batch_runs.not_started source=latest_run calculator={} date={}", name, date);
+        }
+
+        // ── Deadline (calculator-level, independent of estimate source) ──────
+        Instant projectedSla = null;
+        if (latest != null && latest.getSlaTime() != null) {
+            projectedSla = projectSlaTime(latest.getSlaTime(), date, runNumber);
+        }
+
+        if (estStart == null && projectedSla == null) {
+            // Brand-new calculator with no history — return empty
+            log.debug("event=batch_runs.not_started source=none calculator={} date={}", name, date);
+            return new CalculatorEntry(name, null, List.of());
+        }
+
+        return entryWithSyntheticRun(name, calculatorId, estStart, estEnd, expectedMs, projectedSla);
     }
 
     /**
@@ -193,7 +211,7 @@ public class CalculatorStateService {
 
     private CalculatorEntry entryWithSyntheticRun(String name, String calculatorId,
                                                    Instant estStart, Instant estEnd,
-                                                   long expectedMs, Instant projectedSla) {
+                                                   Long expectedMs, Instant projectedSla) {
         // Grade against the projected SLA deadline when we have one; only fall back to the
         // estimated end (profile path, no historical SLA) when no deadline is projectable.
         Instant gradeAgainst = projectedSla != null ? projectedSla : estEnd;
@@ -202,7 +220,7 @@ public class CalculatorStateService {
         RunEntry synthetic = RunEntry.builder()
                 .status("NOT_STARTED")
                 .slaStatus(sla.slaStatus())
-                .slaBreached(sla.slaBreached())
+                .slaBreached(sla.slaBreached() ? Boolean.TRUE : null)
                 .estimatedStartTime(estStart)
                 .estimatedEndTime(estEnd)
                 .expectedDurationMs(expectedMs)

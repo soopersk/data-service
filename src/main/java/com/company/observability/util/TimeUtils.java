@@ -12,13 +12,6 @@ public class TimeUtils {
     private static final ZoneId CET_ZONE = ZoneId.of("Europe/Amsterdam");
 
     /**
-     * Calculate absolute SLA deadline time from reporting date and SLA time of day (CET)
-     *
-     * @param reportingDate Reporting date in CET calendar
-     * @param slaTimeCet Target completion time in CET (e.g., 06:15:00)
-     * @return Absolute deadline time in UTC
-     */
-    /**
      * Advance {@code start} by {@code n} business days, skipping weekends (Sat/Sun).
      *
      * <p>An SLA deadline is a <em>business fact</em>: anchoring to {@code reportingDate + n}
@@ -46,6 +39,13 @@ public class TimeUtils {
         return result;
     }
 
+    /**
+     * Calculate absolute SLA deadline time from reporting date and SLA time of day (CET)
+     *
+     * @param reportingDate Reporting date in CET calendar
+     * @param slaTimeCet Target completion time in CET (e.g., 06:15:00)
+     * @return Absolute deadline time in UTC
+     */
     public static Instant calculateSlaDeadline(LocalDate reportingDate, LocalTime slaTimeCet) {
         if (reportingDate == null || slaTimeCet == null) return null;
 

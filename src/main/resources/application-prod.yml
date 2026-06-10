@@ -9,14 +9,15 @@ logging:
     com.company.observability: INFO
 
 observability:
-  calculator-aliases:
-    capital: [capitalcalc, capitalcalcmedium, capitalcalcsmall, capitalcalcextrasmall]
-    portfolio: [portfoliocalc]
-    group-portfolio: [grportfoliocalc]
-    modelled-exposure: [modelledexposurecalc]
-    gemini-hedge: [geminihedgefundcalc]
-    consolidation: [consenrichmentcalc]
-    output-floor: [outputfloorcalc]
-    sectoral-floor: [floorscalc]
-    validation: [validationscalculator]
-    market-risk: [marketriskrwacalc]
+  calculator:
+    aliases:
+      capital: [capitalcalc, capitalcalcmedium, capitalcalcsmall, capitalcalcextrasmall]
+      portfolio: [portfoliocalc]
+      group-portfolio: [grportfoliocalc]
+      modelled-exposure: [modelledexposurecalc]
+      gemini-hedge: [geminihedgefundcalc]
+      consolidation: [consenrichmentcalc]
+      output-floor: [outputfloorcalc]
+      sectoral-floor: [floorscalc]
+      validation: [validationscalculator]
+      market-risk: [marketriskrwacalc]

@@ -157,6 +157,10 @@ public class RunQueryController {
 
         Frequency freq = Frequency.fromStrict(frequency);
 
+        // Normalize blank → null once so getState and padToExpected see the same value.
+        // Avoids run_number='' triggering wasted dimension/scoped Redis+DB lookups in padToExpected.
+        runNumber = (runNumber == null || runNumber.isBlank()) ? null : runNumber;
+
         // Expand aliases → {alias: [realName, ...]}; unknown names pass through unchanged
         Map<String, List<String>> aliasToRealNames = nameResolver.resolveAll(aliases);
 
@@ -183,7 +187,7 @@ public class RunQueryController {
                     ));
 
             // Pad each configured alias to its full declared set of expected runs
-            calculators = expectedRunsService.padToExpected(calculators);
+            calculators = expectedRunsService.padToExpected(calculators, reportingDate, freq, runNumber);
 
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.maxAge(30, TimeUnit.SECONDS).cachePrivate())

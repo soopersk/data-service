@@ -48,17 +48,18 @@ public class DailyAggregateRepository {
                 "DELETE FROM calculator_sli_daily WHERE reporting_date BETWEEN :from AND :to", params);
 
         // Two-pass UNION:
-        // Pass 1 — explicit run_number rows (capital and other cycle-specific calcs): one row per (name,freq,date,rn)
+        // Pass 1 — explicit run_number rows (capital and other cycle-specific calcs): one row per (name,freq,date,rn,dim)
         // Pass 2 — null-run_number rows (modelled-exposure, gemini-hedge): fanned into BOTH '1' AND '2' buckets
         String insert = """
             INSERT INTO calculator_sli_daily (
-                calculator_name, frequency, reporting_date, run_number,
+                calculator_name, frequency, reporting_date, run_number, dimension_value,
                 total_runs, success_runs, sla_breaches,
                 sum_duration_ms, sum_start_min_utc, sum_end_min_utc, computed_at
             )
             -- Pass 1: explicit run_number rows
             SELECT
                 calculator_name, frequency, reporting_date, run_number,
+                COALESCE(region, run_type, 'ALL') AS dimension_value,
                 COUNT(*),
                 COUNT(*) FILTER (WHERE status = 'SUCCESS'),
                 COUNT(*) FILTER (WHERE sla_breached),
@@ -78,13 +79,15 @@ public class DailyAggregateRepository {
             WHERE end_time IS NOT NULL
               AND run_number IS NOT NULL
               AND reporting_date BETWEEN :from AND :to
-            GROUP BY calculator_name, frequency, reporting_date, run_number
+            GROUP BY calculator_name, frequency, reporting_date, run_number,
+                     COALESCE(region, run_type, 'ALL')
 
             UNION ALL
 
             -- Pass 2: null-run_number rows — fan out into both '1' and '2' buckets
             SELECT
                 cr.calculator_name, cr.frequency, cr.reporting_date, rn.run_number,
+                COALESCE(cr.region, cr.run_type, 'ALL') AS dimension_value,
                 COUNT(*),
                 COUNT(*) FILTER (WHERE cr.status = 'SUCCESS'),
                 COUNT(*) FILTER (WHERE cr.sla_breached),
@@ -105,7 +108,8 @@ public class DailyAggregateRepository {
             WHERE cr.end_time IS NOT NULL
               AND cr.run_number IS NULL
               AND cr.reporting_date BETWEEN :from AND :to
-            GROUP BY cr.calculator_name, cr.frequency, cr.reporting_date, rn.run_number
+            GROUP BY cr.calculator_name, cr.frequency, cr.reporting_date, rn.run_number,
+                     COALESCE(cr.region, cr.run_type, 'ALL')
             """;
 
         try {
@@ -221,13 +225,13 @@ public class DailyAggregateRepository {
 
         try {
             return jdbcTemplate.queryForObject(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
-                    calculatorName, frequency, null,
+                    calculatorName, frequency, null, null,
                     rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
                     rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
         } catch (Exception e) {
             log.error("event=daily_aggregate.find_profile outcome=failure calculator_name={} frequency={}",
                     calculatorName, frequency, e);
-            return CalculatorProfile.fromSums(calculatorName, frequency, null, 0, 0, 0, 0);
+            return CalculatorProfile.fromSums(calculatorName, frequency, null, null, 0, 0, 0, 0);
         }
     }
 
@@ -255,7 +259,7 @@ public class DailyAggregateRepository {
 
         try {
             return jdbcTemplate.query(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
-                    rs.getString("calculator_name"), frequency, null,
+                    rs.getString("calculator_name"), frequency, null, null,
                     rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
                     rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
         } catch (Exception e) {
@@ -287,7 +291,7 @@ public class DailyAggregateRepository {
 
         try {
             return jdbcTemplate.query(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
-                    rs.getString("calculator_name"), frequency, rs.getString("run_number"),
+                    rs.getString("calculator_name"), frequency, rs.getString("run_number"), null,
                     rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
                     rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
         } catch (Exception e) {
@@ -323,13 +327,87 @@ public class DailyAggregateRepository {
 
         try {
             return jdbcTemplate.queryForObject(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
-                    calculatorName, frequency, runNumber,
+                    calculatorName, frequency, runNumber, null,
                     rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
                     rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
         } catch (Exception e) {
             log.error("event=daily_aggregate.find_profile_by_run_number outcome=failure calculator_name={} frequency={} runNumber={}",
                     calculatorName, frequency, runNumber, e);
-            return CalculatorProfile.fromSums(calculatorName, frequency, runNumber, 0, 0, 0, 0);
+            return CalculatorProfile.fromSums(calculatorName, frequency, runNumber, null, 0, 0, 0, 0);
+        }
+    }
+
+    /**
+     * Dimension-scoped profile for one calculator. Primary source for per-region/run-type
+     * estimates in Case B (partial batch). A null {@code runNumber} matches all run_number values.
+     */
+    public CalculatorProfile findProfileByRunNumberAndDimension(String calculatorName, String frequency,
+                                                                int days, String runNumber,
+                                                                String dimensionValue) {
+        String sql = """
+            SELECT COALESCE(SUM(sum_duration_ms), 0)   AS sum_duration_ms,
+                   COALESCE(SUM(sum_start_min_utc), 0) AS sum_start_min_utc,
+                   COALESCE(SUM(sum_end_min_utc), 0)   AS sum_end_min_utc,
+                   COALESCE(SUM(total_runs), 0)        AS total_runs
+            FROM calculator_sli_daily
+            WHERE calculator_name = :calculatorName
+            AND frequency = :frequency
+            AND (:runNumber IS NULL OR run_number = :runNumber)
+            AND dimension_value = :dimensionValue
+            AND reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
+            """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("calculatorName", calculatorName)
+                .addValue("frequency", frequency)
+                .addValue("runNumber", runNumber)
+                .addValue("dimensionValue", dimensionValue)
+                .addValue("days", days);
+
+        try {
+            return jdbcTemplate.queryForObject(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
+                    calculatorName, frequency, runNumber, dimensionValue,
+                    rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
+                    rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
+        } catch (Exception e) {
+            log.error("event=daily_aggregate.find_profile_by_dim outcome=failure calculator_name={} frequency={} runNumber={} dim={}",
+                    calculatorName, frequency, runNumber, dimensionValue, e);
+            return CalculatorProfile.fromSums(calculatorName, frequency, runNumber, dimensionValue, 0, 0, 0, 0);
+        }
+    }
+
+    /**
+     * Per-run_number + per-dimension profiles for all active calculators. Used by the nightly
+     * job to warm the third-tier cache keys ({@code obs:profile:{name}:{freq}:{runNumber|*}:{dim}}).
+     * Excludes 'ALL' rows — those are already covered by blended and scoped keys.
+     */
+    public List<CalculatorProfile> findAllProfilesByRunNumberAndDimension(String frequency, int days) {
+        String sql = """
+            SELECT calculator_name, run_number, dimension_value,
+                   SUM(sum_duration_ms)   AS sum_duration_ms,
+                   SUM(sum_start_min_utc) AS sum_start_min_utc,
+                   SUM(sum_end_min_utc)   AS sum_end_min_utc,
+                   SUM(total_runs)        AS total_runs
+            FROM calculator_sli_daily
+            WHERE frequency = :frequency
+            AND dimension_value <> 'ALL'
+            AND reporting_date >= CURRENT_DATE - CAST(:days AS INTEGER) * INTERVAL '1 day'
+            GROUP BY calculator_name, run_number, dimension_value
+            """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("frequency", frequency)
+                .addValue("days", days);
+
+        try {
+            return jdbcTemplate.query(sql, params, (rs, rowNum) -> CalculatorProfile.fromSums(
+                    rs.getString("calculator_name"), frequency, rs.getString("run_number"),
+                    rs.getString("dimension_value"),
+                    rs.getLong("sum_duration_ms"), rs.getLong("sum_start_min_utc"),
+                    rs.getLong("sum_end_min_utc"), rs.getInt("total_runs")));
+        } catch (Exception e) {
+            log.error("event=daily_aggregate.find_all_profiles_by_dim outcome=failure frequency={}", frequency, e);
+            return Collections.emptyList();
         }
     }
 
