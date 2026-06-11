@@ -39,8 +39,7 @@ public class AnalyticsService {
     private final CalculatorRunRepository calculatorRunRepository;
     private final AnalyticsCacheService cacheService;
     private final CalculatorProfileService calculatorProfileService;
-    private final com.company.observability.config.DurationBasedSlaProperties slaProperties;
-    private final SlaProperties slaModeProperties;
+    private final SlaProperties slaProperties;
     private final CalculatorNameResolver nameResolver;
 
     private static final String CACHE_RUNTIME = "runtime";
@@ -516,7 +515,7 @@ public class AnalyticsService {
         CalculatorProfile profile = calculatorProfileService.getProfile(
                 latestRaw.calculatorName(), frequency);
 
-        if (profile.hasSufficientSamples(slaModeProperties.getMinSampleSize())) {
+        if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
             java.time.Instant estStart = com.company.observability.util.TimeUtils
                     .instantFromUtcMinuteOfDay(latestRaw.reportingDate(), profile.avgStartMinUtc());
 
@@ -526,8 +525,8 @@ public class AnalyticsService {
             }
 
             // No frozen deadline (e.g. ungraded run): synthesize from the buffered profile average.
-            long bufferedMs = Math.round(profile.avgDurationMs() * (1 + slaProperties.getThresholdPercent() / 100.0))
-                    + slaModeProperties.lateBandMs();
+            long bufferedMs = Math.round(profile.avgDurationMs() * (1 + slaProperties.getDurationThresholdPercent() / 100.0))
+                    + slaProperties.lateBandMs();
             return new ReferenceLines(estStart, estStart.plusMillis(bufferedMs));
         }
         return new ReferenceLines(latestRaw.estimatedStartTime(), latestRaw.slaTime());

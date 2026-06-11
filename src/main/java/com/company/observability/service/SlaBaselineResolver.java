@@ -1,6 +1,5 @@
 package com.company.observability.service;
 
-import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.enums.Frequency;
@@ -49,7 +48,6 @@ public class SlaBaselineResolver {
 
     private static final Pattern TPLUS_PATTERN = Pattern.compile("^T\\+(\\d+)@(\\d{2}:\\d{2})$");
 
-    private final DurationBasedSlaProperties props;
     private final SlaProperties slaProperties;
     private final MeterRegistry meterRegistry;
 
@@ -82,7 +80,7 @@ public class SlaBaselineResolver {
 
         if (spec.duration() != null) {
             long ms = spec.duration().toMillis();
-            long bufferedMs = Math.round(ms * (1 + props.getThresholdPercent() / 100.0));
+            long bufferedMs = Math.round(ms * (1 + slaProperties.getDurationThresholdPercent() / 100.0));
             Instant deadline = startTime.plusMillis(bufferedMs + slaProperties.lateBandMs());
             log.debug("event=sla.baseline.resolve outcome=success form=duration calculatorId={} frequency={} baselineMs={} deadline={}",
                     request.getCalculatorId(), frequency, ms, deadline);
@@ -172,7 +170,7 @@ public class SlaBaselineResolver {
                     request.getCalculatorId(), frequency);
             return new SlaResolution(null, null);
         }
-        long bufferedMs = Math.round(baselineMs * (1 + props.getThresholdPercent() / 100.0));
+        long bufferedMs = Math.round(baselineMs * (1 + slaProperties.getDurationThresholdPercent() / 100.0));
         Instant deadline = request.getStartTime().plusMillis(bufferedMs + slaProperties.lateBandMs());
         log.debug("event=sla.baseline.resolve outcome=success form=fallback calculatorId={} frequency={} baselineMs={} deadline={}",
                 request.getCalculatorId(), frequency, baselineMs, deadline);

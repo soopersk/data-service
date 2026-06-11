@@ -1,6 +1,5 @@
 package com.company.observability.service;
 
-import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.enums.Frequency;
@@ -19,7 +18,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SlaBaselineResolverTest {
 
-    private DurationBasedSlaProperties durationProps;
     private SlaProperties slaProperties;
     private SlaBaselineResolver resolver;
 
@@ -28,9 +26,8 @@ class SlaBaselineResolverTest {
 
     @BeforeEach
     void setUp() {
-        durationProps = new DurationBasedSlaProperties();
         slaProperties = new SlaProperties(); // slaTimezone=UTC
-        resolver = new SlaBaselineResolver(durationProps, slaProperties, new SimpleMeterRegistry());
+        resolver = new SlaBaselineResolver(slaProperties, new SimpleMeterRegistry());
     }
 
     private StartRunRequest.StartRunRequestBuilder baseRequest() {

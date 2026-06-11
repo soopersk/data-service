@@ -61,7 +61,6 @@ class AnalyticsServiceTest {
                 calculatorRunRepository,
                 cacheService,
                 calculatorProfileService,
-                new com.company.observability.config.DurationBasedSlaProperties(),
                 new com.company.observability.config.SlaProperties(),
                 passthroughResolver
         );
@@ -440,7 +439,6 @@ class AnalyticsServiceTest {
                 calculatorRunRepository,
                 cacheService,
                 calculatorProfileService,
-                new com.company.observability.config.DurationBasedSlaProperties(),
                 new com.company.observability.config.SlaProperties(),
                 new CalculatorNameResolver(props)
         );
@@ -487,7 +485,6 @@ class AnalyticsServiceTest {
                 calculatorRunRepository,
                 cacheService,
                 calculatorProfileService,
-                new com.company.observability.config.DurationBasedSlaProperties(),
                 new com.company.observability.config.SlaProperties(),
                 new CalculatorNameResolver(props)
         );

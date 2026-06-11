@@ -103,14 +103,13 @@ observability:
     late-band-minutes: 15          # ON_TIME upper edge beyond the frozen slaTime
     very-late-band-minutes: 30     # LATE upper edge beyond the frozen slaTime
     min-sample-size: 5             # runs required before trusting the average
+    # Percentage buffer over a duration-derived baseline. Applied when slaTime is an ISO-8601
+    # duration or when the blank-slaTime fallback derives a baseline from
+    # expectedDurationMs / profile average.
+    duration-threshold-percent: 20
     lookback:
       daily-days: 30
       monthly-days: 395
-
-    # Duration-based grading knobs. Applied when slaTime is an ISO-8601 duration or when the
-    # blank-slaTime fallback derives a baseline from expectedDurationMs / profile average.
-    duration-based:
-      threshold-percent: 20        # percentage buffer over the resolved baseline
 
     # OPTIMIZED: Live detection every 2 minutes (tolerance: few minutes)
     live-detection:
