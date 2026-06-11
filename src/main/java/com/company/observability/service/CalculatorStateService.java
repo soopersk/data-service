@@ -1,7 +1,6 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.CalculatorStateCacheService;
-import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
@@ -21,6 +20,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -33,7 +33,6 @@ import java.util.stream.Stream;
 public class CalculatorStateService {
 
     private final CalculatorRunRepository runRepository;
-    private final DurationBasedSlaProperties slaProps;
     private final SlaProperties slaProperties;
     private final CalculatorStateCacheService stateCache;
     private final CalculatorProfileService profileService;
@@ -138,8 +137,13 @@ public class CalculatorStateService {
      */
     private CalculatorEntry buildNotStartedEntry(String name, LocalDate date, Frequency freq,
                                                   String runNumber) {
-        // Runs execute T+n business days after the reporting date — anchor estimates there.
-        LocalDate executionDate = TimeUtils.nextBusinessDay(date, SlaBaselineResolver.parseRunNumber(runNumber));
+        // ── Latest run (run_number-scoped: a RUN1 projection must not borrow RUN2's frozen deadline) ──
+        CalculatorRun latest = runRepository.findLatestRunEstimatesByName(name, freq, runNumber).orElse(null);
+
+        // Runs execute T+n business days after the reporting date. For DAILY, recover the real offset
+        // from the latest run's reportingDate→slaTime distance; else fall back to run_number.
+        int offsetDays = deriveOffsetDays(latest, freq, runNumber);
+        LocalDate executionDate = TimeUtils.nextBusinessDay(date, offsetDays);
 
         // ── Estimates (display) ──────────────────────────────────────────────
         // 1a. Run_number-scoped profile (Redis-cached 26h — very cheap)
@@ -149,17 +153,13 @@ public class CalculatorStateService {
         Long expectedMs = null;
         String calculatorId = null;
 
-        if (profile.hasSufficientSamples(slaProps.getMinSampleSize())) {
+        if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
             estStart = TimeUtils.instantFromUtcMinuteOfDay(executionDate, profile.avgStartMinUtc());
             estEnd = estStart.plusMillis(profile.avgDurationMs());
             expectedMs = profile.avgDurationMs();
             log.debug("event=batch_runs.not_started source=profile calculator={} date={} executionDate={}",
                     name, date, executionDate);
         }
-
-        // ── Latest run (needed for both estimate fallback and SLA projection) ──
-        Optional<CalculatorRun> latestOpt = runRepository.findLatestRunEstimatesByName(name, freq);
-        CalculatorRun latest = latestOpt.orElse(null);
 
         // The profile path supplies estimates but no id; carry the latest run's id when present
         // so Case A entries are not needlessly missing calculatorId.
@@ -183,7 +183,7 @@ public class CalculatorStateService {
         // ── Deadline (calculator-level, independent of estimate source) ──────
         Instant projectedSla = null;
         if (latest != null && latest.getSlaTime() != null) {
-            projectedSla = projectSlaTime(latest.getSlaTime(), date, runNumber);
+            projectedSla = projectSlaTime(latest, date, freq, executionDate, estStart);
         }
 
         if (estStart == null && projectedSla == null) {
@@ -196,16 +196,47 @@ public class CalculatorStateService {
     }
 
     /**
-     * Re-anchors a historical frozen SLA deadline onto a new reporting date using the
-     * next-business-day rule. Extracts the time-of-day from the historical instant in the
-     * configured timezone (correct for DST) and advances {@code targetDate} by
-     * {@code parseRunNumber(runNumber)} business days.
+     * Recovers the T+N business-day offset for a not-started projection. For DAILY, derives it
+     * from the latest run's {@code reportingDate → slaTime} distance (recovers the real offset for
+     * both {@code T+N@HH:mm} and bare-clock runs without persisting the spec); falls back to
+     * {@code parseRunNumber(runNumber)} when no usable latest run exists. MONTHLY deadlines are
+     * start-anchored, not offset-based, so MONTHLY always uses the run_number fallback for estimates.
      */
-    private Instant projectSlaTime(Instant historicalSlaTime, LocalDate targetDate, String runNumber) {
+    private int deriveOffsetDays(CalculatorRun latest, Frequency freq, String runNumber) {
+        int fallback = SlaBaselineResolver.parseRunNumber(runNumber);
+        if (freq == Frequency.MONTHLY || latest == null
+                || latest.getSlaTime() == null || latest.getReportingDate() == null) {
+            return fallback;
+        }
+        ZoneId zone = ZoneId.of(slaProperties.getSlaTimezone());
+        int derivedN = TimeUtils.businessDaysBetween(
+                latest.getReportingDate(), latest.getSlaTime().atZone(zone).toLocalDate());
+        return derivedN >= 1 ? derivedN : fallback;
+    }
+
+    /**
+     * Projects a historical frozen SLA deadline onto the queried reporting date.
+     *
+     * <p><b>DAILY</b>: re-anchors the historical time-of-day onto {@code executionDate} (already
+     * advanced by the derived T+N offset), extracting the time-of-day in the configured timezone
+     * (correct for DST).
+     *
+     * <p><b>MONTHLY</b>: the real deadline is start-anchored, so pre-start it can only be estimated
+     * from the estimated start date (profile/latest-run estimate) with the overnight roll. Returns
+     * {@code null} when no estimated start is available.
+     */
+    private Instant projectSlaTime(CalculatorRun latest, LocalDate targetDate, Frequency freq,
+                                   LocalDate executionDate, Instant estStart) {
+        Instant historicalSlaTime = latest.getSlaTime();
+        if (freq == Frequency.MONTHLY) {
+            if (estStart == null) {
+                return null;
+            }
+            LocalTime cutoff = historicalSlaTime.atZone(ZoneOffset.UTC).toLocalTime();
+            return TimeUtils.clockTimeDeadlineUtc(estStart, cutoff);
+        }
         ZoneId zone = ZoneId.of(slaProperties.getSlaTimezone());
         LocalTime clockTime = historicalSlaTime.atZone(zone).toLocalTime();
-        int n = SlaBaselineResolver.parseRunNumber(runNumber);
-        LocalDate executionDate = TimeUtils.nextBusinessDay(targetDate, n);
         return ZonedDateTime.of(executionDate, clockTime, zone).toInstant();
     }
 
@@ -216,7 +247,7 @@ public class CalculatorStateService {
         // estimated end (profile path, no historical SLA) when no deadline is projectable.
         Instant gradeAgainst = projectedSla != null ? projectedSla : estEnd;
         ExpectedRunsService.SlaEval sla =
-                ExpectedRunsService.evaluateSlaStatus(gradeAgainst, slaProps.bandGapMs());
+                ExpectedRunsService.evaluateSlaStatus(gradeAgainst, slaProperties.bandGapMs());
         RunEntry synthetic = RunEntry.builder()
                 .status("NOT_STARTED")
                 .slaStatus(sla.slaStatus())

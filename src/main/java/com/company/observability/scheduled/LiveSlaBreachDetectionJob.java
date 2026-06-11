@@ -1,7 +1,7 @@
 package com.company.observability.scheduled;
 
 import com.company.observability.cache.SlaMonitoringCache;
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.SlaBand;
@@ -54,7 +54,7 @@ public class LiveSlaBreachDetectionJob {
     private final ApplicationEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
     private final LifecycleLogger lifecycleLogger;
-    private final DurationBasedSlaProperties durationBasedSlaProperties;
+    private final SlaProperties slaProperties;
     private final AtomicInteger approachingRunsGauge = new AtomicInteger(0);
     private final AtomicInteger lastBreachesGauge = new AtomicInteger(0);
     private final AtomicLong activeRunsGauge = new AtomicLong(0L);
@@ -224,7 +224,7 @@ public class LiveSlaBreachDetectionJob {
      */
     private SlaBand determineBand(CalculatorRun run) {
         long delayMs = Duration.between(run.getSlaTime(), Instant.now()).toMillis();
-        return delayMs <= durationBasedSlaProperties.bandGapMs() ? SlaBand.LATE : SlaBand.VERY_LATE;
+        return delayMs <= slaProperties.bandGapMs() ? SlaBand.LATE : SlaBand.VERY_LATE;
     }
 
     private long calculateMinutesUntilSla(Map<String, Object> runInfo) {

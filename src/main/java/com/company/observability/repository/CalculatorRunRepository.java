@@ -615,10 +615,23 @@ public class CalculatorRunRepository {
      * <p>Uses index: {@code calculator_runs_latest_estimate_by_name_idx}.
      */
     public Optional<CalculatorRun> findLatestRunEstimatesByName(String calculatorName, Frequency frequency) {
+        return findLatestRunEstimatesByName(calculatorName, frequency, null);
+    }
+
+    /**
+     * Run_number-scoped overload. When {@code runNumber} is non-blank, restricts to that run number
+     * so a RUN1 projection does not pick up RUN2's frozen deadline (RUN2 is typically the newest row).
+     * A blank/null {@code runNumber} preserves the unscoped "latest across run numbers" behaviour.
+     */
+    public Optional<CalculatorRun> findLatestRunEstimatesByName(String calculatorName, Frequency frequency, String runNumber) {
+        boolean scoped = runNumber != null && !runNumber.isBlank();
         String sql = SELECT_BASE + """
             WHERE calculator_name = :calculatorName
               AND frequency = :frequency
               AND expected_duration_ms IS NOT NULL
+            """
+            + (scoped ? "  AND run_number = :runNumber\n" : "")
+            + """
             ORDER BY reporting_date DESC, created_at DESC
             LIMIT 1
             """;
@@ -626,6 +639,9 @@ public class CalculatorRunRepository {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("calculatorName", calculatorName)
                 .addValue("frequency", frequency.name());
+        if (scoped) {
+            params.addValue("runNumber", runNumber.trim());
+        }
 
         List<CalculatorRun> results = jdbcTemplate.query(sql, params, new CalculatorRunRowMapper(false));
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));

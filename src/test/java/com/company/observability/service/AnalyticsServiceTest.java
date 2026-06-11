@@ -304,8 +304,8 @@ class AnalyticsServiceTest {
     }
 
     @Test
-    void getRunExecutions_clockTimeMode_referenceLinesUsesStoredSlaTime() {
-        // In CLOCK_TIME mode with sufficient profile samples: estStart comes from profile avg,
+    void getRunExecutions_referenceLinesUsesStoredSlaTimeWhenPresent() {
+        // With sufficient profile samples and a frozen deadline: estStart comes from profile avg,
         // slaTime reference line is the stored absolute deadline (not a re-derived buffered value).
         LocalDate day = LocalDate.of(2026, 5, 11);
         Instant start = Instant.parse("2026-05-11T05:00:00Z");
@@ -335,28 +335,17 @@ class AnalyticsServiceTest {
     }
 
     @Test
-    void getRunExecutions_durationMode_referenceLinesBuffersProfileAverage() {
-        // In DURATION mode with sufficient profile samples: reference deadline is buffered from profile avg.
-        service = new AnalyticsService(
-                dailyAggregateRepository,
-                slaBreachEventRepository,
-                calculatorRunRepository,
-                cacheService,
-                calculatorProfileService,
-                new com.company.observability.config.DurationBasedSlaProperties(),
-                durationModeProperties(),
-                passthroughResolver
-        );
-
+    void getRunExecutions_referenceLinesBuffersProfileAverageWhenNoFrozenDeadline() {
+        // No frozen deadline (ungraded run, slaTime == null) but sufficient profile samples:
+        // the reference deadline is synthesized as buffered profile avg.
         LocalDate day = LocalDate.of(2026, 5, 11);
         Instant start = Instant.parse("2026-05-11T05:00:00Z");
         Instant end = Instant.parse("2026-05-11T05:30:00Z");
-        Instant runSla = Instant.parse("2026-05-11T06:30:00Z");
 
         RunWithSlaStatus run = new RunWithSlaStatus(
                 "run-1", "calc-1", "Portfolio", day,
                 start, end, 1_800_000L,
-                runSla, start, Frequency.DAILY,
+                null, start, Frequency.DAILY,   // slaTime == null → no frozen deadline
                 RunStatus.SUCCESS, null, null, null, "1", 300000L);
 
         when(calculatorRunRepository.findRunsWithSlaStatus(
@@ -372,12 +361,6 @@ class AnalyticsServiceTest {
         Instant expectedStart = Instant.parse("2026-05-11T04:30:00Z");
         assertEquals(expectedStart, result.estimatedStartTime());
         assertEquals(expectedStart.plusMillis(87L * 60 * 1000), result.slaTime());
-    }
-
-    private com.company.observability.config.SlaProperties durationModeProperties() {
-        com.company.observability.config.SlaProperties p = new com.company.observability.config.SlaProperties();
-        p.setMode(com.company.observability.domain.enums.SlaMode.DURATION);
-        return p;
     }
 
     // ── getRunExecutionsByName — cache behaviour ──────────────────────────────

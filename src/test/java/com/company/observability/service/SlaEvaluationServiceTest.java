@@ -1,6 +1,6 @@
 package com.company.observability.service;
 
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.SlaBand;
@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SlaEvaluationServiceTest {
 
     // Defaults: lateBand=15m, veryLateBand=30m → band gap = 15m.
-    private final DurationBasedSlaProperties props = new DurationBasedSlaProperties();
+    private final SlaProperties props = new SlaProperties();
     private final SlaEvaluationService service = new SlaEvaluationService(new SimpleMeterRegistry(), props);
 
     private static final Instant START = Instant.parse("2026-02-22T04:00:00Z");

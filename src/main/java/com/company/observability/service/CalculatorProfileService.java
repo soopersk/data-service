@@ -1,7 +1,7 @@
 package com.company.observability.service;
 
 import com.company.observability.config.AggregationProperties;
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.repository.DailyAggregateRepository;
@@ -32,7 +32,7 @@ public class CalculatorProfileService {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final DailyAggregateRepository dailyAggregateRepository;
-    private final DurationBasedSlaProperties slaProperties;
+    private final SlaProperties slaProperties;
     private final AggregationProperties aggregationProperties;
     private final MeterRegistry meterRegistry;
 

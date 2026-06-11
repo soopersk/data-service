@@ -40,6 +40,32 @@ public class TimeUtils {
     }
 
     /**
+     * Count business days (weekends skipped) stepping forward from {@code from} to {@code to}.
+     * Inverse of {@link #nextBusinessDay(LocalDate, int)}: {@code nextBusinessDay(from, businessDaysBetween(from, to)) == to}
+     * for any {@code to > from} that is itself a business day.
+     *
+     * <ul>
+     *   <li>Fri → Mon = 1, Fri → Tue = 2, Mon → Tue = 1</li>
+     *   <li>{@code to <= from} or either null → 0</li>
+     * </ul>
+     */
+    public static int businessDaysBetween(LocalDate from, LocalDate to) {
+        if (from == null || to == null || !to.isAfter(from)) {
+            return 0;
+        }
+        int count = 0;
+        LocalDate cursor = from;
+        while (cursor.isBefore(to)) {
+            cursor = cursor.plusDays(1);
+            DayOfWeek dow = cursor.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * Calculate absolute SLA deadline time from reporting date and SLA time of day (CET)
      *
      * @param reportingDate Reporting date in CET calendar

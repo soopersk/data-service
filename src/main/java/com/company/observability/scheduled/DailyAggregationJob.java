@@ -1,7 +1,7 @@
 package com.company.observability.scheduled;
 
 import com.company.observability.config.AggregationProperties;
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.repository.DailyAggregateRepository;
@@ -44,7 +44,7 @@ public class DailyAggregationJob {
     private final DailyAggregateRepository dailyAggregateRepository;
     private final CalculatorProfileService calculatorProfileService;
     private final AggregationProperties aggregationProperties;
-    private final DurationBasedSlaProperties slaProperties;
+    private final SlaProperties slaProperties;
     private final MeterRegistry meterRegistry;
 
     private final AtomicLong lastRecomputedRows = new AtomicLong(0L);

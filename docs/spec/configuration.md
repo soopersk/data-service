@@ -44,13 +44,13 @@ Default: `dev` (set via `SPRING_PROFILES_ACTIVE` env var or `spring.profiles.act
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `observability.sla.duration-based.enabled` | `true` | Derive the SLA deadline from the resolved baseline; `false` leaves runs ungraded |
-| `observability.sla.duration-based.threshold-percent` | `20` | Percentage buffer over the resolved baseline |
-| `observability.sla.duration-based.late-band-minutes` | `15` | ON_TIME upper edge beyond buffered baseline (baked into `slaTime`) |
-| `observability.sla.duration-based.very-late-band-minutes` | `30` | LATE upper edge beyond buffered baseline |
-| `observability.sla.duration-based.min-sample-size` | `5` | Runs required before the historical average is trusted |
-| `observability.sla.duration-based.lookback.daily-days` | `30` | Trailing window for DAILY baselines/profiles |
-| `observability.sla.duration-based.lookback.monthly-days` | `395` | Trailing window for MONTHLY baselines/profiles |
+| `observability.sla.duration-based.enabled` | `true` | DURATION mode only: derive the SLA deadline from the resolved baseline; `false` leaves runs ungraded |
+| `observability.sla.duration-based.threshold-percent` | `20` | DURATION mode only: percentage buffer over the resolved baseline |
+| `observability.sla.late-band-minutes` | `15` | Shared (both modes): ON_TIME upper edge beyond the frozen `slaTime`; also baked into the DURATION deadline |
+| `observability.sla.very-late-band-minutes` | `30` | Shared (both modes): LATE upper edge beyond the frozen `slaTime` |
+| `observability.sla.min-sample-size` | `5` | Shared (both modes): runs required before the historical average is trusted |
+| `observability.sla.lookback.daily-days` | `30` | Shared (both modes): trailing window for DAILY baselines/profiles |
+| `observability.sla.lookback.monthly-days` | `395` | Shared (both modes): trailing window for MONTHLY baselines/profiles |
 | `observability.sla.live-tracking.enabled` | `true` | Register runs (DAILY + MONTHLY) in the SLA monitoring Redis ZSET |
 | `observability.sla.live-detection.enabled` | `true` | Enable `LiveSlaBreachDetectionJob` |
 | `observability.sla.live-detection.interval-ms` | `120000` | Detection job interval in milliseconds (2 min) |

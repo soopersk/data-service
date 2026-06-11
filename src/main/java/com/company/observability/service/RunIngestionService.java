@@ -1,13 +1,11 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.SlaMonitoringCache;
-import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaEvaluationResult;
 import com.company.observability.domain.enums.Frequency;
-import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.dto.request.*;
@@ -49,7 +47,6 @@ public class RunIngestionService {
     private final SlaMonitoringCache slaMonitoringCache;
     private final LifecycleLogger lifecycleLogger;
     private final SlaProperties slaProperties;
-    private final DurationBasedSlaProperties durationProps;
 
     @Value("${observability.sla.live-tracking.enabled:true}")
     private boolean liveTrackingEnabled;
@@ -132,8 +129,8 @@ public class RunIngestionService {
                 "frequency", run.getFrequency().name()
         ).increment();
 
-        log.info("event=run.start.persist outcome=success slaDeadline={} liveTracking={}",
-                slaDeadline, liveTrackingEnabled);
+        log.info("event=run.start.persist outcome=success slaSpec={} slaDeadline={} liveTracking={}",
+                request.getSlaTime(), slaDeadline, liveTrackingEnabled);
 
         return run;
     }
@@ -269,8 +266,8 @@ public class RunIngestionService {
     }
 
     /**
-     * Estimated end precedence: request value (Airflow) → in clock-time mode, deadline when no
-     * duration baseline is available → duration baseline fallback → profile avg → null.
+     * Estimated end precedence: request value (Airflow) → duration baseline fallback →
+     * frozen clock-derived deadline when no duration baseline is available → profile avg → null.
      */
     private Instant resolveEstimatedEnd(
             StartRunRequest request,
@@ -291,9 +288,8 @@ public class RunIngestionService {
             return TimeUtils.calculateEstimatedEndTime(request.getStartTime(), slaResolution.baselineDurationMs());
         }
 
-        // Clock-time mode: no duration baseline, but we have a frozen deadline — use it as estimated end.
-        if (slaResolution != null && slaResolution.deadline() != null
-                && slaProperties.getMode() == SlaMode.CLOCK_TIME) {
+        // No duration baseline, but we have a frozen (clock-derived) deadline — use it as estimated end.
+        if (slaResolution != null && slaResolution.deadline() != null) {
             return slaResolution.deadline();
         }
 
@@ -304,24 +300,18 @@ public class RunIngestionService {
     }
 
     /**
-     * Resolves the value to persist in {@code expected_duration_ms}.
-     * <ul>
-     *   <li>CLOCK_TIME mode: duration is a performance metric independent of SLA —
-     *       use request value, else profile avg (when sufficient samples), else null.
-     *   <li>DURATION mode: the baseline duration IS the SLA estimate — use the resolved baseline.
-     * </ul>
+     * Resolves the value to persist in {@code expected_duration_ms} — the historical expectation,
+     * independent of the SLA limit: request value → profile avg (when sufficient samples) →
+     * resolved baseline (duration-spec / fallback) → null.
      */
     private Long resolveExpectedDuration(StartRunRequest request, CalculatorProfile profile,
                                          SlaBaselineResolver.SlaResolution slaResolution) {
-        if (slaProperties.getMode() == SlaMode.CLOCK_TIME) {
-            if (request.getExpectedDurationMs() != null && request.getExpectedDurationMs() > 0) {
-                return request.getExpectedDurationMs();
-            }
-            if (profile != null && profile.hasSufficientSamples(durationProps.getMinSampleSize()) && profile.avgDurationMs() > 0) {
-                return profile.avgDurationMs();
-            }
-            return null;
+        if (request.getExpectedDurationMs() != null && request.getExpectedDurationMs() > 0) {
+            return request.getExpectedDurationMs();
         }
-        return slaResolution.baselineDurationMs();
+        if (profile != null && profile.hasSufficientSamples(slaProperties.getMinSampleSize()) && profile.avgDurationMs() > 0) {
+            return profile.avgDurationMs();
+        }
+        return slaResolution != null ? slaResolution.baselineDurationMs() : null;
     }
 }

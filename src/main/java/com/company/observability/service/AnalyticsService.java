@@ -9,7 +9,6 @@ import com.company.observability.domain.SlaBreachEvent;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.SlaBand;
-import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.dto.enums.SlaStatus;
 import com.company.observability.dto.response.*;
 import com.company.observability.service.projection.LogicalRunGrouper;
@@ -517,17 +516,18 @@ public class AnalyticsService {
         CalculatorProfile profile = calculatorProfileService.getProfile(
                 latestRaw.calculatorName(), frequency);
 
-        if (profile.hasSufficientSamples(slaProperties.getMinSampleSize())) {
+        if (profile.hasSufficientSamples(slaModeProperties.getMinSampleSize())) {
             java.time.Instant estStart = com.company.observability.util.TimeUtils
                     .instantFromUtcMinuteOfDay(latestRaw.reportingDate(), profile.avgStartMinUtc());
 
-            if (slaModeProperties.getMode() == SlaMode.CLOCK_TIME) {
-                // In clock-time mode the deadline is a stored absolute — use it directly as the SLA reference line.
+            // The frozen slaTime is the authoritative deadline for every spec kind — use it directly.
+            if (latestRaw.slaTime() != null) {
                 return new ReferenceLines(estStart, latestRaw.slaTime());
             }
 
+            // No frozen deadline (e.g. ungraded run): synthesize from the buffered profile average.
             long bufferedMs = Math.round(profile.avgDurationMs() * (1 + slaProperties.getThresholdPercent() / 100.0))
-                    + slaProperties.lateBandMs();
+                    + slaModeProperties.lateBandMs();
             return new ReferenceLines(estStart, estStart.plusMillis(bufferedMs));
         }
         return new ReferenceLines(latestRaw.estimatedStartTime(), latestRaw.slaTime());

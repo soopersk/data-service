@@ -155,11 +155,11 @@ curl -u admin:admin -H "X-Tenant-Id: acme-corp" \
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `observability.sla.duration-based.enabled` | `true` | Derive the deadline from avg runtime (`false` = use request `slaTime` as-is) |
-| `observability.sla.duration-based.threshold-percent` | `20` | Buffer over the baseline |
-| `observability.sla.duration-based.late-band-minutes` | `15` | ON_TIME upper edge |
-| `observability.sla.duration-based.very-late-band-minutes` | `30` | LATE upper edge |
-| `observability.sla.duration-based.min-sample-size` | `5` | Runs before the average is trusted |
+| `observability.sla.duration-based.enabled` | `true` | DURATION mode only: derive the deadline from avg runtime (`false` = use request `slaTime` as-is) |
+| `observability.sla.duration-based.threshold-percent` | `20` | DURATION mode only: buffer over the baseline |
+| `observability.sla.late-band-minutes` | `15` | Shared (both modes): ON_TIME upper edge |
+| `observability.sla.very-late-band-minutes` | `30` | Shared (both modes): LATE upper edge |
+| `observability.sla.min-sample-size` | `5` | Shared (both modes): runs before the average is trusted |
 | `observability.sla.live-tracking.enabled` | `true` | Register runs (DAILY + MONTHLY) in Redis SLA monitoring |
 | `observability.sla.live-detection.enabled` | `true` | Enable the live detection job |
 | `observability.sla.live-detection.interval-ms` | `120000` (2 min) | How often the detection job runs |

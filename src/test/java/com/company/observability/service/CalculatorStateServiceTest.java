@@ -1,7 +1,6 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.CalculatorStateCacheService;
-import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.CalculatorRun;
@@ -39,7 +38,7 @@ class CalculatorStateServiceTest {
     @Mock
     CalculatorProfileService profileService;
 
-    // Real DurationBasedSlaProperties — still needed for getMinSampleSize() (profile estimation path).
+    // Real SlaProperties — still needed for getMinSampleSize() (profile estimation path).
     CalculatorStateService service;
 
     private static final LocalDate DATE = LocalDate.of(2026, 3, 6);
@@ -58,7 +57,7 @@ class CalculatorStateServiceTest {
     @BeforeEach
     void setUp() {
         service = new CalculatorStateService(
-                runRepository, new DurationBasedSlaProperties(), new SlaProperties(),
+                runRepository, new SlaProperties(),
                 stateCache, profileService);
         // Default: cache returns no hits (all misses) so DB is called — matches all pre-existing tests
         lenient().when(stateCache.getEntries(any(), anyString(), any(), any()))
@@ -66,7 +65,7 @@ class CalculatorStateServiceTest {
         // Default: no profile history and no fallback run — empty-runs case returns empty entry
         lenient().when(profileService.getProfile(anyString(), any(Frequency.class), any()))
                 .thenReturn(NO_HISTORY_PROFILE);
-        lenient().when(runRepository.findLatestRunEstimatesByName(anyString(), any(Frequency.class)))
+        lenient().when(runRepository.findLatestRunEstimatesByName(anyString(), any(Frequency.class), any()))
                 .thenReturn(Optional.empty());
     }
 
@@ -329,7 +328,7 @@ class CalculatorStateServiceTest {
         latest.setExpectedDurationMs(3_600_000L);
         when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
                 .thenReturn(List.of());
-        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(FREQ)))
+        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(FREQ), eq("1")))
                 .thenReturn(Optional.of(latest));
 
         var entries = service.getState(DATE, FREQ, "1", List.of("calc")).get("calc").runs();
@@ -363,7 +362,7 @@ class CalculatorStateServiceTest {
 
         when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), isNull(), any()))
                 .thenReturn(List.of());
-        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(FREQ)))
+        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(FREQ), isNull()))
                 .thenReturn(Optional.of(latest));
 
         var entries = service.getState(DATE, FREQ, null, List.of("calc")).get("calc").runs();
@@ -387,6 +386,80 @@ class CalculatorStateServiceTest {
         var entries = service.getState(DATE, FREQ, null, List.of("new-calc")).get("new-calc").runs();
 
         assertThat(entries).isEmpty();
+    }
+
+    /**
+     * DAILY projection must derive the T+N offset from the latest run's reportingDate→slaTime
+     * distance, overriding the run_number fallback. Latest run reported Tue with a Wed deadline
+     * (T+1); querying a Friday with run_number=2 must still project T+1 (Monday), not T+2 (Tuesday).
+     */
+    @Test
+    void notStartedEntry_daily_derivesOffsetFromLatestRunDistance() {
+        when(profileService.getProfile(eq("calc"), eq(FREQ), eq("2"))).thenReturn(NO_HISTORY_PROFILE);
+
+        CalculatorRun latest = new CalculatorRun();
+        latest.setCalculatorId("calc-id");
+        latest.setCalculatorName("calc");
+        latest.setReportingDate(LocalDate.of(2026, 3, 3));          // Tuesday
+        latest.setSlaTime(Instant.parse("2026-03-04T15:00:00Z"));   // Wednesday → T+1
+
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("2"), any()))
+                .thenReturn(List.of());
+        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(FREQ), eq("2")))
+                .thenReturn(Optional.of(latest));
+
+        var entries = service.getState(DATE, FREQ, "2", List.of("calc")).get("calc").runs();
+
+        assertThat(entries).hasSize(1);
+        // derived N=1 wins over run_number=2 → query Fri 2026-03-06 + 1 biz day = Mon 2026-03-09 at 15:00
+        assertThat(entries.get(0).sla()).isEqualTo(Instant.parse("2026-03-09T15:00:00Z"));
+    }
+
+    /**
+     * The latest-run lookup must be scoped by run_number so a RUN1 projection does not borrow
+     * RUN2's frozen deadline.
+     */
+    @Test
+    void notStartedEntry_scopesLatestRunLookupByRunNumber() {
+        when(profileService.getProfile(eq("calc"), eq(FREQ), eq("1"))).thenReturn(NO_HISTORY_PROFILE);
+        when(runRepository.findAllRunsByDateAndDimension(eq(DATE), eq(FREQ), eq("1"), any()))
+                .thenReturn(List.of());
+
+        service.getState(DATE, FREQ, "1", List.of("calc"));
+
+        verify(runRepository).findLatestRunEstimatesByName("calc", FREQ, "1");
+    }
+
+    /**
+     * MONTHLY deadlines are start-anchored, so a not-started projection anchors the cutoff on the
+     * estimated start date (with overnight roll), not on a T+N business-day offset.
+     */
+    @Test
+    void notStartedEntry_monthly_anchorsSlaOnEstimatedStart() {
+        LocalDate eom = LocalDate.of(2026, 2, 28);
+        // Profile avg start = 1320 min UTC (22:00); 10 samples → trusted.
+        CalculatorProfile profile = new CalculatorProfile("calc", "MONTHLY", null, null, 3_600_000L, 1320, 1380, 10);
+        when(profileService.getProfile(eq("calc"), eq(Frequency.MONTHLY), eq("1"))).thenReturn(profile);
+
+        CalculatorRun latest = new CalculatorRun();
+        latest.setCalculatorId("calc-id");
+        latest.setCalculatorName("calc");
+        latest.setSlaTime(Instant.parse("2026-01-31T02:00:00Z")); // 02:00 cutoff
+
+        when(runRepository.findAllRunsByDateAndDimension(eq(eom), eq(Frequency.MONTHLY), eq("1"), any()))
+                .thenReturn(List.of());
+        when(runRepository.findLatestRunEstimatesByName(eq("calc"), eq(Frequency.MONTHLY), eq("1")))
+                .thenReturn(Optional.of(latest));
+
+        var entries = service.getState(eom, Frequency.MONTHLY, "1", List.of("calc")).get("calc").runs();
+
+        assertThat(entries).hasSize(1);
+        Instant estStart = entries.get(0).estimatedStartTime();
+        assertThat(estStart).isNotNull();
+        // MONTHLY SLA = clockTimeDeadlineUtc(estStart, 02:00) — start-anchored, overnight roll
+        assertThat(entries.get(0).sla()).isEqualTo(
+                com.company.observability.util.TimeUtils.clockTimeDeadlineUtc(
+                        estStart, java.time.LocalTime.of(2, 0)));
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 package com.company.observability.service;
 
 import com.company.observability.config.CalculatorProperties;
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -28,7 +29,7 @@ public class ExpectedRunsService {
 
     private final CalculatorProperties props;
     private final CalculatorProfileService profileService;
-    private final DurationBasedSlaProperties slaProps;
+    private final SlaProperties slaProps;
 
     /**
      * For each alias with a declared region/run-type set, pads its {@link CalculatorEntry} to the
@@ -103,8 +104,18 @@ public class ExpectedRunsService {
 
         // Profiles are keyed by real calculator_name, not alias.
         String realName = props.getAliases().getOrDefault(alias, List.of(alias)).get(0);
-        LocalDate executionDate = TimeUtils.nextBusinessDay(reportingDate,
-                SlaBaselineResolver.parseRunNumber(runNumber));
+        // DAILY: recover the real T+N offset from the calculator deadline (reportingDate→deadline
+        // distance) so placeholder estimates anchor on the right execution date; else run_number.
+        int offsetDays = SlaBaselineResolver.parseRunNumber(runNumber);
+        if (frequency != Frequency.MONTHLY && calculatorDeadline != null) {
+            ZoneId zone = ZoneId.of(slaProps.getSlaTimezone());
+            int derivedN = TimeUtils.businessDaysBetween(
+                    reportingDate, calculatorDeadline.atZone(zone).toLocalDate());
+            if (derivedN >= 1) {
+                offsetDays = derivedN;
+            }
+        }
+        LocalDate executionDate = TimeUtils.nextBusinessDay(reportingDate, offsetDays);
 
         final Instant deadline = calculatorDeadline;
         List<RunEntry> padded = new ArrayList<>(declaredValues.size());

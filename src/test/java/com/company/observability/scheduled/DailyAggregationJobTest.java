@@ -1,7 +1,7 @@
 package com.company.observability.scheduled;
 
 import com.company.observability.config.AggregationProperties;
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.repository.DailyAggregateRepository;
 import com.company.observability.service.CalculatorProfileService;
@@ -35,7 +35,7 @@ class DailyAggregationJobTest {
     void setUp() {
         job = new DailyAggregationJob(
                 dailyAggregateRepository, calculatorProfileService,
-                new AggregationProperties(), new DurationBasedSlaProperties(), new SimpleMeterRegistry());
+                new AggregationProperties(), new SlaProperties(), new SimpleMeterRegistry());
         job.registerGauges();
     }
 

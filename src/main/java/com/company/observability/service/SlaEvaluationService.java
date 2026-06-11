@@ -1,6 +1,6 @@
 package com.company.observability.service;
 
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.SlaEvaluationResult;
 import com.company.observability.domain.enums.SlaBand;
@@ -35,7 +35,7 @@ import static com.company.observability.util.ObservabilityConstants.SLA_EVALUATI
 public class SlaEvaluationService {
 
     private final MeterRegistry meterRegistry;
-    private final DurationBasedSlaProperties props;
+    private final SlaProperties props;
 
     public SlaEvaluationResult evaluateSla(CalculatorRun run) {
         Timer.Sample sample = Timer.start(meterRegistry);

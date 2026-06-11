@@ -61,6 +61,61 @@ class TimeUtilsTest {
     }
 
     // -----------------------------------------------------------------------
+    // businessDaysBetween
+    // -----------------------------------------------------------------------
+
+    @Nested
+    class BusinessDaysBetween {
+
+        @Test
+        void fridayToMonday_isOne() {
+            // Fri 2026-02-20 → Mon 2026-02-23 (Sat/Sun skipped)
+            assertEquals(1, TimeUtils.businessDaysBetween(
+                    LocalDate.of(2026, 2, 20), LocalDate.of(2026, 2, 23)));
+        }
+
+        @Test
+        void fridayToTuesday_isTwo() {
+            // Fri 2026-02-20 → Tue 2026-02-24
+            assertEquals(2, TimeUtils.businessDaysBetween(
+                    LocalDate.of(2026, 2, 20), LocalDate.of(2026, 2, 24)));
+        }
+
+        @Test
+        void mondayToTuesday_isOne() {
+            assertEquals(1, TimeUtils.businessDaysBetween(
+                    LocalDate.of(2026, 2, 23), LocalDate.of(2026, 2, 24)));
+        }
+
+        @Test
+        void sameDay_isZero() {
+            LocalDate d = LocalDate.of(2026, 2, 23);
+            assertEquals(0, TimeUtils.businessDaysBetween(d, d));
+        }
+
+        @Test
+        void toBeforeFrom_isZero() {
+            assertEquals(0, TimeUtils.businessDaysBetween(
+                    LocalDate.of(2026, 2, 24), LocalDate.of(2026, 2, 20)));
+        }
+
+        @Test
+        void nulls_areZero() {
+            assertEquals(0, TimeUtils.businessDaysBetween(null, LocalDate.of(2026, 2, 24)));
+            assertEquals(0, TimeUtils.businessDaysBetween(LocalDate.of(2026, 2, 20), null));
+        }
+
+        @Test
+        void inverseOfNextBusinessDay() {
+            // businessDaysBetween(from, nextBusinessDay(from, n)) == n for any n>=1
+            LocalDate from = LocalDate.of(2026, 2, 20); // Friday
+            for (int n = 1; n <= 6; n++) {
+                assertEquals(n, TimeUtils.businessDaysBetween(from, TimeUtils.nextBusinessDay(from, n)));
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // clockTimeDeadlineUtc
     // -----------------------------------------------------------------------
 

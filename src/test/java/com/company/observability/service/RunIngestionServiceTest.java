@@ -1,11 +1,9 @@
 package com.company.observability.service;
 
 import com.company.observability.cache.SlaMonitoringCache;
-import com.company.observability.config.DurationBasedSlaProperties;
 import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorRun;
 import com.company.observability.domain.enums.Frequency;
-import com.company.observability.domain.enums.SlaMode;
 import com.company.observability.domain.enums.CompletionStatus;
 import com.company.observability.domain.enums.RunStatus;
 import com.company.observability.domain.enums.SlaBand;
@@ -63,12 +61,10 @@ class RunIngestionServiceTest {
             new CalculatorProfile("Calculator 1", "DAILY", null, null, 0, 0, 0, 0);
 
     private SlaProperties slaProperties;
-    private DurationBasedSlaProperties durationProps;
 
     @BeforeEach
     void setUp() {
-        slaProperties = new SlaProperties(); // defaults to CLOCK_TIME
-        durationProps = new DurationBasedSlaProperties();
+        slaProperties = new SlaProperties();
         service = new RunIngestionService(
                 runRepository,
                 slaEvaluationService,
@@ -78,8 +74,7 @@ class RunIngestionServiceTest {
                 new SimpleMeterRegistry(),
                 slaMonitoringCache,
                 new com.company.observability.logging.LifecycleLogger(),
-                slaProperties,
-                durationProps
+                slaProperties
         );
     }
 
@@ -207,9 +202,9 @@ class RunIngestionServiceTest {
     }
 
     @Test
-    void startRun_durationMode_persistsResolvedBaselineAsExpectedDuration() {
-        // In DURATION mode the resolver's baseline IS the expectedDurationMs.
-        slaProperties.setMode(SlaMode.DURATION);
+    void startRun_resolvedBaselineUsedAsExpectedDurationWhenRequestAndProfileEmpty() {
+        // expectedDuration chain: request → profile avg → resolved baseline → null.
+        // With no request value and an empty profile, the resolved baseline is the fallback.
         ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
 
         LocalDate reportingDate = LocalDate.of(2026, 2, 20);
@@ -224,8 +219,7 @@ class RunIngestionServiceTest {
                 .reportingDate(reportingDate)
                 .startTime(start)
                 .slaTime("PT1H")
-                .expectedDurationMs(9_999_999L)
-                .build();
+                .build(); // no expectedDurationMs
 
         when(runRepository.findById("run-baseline", reportingDate)).thenReturn(Optional.empty());
         when(runRepository.upsert(any(CalculatorRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -241,8 +235,8 @@ class RunIngestionServiceTest {
     }
 
     @Test
-    void startRun_clockMode_persistsRequestExpectedDurationMs() {
-        // In CLOCK_TIME mode expectedDurationMs comes from the request, not the SLA resolution.
+    void startRun_persistsRequestExpectedDurationMs() {
+        // expectedDurationMs from the request always wins over the resolved baseline.
         ReflectionTestUtils.setField(service, "liveTrackingEnabled", true);
 
         LocalDate reportingDate = LocalDate.of(2026, 2, 20);

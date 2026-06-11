@@ -41,10 +41,15 @@ public class StartRunRequest {
     @Schema(example = "2026-02-06T23:22:32Z")
     private Instant startTime;
 
-    @Schema(description = "Phase-1 (CLOCK_TIME mode): UTC clock time HH:mm at which this run must complete " +
-            "(e.g. \"22:00\"). Rolled forward +1 day when the clock time is at or before startTime (overnight SLAs). " +
-            "Phase-2 (DURATION mode): ISO-8601 duration (e.g. \"PT2H30M\"). " +
-            "The persisted/response slaTime is always the derived absolute deadline instant (UTC).")
+    @Schema(description = "Self-describing SLA spec (UTC). One of three forms:\n" +
+            "• \"T+N@HH:mm\" (N>=1) — day offset + cutoff. DAILY only: deadline = nextBusinessDay(reportingDate, N) " +
+            "at HH:mm (weekends skipped). MONTHLY rejects this form.\n" +
+            "• \"HH:mm\" (bare clock) — DAILY: offset falls back to run_number (run 1→T+1, run 2→T+2, else T+2). " +
+            "MONTHLY: anchored to the startTime date, rolled +1 day if at/before startTime (overnight).\n" +
+            "• ISO-8601 duration (e.g. \"PT2H30M\") — deadline = startTime + buffered + lateBand.\n" +
+            "Blank/null → derived from expectedDurationMs, else profile average, else ungraded. " +
+            "The persisted/response slaTime is always the derived absolute deadline instant (UTC).",
+            example = "T+1@09:30")
     private String slaTime;
 
     // Optional fields

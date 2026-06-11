@@ -92,24 +92,25 @@ observability:
       password: ${OBS_ADMIN_PASSWORD:ops}
 
   sla:
-    # Phase-1: clock-time SLA (HH:mm UTC). Set to DURATION to restore legacy behaviour.
-    mode: CLOCK_TIME
+    # slaTime on the request is self-describing per run (T+N@HH:mm | HH:mm | ISO-8601 duration).
+    # No global mode switch — the spec kind decides interpretation.
 
     live-tracking:
       enabled: true
 
-    # Duration-based (average-runtime) SLA grading. The deadline is derived at run
-    # start from the calculator's own trailing-window average runtime and frozen into
-    # the run's slaTime.
+    # Shared across all slaTime spec kinds: bands grade the actual duration against the
+    # frozen slaTime; lookback is the profile-computation window.
+    late-band-minutes: 15          # ON_TIME upper edge beyond the frozen slaTime
+    very-late-band-minutes: 30     # LATE upper edge beyond the frozen slaTime
+    min-sample-size: 5             # runs required before trusting the average
+    lookback:
+      daily-days: 30
+      monthly-days: 395
+
+    # Duration-based grading knobs. Applied when slaTime is an ISO-8601 duration or when the
+    # blank-slaTime fallback derives a baseline from expectedDurationMs / profile average.
     duration-based:
-      enabled: true
       threshold-percent: 20        # percentage buffer over the resolved baseline
-      late-band-minutes: 15        # ON_TIME upper edge beyond buffered baseline
-      very-late-band-minutes: 30   # LATE upper edge beyond buffered baseline
-      min-sample-size: 5           # runs required before trusting the average
-      lookback:
-        daily-days: 30
-        monthly-days: 395
 
     # OPTIMIZED: Live detection every 2 minutes (tolerance: few minutes)
     live-detection:

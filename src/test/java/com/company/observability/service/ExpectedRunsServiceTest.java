@@ -1,7 +1,7 @@
 package com.company.observability.service;
 
 import com.company.observability.config.CalculatorProperties;
-import com.company.observability.config.DurationBasedSlaProperties;
+import com.company.observability.config.SlaProperties;
 import com.company.observability.domain.CalculatorProfile;
 import com.company.observability.domain.enums.Frequency;
 import com.company.observability.dto.response.CalculatorBatchRunsResponse.CalculatorEntry;
@@ -41,7 +41,7 @@ class ExpectedRunsServiceTest {
 
     @Mock private CalculatorProfileService profileService;
 
-    private final DurationBasedSlaProperties slaProps = new DurationBasedSlaProperties();
+    private final SlaProperties slaProps = new SlaProperties();
     private CalculatorProperties props;
     private ExpectedRunsService service;
 

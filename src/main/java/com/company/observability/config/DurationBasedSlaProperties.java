@@ -1,6 +1,5 @@
 package com.company.observability.config;
 
-import com.company.observability.domain.enums.Frequency;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -13,6 +12,10 @@ import org.springframework.stereotype.Component;
  * average runtime plus a percentage buffer and a grace band, rather than from an
  * absolute instant supplied upstream. The derived deadline is frozen into the run's
  * {@code slaTime} so the existing on-write and live-detection machinery is reused.
+ *
+ * <p>Band and profile-window knobs shared across all spec kinds live on
+ * {@link SlaProperties} ({@code observability.sla.*}); only the duration-exclusive
+ * {@code thresholdPercent} remains here.
  */
 @Component
 @ConfigurationProperties(prefix = "observability.sla.duration-based")
@@ -20,42 +23,6 @@ import org.springframework.stereotype.Component;
 @Setter
 public class DurationBasedSlaProperties {
 
-    /** When false, the resolver does not derive a deadline and the run is left ungraded. */
-    private boolean enabled = true;
-
     /** Percentage buffer applied over the resolved baseline (e.g. 20 → baseline * 1.20). */
     private double thresholdPercent = 20;
-
-    /** ON_TIME upper edge beyond the buffered baseline, in minutes. Baked into the frozen slaTime. */
-    private int lateBandMinutes = 15;
-
-    /** LATE upper edge beyond the buffered baseline, in minutes. */
-    private int veryLateBandMinutes = 30;
-
-    /** Runs required in the window before the historical average is trusted. */
-    private int minSampleSize = 5;
-
-    private Lookback lookback = new Lookback();
-
-    public long lateBandMs() {
-        return lateBandMinutes * 60_000L;
-    }
-
-    /** Width of the LATE band: gap between the LATE edge (frozen into slaTime) and the VERY_LATE edge. */
-    public long bandGapMs() {
-        return (long) (veryLateBandMinutes - lateBandMinutes) * 60_000L;
-    }
-
-    public int lookbackDays(Frequency frequency) {
-        return frequency == Frequency.MONTHLY
-                ? lookback.getMonthlyDays()
-                : lookback.getDailyDays();
-    }
-
-    @Getter
-    @Setter
-    public static class Lookback {
-        private int dailyDays = 30;
-        private int monthlyDays = 395;
-    }
 }

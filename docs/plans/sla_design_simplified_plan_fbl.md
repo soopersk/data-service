@@ -289,3 +289,169 @@ RunQueryController.java	Updated padToExpected call site to 4-arg signature
 5 test classes + 3 test call-site fixes	All unit tests green (373 passing, 2 Docker-only integration tests skipped per plan)
 
 ```
+
+# Unified Self-Describing SLA Spec (`T+N@HH:mm` / bare `HH:mm` / ISO duration)
+
+## Context
+
+The business defines SLAs per calculator + frequency + run_number as a **day offset (T+N business days) plus a UTC cutoff time** (e.g. Run1 → T+1 09:30, Run2 → T+2 21:30). Special calculators (Modelled Exposure, Gemini) key the offset on **run_type** instead (SFT/OTC → T+1, ETD → T+2 business days), identical across run numbers. Weekends are skipped: Fri T+1 = Mon, Fri T+2 = Tue.
+
+**Current flaw:** `SlaBaselineResolver` (CLOCK_TIME mode) hard-wires `offset = run_number` (`parseRunNumber`, default T+2). The request can only carry `"HH:mm"` — the offset is unexpressible. Wrong whenever offset ≠ run_number (ME/Gemini, and any calculator with arbitrary per-run offsets).
+
+**Decisions made with the user:**
+- Airflow remains the SLA store (its calculator catalogue) and sends a **resolved SLA per run** in `StartRunRequest.slaTime`, already in UTC.
+- Keep the freeze-at-ingestion model: one absolute deadline derived at `/start`, stored in `calculator_runs.sla_time`; grading, live detection, queries compare against it (unchanged).
+- `slaTime` becomes **self-describing**; no global mode switch. Switching a calculator to duration-based SLA later = Airflow changes the catalogue value. Zero service change.
+- **No persistence of the raw spec** — log it at ingestion only. No schema change anywhere.
+- `expectedDurationMs` is always populated (request → profile average), never gated by config.
+
+## The contract: `slaTime` formats
+
+Clock anchoring is **frequency-dependent**: DAILY anchors to `reporting_date`; MONTHLY anchors to the **date component of `startTime`** with overnight roll.
+
+| `slaTime` value | DAILY | MONTHLY |
+|---|---|---|
+| `"T+2@21:30"` | `nextBusinessDay(reportingDate, N)` at `21:30` in `slaTimezone` (default UTC). Deadline is the exact cutoff — **no lateBand added** (bands are grading-only, matching current CLOCK_TIME behavior) | **`DomainValidationException`** — MONTHLY clock SLA must be bare `HH:mm` |
+| `"02:00"` (bare clock) | **offset fallback**: no `T+N` in spec → `N = parseRunNumber(runNumber)` (run 1 → 1, run 2 → 2, null/invalid → 2). Deadline = `nextBusinessDay(reportingDate, N)` at `02:00`. Identical to current `resolveClockTime()`. Supported form, not deprecated | **canonical**: `TimeUtils.clockTimeDeadlineUtc(startTime, 02:00)` — startTime's UTC date at 02:00, rolled +1 day if at/before startTime. Existing util, reuse as-is |
+| `"PT2H30M"` (ISO-8601 duration) | deadline = `startTime + duration×(1+thresholdPercent/100) + lateBandMs` — existing DURATION path unchanged; `baselineDurationMs = duration.toMillis()` | same |
+| blank/null | duration fallback chain, **always active** (no `enabled` gate): `request.expectedDurationMs` → profile avg (needs `hasSufficientSamples(minSampleSize)`) → ungraded (`SlaResolution(null, null)` + existing `obs.sla.baseline.ungraded` counter) | same |
+| anything else (e.g. `"T+0@09:30"`, `"9:30"`, garbage) | `DomainValidationException` listing the three accepted forms (`T+N@HH:mm` with N ≥ 1, `HH:mm`, ISO-8601 duration) | same |
+
+Recommended Airflow catalogue shape (their repo — document in PR description only):
+```json
+"sla": {
+  "DAILY":   { "RUN1": "T+1@09:30", "RUN2": "T+2@21:30" },
+  "MONTHLY": { "RUN1": "02:00", "RUN2": "18:00" }
+}
+// ME/Gemini — keyed by run_type, same for all run numbers:
+"sla": { "DAILY": { "SFT": "T+1@19:30", "OTC": "T+1@19:30", "ETD": "T+2@19:30" } }
+```
+The DAG picks the entry for the run it triggers (it knows run_number/run_type) and sends one string.
+
+## Changes by file
+
+### 1. `service/SlaBaselineResolver.java` — spec parsing + frequency-aware dispatch
+
+- Add a **private nested record** (same KISS pattern as the existing nested `SlaResolution`):
+  ```java
+  private record ParsedSpec(Integer offsetDays, LocalTime cutoff, Duration duration) {}
+  // exactly one of (offsetDays+cutoff) | (cutoff only) | (duration) is set
+  ```
+  and `private static ParsedSpec parseSpec(String raw)`:
+  1. regex `^T\+(\d+)@(\d{2}:\d{2})$` → offset+cutoff; reject N < 1 with `DomainValidationException`.
+  2. else `Duration.parse` succeeds → duration; reject non-positive (keep existing message "slaTime must be a positive ISO-8601 duration").
+  3. else `LocalTime.parse` succeeds → bare cutoff.
+  4. else `DomainValidationException` naming all three accepted forms.
+- Rewrite `resolve(request, frequency, profile)` ([current dispatch at lines 54–83](src/main/java/com/company/observability/service/SlaBaselineResolver.java#L54-L83)):
+  - `startTime == null` → `SlaResolution(null, null)` (unchanged guard).
+  - blank `slaTime` → duration fallback chain (existing `resolveBaselineMs` steps 2–3: `expectedDurationMs` → profile avg), **delete the `props.isEnabled()` check at line 65**. Found baseline → existing buffered-deadline math; none → ungraded counter + `SlaResolution(null, null)`.
+  - `ParsedSpec.duration` → existing duration math (lines 77–78): `deadline = startTime + round(ms×(1+thresholdPercent/100)) + lateBandMs`; `baselineDurationMs = ms`.
+  - `ParsedSpec.offsetDays+cutoff`:
+    - DAILY → `executionDate = TimeUtils.nextBusinessDay(request.getReportingDate(), offsetDays)`; `deadline = ZonedDateTime.of(executionDate, cutoff, ZoneId.of(slaProperties.getSlaTimezone())).toInstant()`; `baselineDurationMs = null`. Requires `reportingDate != null` (already `@NotNull` on the DTO; keep the existing null-guard returning ungraded).
+    - MONTHLY → `DomainValidationException("MONTHLY clock SLA must be a bare clock time HH:mm")`.
+  - `ParsedSpec.cutoff` only (bare clock):
+    - DAILY → current `resolveClockTime()` body: `nextBusinessDay(reportingDate, parseRunNumber(request.getRunNumber()))` at cutoff in `slaTimezone`.
+    - MONTHLY → `TimeUtils.clockTimeDeadlineUtc(request.getStartTime(), cutoff)`.
+- **Delete** the `slaProperties.getMode()` branch (line 60) and the `SlaMode` import. Keep `parseRunNumber` (still used by bare-clock DAILY, projection fallback, `ExpectedRunsService`, `CalculatorStateService`).
+- Keep the `event=sla.baseline.resolve` debug logs, adding the parsed form (tplus/clock/duration/fallback) as a field.
+
+### 2. Kill the global mode + the `enabled` gate
+
+- Delete `domain/enums/SlaMode.java`.
+- [SlaProperties.java](src/main/java/com/company/observability/config/SlaProperties.java): remove the `mode` field + import; fix the `slaTimezone` javadoc (currently suggests `"Europe/London"` for CET — wrong; London is GMT/BST. All times are UTC per requirement; default stays `UTC`).
+- `DurationBasedSlaProperties`: remove `enabled` (orphaned — its only consumer was resolver line 65); keep `thresholdPercent`.
+- [application.yml](src/main/resources/application.yml): remove `observability.sla.mode` (line 96) and `observability.sla.duration-based.enabled` (line 114); keep `threshold-percent`; update the surrounding comments that talk about "both SLA modes".
+- Other `SlaMode` consumers get **mode-free equivalents** (behavior preserved for both spec kinds, decided per-run by data instead of global config):
+  - [RunIngestionService.java:292-296](src/main/java/com/company/observability/service/RunIngestionService.java#L292-L296) (`resolveEstimatedEnd`): the mode check is redundant — execution only reaches there when `baselineDurationMs == null`, which means the deadline is clock-derived. Replace condition with `slaResolution != null && slaResolution.deadline() != null`.
+  - [RunIngestionService.java:312-324](src/main/java/com/company/observability/service/RunIngestionService.java#L312-L324) (`resolveExpectedDuration`): collapse both branches into the user-mandated chain: `request.expectedDurationMs` (>0) → `profile.avgDurationMs()` (with `hasSufficientSamples`) → `slaResolution.baselineDurationMs()` → null. (Semantic note for the reviewer: for duration-spec runs the profile average now wins over the spec duration — expected duration is the historical expectation, the spec is the limit.)
+  - [AnalyticsService.java:514-534](src/main/java/com/company/observability/service/AnalyticsService.java#L514-L534) (`resolveReferenceLines`): replace the mode branch with data-driven: use `latestRaw.slaTime()` as the SLA reference line whenever non-null (it is the frozen deadline in every mode); fall back to `estStart + buffered profile avg` only when null.
+- Update tests that set the mode/flag: `SlaBaselineResolverTest` (line 218 `setMode(DURATION)`, line 272 `setEnabled(false)`), `RunIngestionServiceTest:208`, `AnalyticsServiceTest:379` — duration behavior is now triggered by passing a duration spec, the enabled=false case becomes "blank slaTime with no fallback data → ungraded".
+
+### 3. `RunIngestionService.startRun()` — log the raw spec
+
+No persistence (user decision). Add the raw request `slaTime` to the existing success log ([line 133-134](src/main/java/com/company/observability/service/RunIngestionService.java#L133-L134)): `event=run.start.persist outcome=success slaSpec={} slaDeadline={} ...`.
+
+### 4. NOT_STARTED projection — derive the offset, scope by run_number
+
+`/api/v1/calculators/batch/runs` computes NOT_STARTED breach state at query time: project a deadline, grade against `now` via `ExpectedRunsService.evaluateSlaStatus` (ON_TIME ≤ deadline < LATE ≤ +bandGap < VERY_LATE). The projection inputs change:
+
+- **New `TimeUtils.businessDaysBetween(LocalDate from, LocalDate to)`** — inverse of `nextBusinessDay`: count business days stepping from `from` to `to` (Fri→Mon = 1, Fri→Tue = 2); returns 0 for `to ≤ from` or nulls.
+- [CalculatorStateService.projectSlaTime()](src/main/java/com/company/observability/service/CalculatorStateService.java#L202-L208):
+  - **DAILY**: `N = businessDaysBetween(latestRun.getReportingDate(), latestRun.getSlaTime() UTC date)`; if N ≥ 1 use it, else fall back to `parseRunNumber(runNumber)`. Keep the existing time-of-day extraction from the frozen instant. This recovers T+N exactly for both `T+N@HH:mm` and bare-clock runs without persisting the spec. (Duration-derived historical deadlines project best-effort like today — accepted limitation.)
+  - **MONTHLY**: the real deadline is start-anchored, so pre-start it can only be estimated: anchor the extracted cutoff on the **estimated start date** (profile/latest-run estimate) with the overnight roll; no estimate → no projected deadline. `buildNotStartedEntry` has `freq` in scope; pass it (or the estimated start) into `projectSlaTime`.
+  - `projectSlaTime` needs the latest run's `reportingDate`, so pass the `CalculatorRun` (or both fields) instead of just the `Instant` — `latest` is already in scope at the call site ([line 183-185](src/main/java/com/company/observability/service/CalculatorStateService.java#L183-L185)).
+- Execution-date anchoring for the estimates ([CalculatorStateService.java:140](src/main/java/com/company/observability/service/CalculatorStateService.java#L140), [ExpectedRunsService.java:106-107](src/main/java/com/company/observability/service/ExpectedRunsService.java#L106-L107)): use the same derived `N` when a latest run is available, else `parseRunNumber` as today.
+- **Bug fix — scope the latest-run lookup by run_number**: [findLatestRunEstimatesByName](src/main/java/com/company/observability/repository/CalculatorRunRepository.java#L617-L632) ignores run_number, so a RUN1 projection typically picks up RUN2's frozen deadline (RUN2 is usually the newest row) → wrong cutoff (21:30 instead of 15:00) → false ON_TIME. Add an overload `findLatestRunEstimatesByName(name, frequency, runNumber)` appending `AND run_number = :runNumber` when runNumber is non-blank; keep the 2-arg signature delegating with null. `CalculatorStateService.buildNotStartedEntry` already has `runNumber` — pass it. `SELECT_BASE` already includes `reporting_date` and `run_number`; no column changes.
+
+### 5. Docs
+
+- `StartRunRequest.slaTime` `@Schema`: describe the three forms + frequency-dependent anchoring (replace the current phase-1/phase-2 text).
+- CLAUDE.md "SLA Detection" section + `tech-spec.md`: mode removed, spec formats, MONTHLY anchoring, always-on fallback.
+
+### Explicitly unchanged
+`SlaEvaluationService` grading, `LiveSlaBreachDetectionJob`, `SlaMonitoringCache` registration, band config, event flow, caching — all operate on the frozen `sla_time` instant.
+
+### Out of scope (accepted)
+- Never-started breach **alerting** (NOT_STARTED grading stays query-time-only; live job only watches started runs). Fixable later via catalogue sync.
+- Holiday calendar (business days = weekend skip only).
+- Airflow catalogue/DAG changes (their repo; contract documented above).
+
+## Tests
+
+- `SlaBaselineResolverTest` (rework):
+  - `T+1@09:30` DAILY, reportingDate = Friday → deadline Monday 09:30 UTC; `T+2@21:30` Wed → Fri 21:30; baselineDurationMs null.
+  - `T+1@09:30` MONTHLY → `DomainValidationException`.
+  - Bare `09:30` DAILY with runNumber "1"/"2"/null → offsets 1/2/2 (existing tests keep passing).
+  - Bare `02:00` MONTHLY, start 23:00 → next-day 02:00; start 01:00 → same-day 02:00.
+  - `PT2H30M` any frequency → buffered deadline + baseline ms (existing duration tests, minus `setMode`).
+  - Invalid: `T+0@09:30`, `9:30`, `T+1@9:30`, `banana` → `DomainValidationException`.
+  - Blank slaTime: request expectedDurationMs → used; else profile avg → used; else ungraded — with no `enabled` flag involved.
+- `TimeUtilsTest`: `businessDaysBetween` (Fri→Mon=1, Fri→Tue=2, Mon→Tue=1, same-day=0, to<from=0).
+- `CalculatorStateServiceTest`: DAILY projection derives N from latest run's reportingDate→slaTime distance (e.g. latest Tue reporting, deadline Wed = T+1 → project query-date+1biz); run_number-scoped lookup invoked; MONTHLY projection anchors on estimated start.
+- `RunIngestionServiceTest` / `AnalyticsServiceTest`: drop `setMode`/`setEnabled`, assert new `resolveExpectedDuration` chain and data-driven reference lines.
+
+## Verification
+
+1. `docker compose up -d`, then `SPRING_PROFILES_ACTIVE=local mvn clean test` — full suite green (config binding will fail fast if any yml/test still references `mode`/`enabled`).
+2. Targeted: `mvn test -Dtest=SlaBaselineResolverTest,TimeUtilsTest,CalculatorStateServiceTest,RunIngestionServiceTest,AnalyticsServiceTest`
+3. Manual smoke (`SPRING_PROFILES_ACTIVE=local mvn spring-boot:run`, Swagger at `http://localhost:8080/swagger-ui.html`, Basic auth admin/admin + `X-Tenant-Id`):
+   - `POST /api/v1/runs/start` DAILY, `slaTime="T+1@09:30"`, `reportingDate` = a Friday → stored/response `slaTime` = Monday 09:30Z.
+   - DAILY bare `"09:30"`, `runNumber="2"` → T+2 business days at 09:30Z (unchanged behavior).
+   - MONTHLY `"02:00"`, `startTime` 23:00Z → next-day 02:00Z; MONTHLY `"T+1@02:00"` → 400.
+   - `"PT2H30M"` → start + 2h30m×1.2 + 15m.
+   - `GET /api/v1/calculators/batch/runs` with RUN1 (`T+1@15:00`) and RUN2 (`T+2@21:30`) history, `runNumber=1`, no run today: projected `sla` uses 15:00 from RUN1's own history; after 15:00Z the synthetic NOT_STARTED entry grades `LATE`/`VERY_LATE` with `slaBreached: true`.
+
+
+## All Code Changes Done (12 files)
+
+```
+Core SLA spec parsing
+
+SlaBaselineResolver.java +198/− — replaced global-mode dispatch with self-describing parseSpec() (regex T+N@HH:mm → ISO duration → bare HH:mm → DomainValidationException); new ParsedSpec record; frequency-aware resolve(); always-on blank-fallback chain; deleted enabled gate. Kept parseRunNumber.
+Mode/gate removal
+
+SlaMode.java — deleted.
+SlaProperties.java — removed mode field + import; fixed slaTimezone javadoc; de-"both modes" the band/lookback javadocs.
+DurationBasedSlaProperties.java — removed enabled; kept thresholdPercent.
+application.yml — removed observability.sla.mode and duration-based.enabled; updated comments.
+Mode-free service equivalents
+
+RunIngestionService.java — dropped SlaMode import; resolveEstimatedEnd now keys on deadline != null; resolveExpectedDuration collapsed to request → profile avg → baseline → null; run.start.persist log now includes slaSpec={}.
+AnalyticsService.java — dropped SlaMode import; resolveReferenceLines is data-driven on slaTime != null.
+NOT_STARTED projection
+
+TimeUtils.java — new businessDaysBetween(from, to).
+CalculatorRunRepository.java — new run_number-scoped findLatestRunEstimatesByName(name, freq, runNumber) overload; 2-arg delegates.
+CalculatorStateService.java — run_number-scoped lookup; new deriveOffsetDays; frequency-aware projectSlaTime (DAILY derived-N re-anchor / MONTHLY estimated-start anchor).
+ExpectedRunsService.java — derives DAILY T+N offset from the calculator deadline for placeholder anchoring.
+Docs/contract
+
+StartRunRequest.java — @Schema rewritten for the three forms.
+Tests (5 files)
+SlaBaselineResolverTest.java — fully reworked into form-based groups.
+TimeUtilsTest.java — new BusinessDaysBetween class.
+CalculatorStateServiceTest.java — 3-arg stubs + derived-N / run_number-scoping / MONTHLY-anchoring tests.
+RunIngestionServiceTest.java — dropped setMode; assert new expected-duration chain.
+AnalyticsServiceTest.java — dropped durationModeProperties; assert data-driven reference lines.
+
+```
